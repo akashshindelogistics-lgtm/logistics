@@ -12,9 +12,10 @@ test.describe('Organization', () => {
     await expect(page.getByRole('heading', { level: 1 })).toContainText(name);
     await expect(page.getByText(org.address)).toBeVisible();
 
-    // Stat cards
-    await expect(page.getByText('Vehicles')).toBeVisible();
-    await expect(page.getByText('Stock items')).toBeVisible();
+    // Stat cards (scoped to .page-header .muted labels to avoid sidebar nav ambiguity)
+    const statLabels = page.locator('.page-header .muted');
+    await expect(statLabels.filter({ hasText: 'Vehicles' })).toBeVisible();
+    await expect(statLabels.filter({ hasText: 'Stock items' })).toBeVisible();
   });
 
   test('sidebar shows org name and truncated id', async ({ page }) => {
@@ -51,8 +52,8 @@ test.describe('Organization', () => {
     await page.goto(`/orgs/${org.id}`);
 
     await expect(page.getByText('Fleet Vehicles')).toBeVisible();
-    await expect(page.getByPlaceholder(/MH12AB1234/i)).toBeVisible();
-    await expect(page.getByPlaceholder(/e\.g\. 10/i)).toBeVisible();
+    await expect(page.getByLabel('Registration Number')).toBeVisible();
+    await expect(page.getByLabel('Capacity (MT)')).toBeVisible();
     await expect(page.getByRole('button', { name: /add vehicle/i })).toBeVisible();
   });
 
@@ -67,7 +68,7 @@ test.describe('Organization', () => {
     const org = await registerOrg(page, `Dispatch Form Org ${uid()}`);
     await page.goto(`/orgs/${org.id}`);
 
-    await expect(page.getByText('Dispatch Stock')).toBeVisible();
+    await expect(page.getByText('Dispatch Stock').first()).toBeVisible();
     await expect(page.getByLabel('Customer')).toBeVisible();
     await expect(page.getByLabel('Stock Description')).toBeVisible();
     await expect(page.getByLabel('Quantity')).toBeVisible();

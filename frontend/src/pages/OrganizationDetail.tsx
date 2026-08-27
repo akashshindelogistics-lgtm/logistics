@@ -192,12 +192,12 @@ export default function OrganizationDetail() {
             <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Add Vehicle</p>
             <form onSubmit={handleAddVehicle} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div className="field" style={{ flex: 1, minWidth: 160, marginBottom: 0 }}>
-                <label>Registration Number</label>
-                <input placeholder="e.g. MH12AB1234" value={vReg} onChange={e => setVReg(e.target.value)} required />
+                <label htmlFor="v-reg">Registration Number</label>
+                <input id="v-reg" placeholder="e.g. MH12AB1234" value={vReg} onChange={e => setVReg(e.target.value)} required />
               </div>
               <div className="field" style={{ flex: '0 0 140px', marginBottom: 0 }}>
-                <label>Capacity (MT)</label>
-                <input type="number" placeholder="e.g. 10" value={vCap} onChange={e => setVCap(e.target.value)} required />
+                <label htmlFor="v-cap">Capacity (MT)</label>
+                <input id="v-cap" type="number" placeholder="e.g. 10" value={vCap} onChange={e => setVCap(e.target.value)} required />
               </div>
               <button className="btn btn-primary" type="submit" disabled={vSubmitting} style={{ alignSelf: 'flex-end' }}>
                 <IconPlus size={14} />{vSubmitting ? 'Adding…' : 'Add Vehicle'}
@@ -254,19 +254,19 @@ export default function OrganizationDetail() {
           <div style={{ padding: '20px' }}>
             <form onSubmit={handleDispatch}>
               <div className="field">
-                <label>Customer</label>
-                <select value={dCustomerId} onChange={e => setDCustomerId(e.target.value)} required>
+                <label htmlFor="d-customer">Customer</label>
+                <select id="d-customer" value={dCustomerId} onChange={e => setDCustomerId(e.target.value)} required>
                   <option value="">Select a customer…</option>
                   {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div className="field">
-                <label>Stock Description</label>
-                <input placeholder="What is being dispatched?" value={dStock} onChange={e => setDStock(e.target.value)} required />
+                <label htmlFor="d-stock">Stock Description</label>
+                <input id="d-stock" placeholder="What is being dispatched?" value={dStock} onChange={e => setDStock(e.target.value)} required />
               </div>
               <div className="field">
-                <label>Quantity</label>
-                <input type="number" placeholder="Units to dispatch" value={dQty} onChange={e => setDQty(e.target.value)} required />
+                <label htmlFor="d-qty">Quantity</label>
+                <input id="d-qty" type="number" placeholder="Units to dispatch" value={dQty} onChange={e => setDQty(e.target.value)} required />
               </div>
 
               {dMsg && (

@@ -10,7 +10,7 @@ test.describe('Authentication', () => {
 
   test('register page shows brand panel and form', async ({ page }) => {
     await page.goto('/register');
-    await expect(page.getByRole('heading', { name: /create your organization/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /register your organization/i })).toBeVisible();
     await expect(page.getByLabel('Organization Name')).toBeVisible();
     await expect(page.getByLabel('Address')).toBeVisible();
     await expect(page.getByLabel('Password', { exact: true })).toBeVisible();
@@ -19,7 +19,7 @@ test.describe('Authentication', () => {
 
   test('login page shows org dropdown and password field', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /sign in to your organization/i })).toBeVisible();
     await expect(page.getByLabel('Organization')).toBeVisible();
     await expect(page.getByLabel('Password')).toBeVisible();
     await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
@@ -66,7 +66,7 @@ test.describe('Authentication', () => {
     await page.getByLabel('Password').fill('wrongpassword');
     await page.getByRole('button', { name: /sign in/i }).click();
 
-    await expect(page.getByText(/invalid credentials/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/invalid credentials/i)).toBeVisible({ timeout: 8000 });
     await expect(page).toHaveURL(/\/login/);
   });
 

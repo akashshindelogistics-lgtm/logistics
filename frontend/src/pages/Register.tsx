@@ -27,7 +27,7 @@ export default function Register() {
         const loginRes = await login(r.data.data.id, password);
         if (loginRes.data.success && loginRes.data.data) {
           storeAuth(loginRes.data.data);
-          navigate('/', { replace: true });
+          navigate(`/orgs/${r.data.data.id}`, { replace: true });
         }
       } else {
         setError('Registration failed. Please try again.');
@@ -69,8 +69,9 @@ export default function Register() {
 
           <form onSubmit={handleSubmit} className="login-form">
             <div className="login-field">
-              <label>Organization Name</label>
+              <label htmlFor="reg-name">Organization Name</label>
               <input
+                id="reg-name"
                 placeholder="e.g. Express Freight Co."
                 value={name}
                 onChange={e => setName(e.target.value)}
@@ -78,8 +79,9 @@ export default function Register() {
               />
             </div>
             <div className="login-field">
-              <label>Address</label>
+              <label htmlFor="reg-address">Address</label>
               <input
+                id="reg-address"
                 placeholder="Street, City, State"
                 value={address}
                 onChange={e => setAddress(e.target.value)}
@@ -87,8 +89,9 @@ export default function Register() {
               />
             </div>
             <div className="login-field">
-              <label>Password</label>
+              <label htmlFor="reg-password">Password</label>
               <input
+                id="reg-password"
                 type="password"
                 placeholder="Choose a secure password"
                 value={password}
@@ -98,8 +101,9 @@ export default function Register() {
               />
             </div>
             <div className="login-field">
-              <label>Confirm Password</label>
+              <label htmlFor="reg-confirm">Confirm Password</label>
               <input
+                id="reg-confirm"
                 type="password"
                 placeholder="Repeat your password"
                 value={confirm}

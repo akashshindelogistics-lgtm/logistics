@@ -30,12 +30,12 @@ export default function Login() {
       const data = r.data.data;
       if (r.data.success && data) {
         storeAuth(data);
-        navigate('/', { replace: true });
+        navigate(`/orgs/${data.org_id}`, { replace: true });
       } else {
         setError('Login failed. Please try again.');
       }
     } catch {
-      setError('Invalid organization or password.');
+      setError('Invalid credentials. Please check your password.');
     } finally {
       setLoading(false);
     }
@@ -71,7 +71,7 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="login-form">
             <div className="login-field">
-              <label>Organization</label>
+              <label htmlFor="login-org">Organization</label>
               {orgsLoading ? (
                 <div className="skeleton" style={{ height: 40, borderRadius: 8 }} />
               ) : orgs.length === 0 ? (
@@ -80,7 +80,7 @@ export default function Login() {
                   <a href="/orgs" style={{ color: 'var(--brand)' }}>Create one first.</a>
                 </div>
               ) : (
-                <select value={orgId} onChange={e => setOrgId(e.target.value)} required>
+                <select id="login-org" value={orgId} onChange={e => setOrgId(e.target.value)} required>
                   <option value="">Select your organization…</option>
                   {orgs.map(o => (
                     <option key={o.id} value={o.id}>{o.name}</option>
@@ -90,8 +90,9 @@ export default function Login() {
             </div>
 
             <div className="login-field">
-              <label>Password</label>
+              <label htmlFor="login-password">Password</label>
               <input
+                id="login-password"
                 type="password"
                 placeholder="Enter your password"
                 value={password}

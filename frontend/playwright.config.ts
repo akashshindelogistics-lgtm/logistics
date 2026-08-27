@@ -15,7 +15,12 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // Use the full Chromium binary (headless shell not available without sudo)
+        executablePath: `${process.env.HOME}/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`,
+        channel: undefined,
+      },
     },
   ],
   // Assumes `vite dev` and the Rust backend are already running.

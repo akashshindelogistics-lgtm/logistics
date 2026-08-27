@@ -8,7 +8,7 @@ test.describe('Vehicles', () => {
 
     await expect(page.getByRole('heading', { name: /vehicles/i })).toBeVisible();
     // New org has no vehicles
-    await expect(page.getByText(/no vehicles/i)).toBeVisible({ timeout: 8000 });
+    await expect(page.getByText(/no vehicles registered/i)).toBeVisible({ timeout: 8000 });
   });
 
   test('add a vehicle and see it in org detail and vehicles list', async ({ page }) => {
@@ -18,8 +18,8 @@ test.describe('Vehicles', () => {
     await page.goto(`/orgs/${org.id}`);
 
     // Fill add-vehicle form
-    await page.getByPlaceholder(/MH12AB1234/i).fill(regNumber);
-    await page.getByPlaceholder(/e\.g\. 10/i).fill('15');
+    await page.getByLabel('Registration Number').fill(regNumber);
+    await page.getByLabel('Capacity (MT)').fill('15');
     await page.getByRole('button', { name: /add vehicle/i }).click();
 
     // Vehicle appears in the Fleet Vehicles table
@@ -40,14 +40,16 @@ test.describe('Vehicles', () => {
 
     // Add vehicle
     const reg = `TN01XY${uid().toUpperCase().slice(0, 4)}`;
-    await page.getByPlaceholder(/MH12AB1234/i).fill(reg);
-    await page.getByPlaceholder(/e\.g\. 10/i).fill('5');
+    await page.getByLabel('Registration Number').fill(reg);
+    await page.getByLabel('Capacity (MT)').fill('5');
     await page.getByRole('button', { name: /add vehicle/i }).click();
 
     await expect(page.getByText(reg)).toBeVisible({ timeout: 8000 });
 
     // Header stat card for vehicles should now show 1
-    await expect(page.locator('.page-header').getByText('1')).toBeVisible();
+    // Scope to the stat card container (sibling of .muted "Vehicles" label)
+    const vehiclesStat = page.locator('.page-header').locator('div').filter({ has: page.locator('.muted', { hasText: 'Vehicles' }) });
+    await expect(vehiclesStat.locator('div').filter({ hasText: /^1$/ })).toBeVisible();
   });
 
   test('vehicle shows "Not tracked" location before any update', async ({ page }) => {
@@ -55,8 +57,8 @@ test.describe('Vehicles', () => {
     const reg = `KA05ZZ${uid().toUpperCase().slice(0, 4)}`;
 
     await page.goto(`/orgs/${org.id}`);
-    await page.getByPlaceholder(/MH12AB1234/i).fill(reg);
-    await page.getByPlaceholder(/e\.g\. 10/i).fill('8');
+    await page.getByLabel('Registration Number').fill(reg);
+    await page.getByLabel('Capacity (MT)').fill('8');
     await page.getByRole('button', { name: /add vehicle/i }).click();
 
     await expect(page.getByText(reg)).toBeVisible({ timeout: 8000 });
@@ -68,8 +70,8 @@ test.describe('Vehicles', () => {
     const reg = `DL01AA${uid().toUpperCase().slice(0, 4)}`;
 
     await page.goto(`/orgs/${org.id}`);
-    await page.getByPlaceholder(/MH12AB1234/i).fill(reg);
-    await page.getByPlaceholder(/e\.g\. 10/i).fill('20');
+    await page.getByLabel('Registration Number').fill(reg);
+    await page.getByLabel('Capacity (MT)').fill('20');
     await page.getByRole('button', { name: /add vehicle/i }).click();
     await expect(page.getByText(reg)).toBeVisible({ timeout: 8000 });
 
@@ -89,7 +91,7 @@ test.describe('Vehicles', () => {
     await page.goto(`/orgs/${org.id}`);
 
     // Submit with only registration, no capacity
-    await page.getByPlaceholder(/MH12AB1234/i).fill('GJ01XX9999');
+    await page.getByLabel('Registration Number').fill('GJ01XX9999');
     await page.getByRole('button', { name: /add vehicle/i }).click();
 
     // HTML5 required validation prevents form submission — URL stays the same

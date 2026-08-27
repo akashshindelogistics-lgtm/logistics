@@ -16,7 +16,9 @@ api.interceptors.request.use(config => {
 api.interceptors.response.use(
   r => r,
   err => {
-    if (err.response?.status === 401) {
+    const url: string = err.config?.url ?? '';
+    // Don't redirect on auth endpoints — let the page handle the error itself
+    if (err.response?.status === 401 && !url.includes('/auth/')) {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem('logi_org_id');
       localStorage.removeItem('logi_org_name');

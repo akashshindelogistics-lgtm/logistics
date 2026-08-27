@@ -45,12 +45,12 @@ export default function Customers() {
           <h2>Create Customer</h2>
           <form onSubmit={handleCreate}>
             <div className="field">
-              <label>Customer Name</label>
-              <input placeholder="e.g. TechHub Stores" value={name} onChange={e => setName(e.target.value)} required />
+              <label htmlFor="cust-name">Customer Name</label>
+              <input id="cust-name" placeholder="e.g. TechHub Stores" value={name} onChange={e => setName(e.target.value)} required />
             </div>
             <div className="field">
-              <label>Address</label>
-              <input placeholder="Street, City, State" value={address} onChange={e => setAddress(e.target.value)} required />
+              <label htmlFor="cust-address">Address</label>
+              <input id="cust-address" placeholder="Street, City, State" value={address} onChange={e => setAddress(e.target.value)} required />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" type="submit" disabled={submitting}>

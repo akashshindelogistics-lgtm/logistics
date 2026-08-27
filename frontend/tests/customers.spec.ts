@@ -15,10 +15,10 @@ test.describe('Customers', () => {
     await page.goto('/customers');
 
     // Form hidden initially
-    await expect(page.getByText('Create Customer')).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Create Customer' })).not.toBeVisible();
 
     await page.getByRole('button', { name: /new customer/i }).click();
-    await expect(page.getByText('Create Customer')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Create Customer' })).toBeVisible();
     await expect(page.getByLabel('Customer Name')).toBeVisible();
     await expect(page.getByLabel('Address')).toBeVisible();
   });
@@ -36,7 +36,7 @@ test.describe('Customers', () => {
 
     // Customer should appear in the table
     await expect(page.getByText(custName)).toBeVisible({ timeout: 8000 });
-    await expect(page.getByText('456 Market Road, Pune')).toBeVisible();
+    await expect(page.getByText('456 Market Road, Pune').first()).toBeVisible();
   });
 
   test('create multiple customers and count badge updates', async ({ page }) => {
@@ -64,7 +64,7 @@ test.describe('Customers', () => {
     await page.getByRole('button', { name: /new customer/i }).click();
     await expect(page.getByLabel('Customer Name')).toBeVisible();
 
-    await page.getByRole('button', { name: /cancel/i }).click();
+    await page.locator('form').getByRole('button', { name: /cancel/i }).click();
     await expect(page.getByLabel('Customer Name')).not.toBeVisible();
   });
 
