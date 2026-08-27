@@ -1,0 +1,7 @@
+* DONE refactor org struct methods with self implementation in [[file: src/org/orgs.rs]]
+* DONE Add location details to the Organization
+* DONE Add customer details and dispatcher system
+* DONE write rest api for the services defined in the logistics system
+* DONE create swagger ui for the api routes defined
+* DONE write unit tests for all the routes defined in the server module
+* DONE Start planning how web interface for logistics system should look like, consider different UI options available and which UI tech stack to use
