@@ -1,47 +1,32 @@
-.page {
-  padding: 2rem;
-  max-width: 1200px;
-  margin: 0 auto;
+.dash-hero {
+  margin-bottom: 28px;
 }
 
-.page h1 {
-  font-size: 1.5rem;
-  margin-bottom: 1.5rem;
-  color: #1e293b;
+.dash-hero-title {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--text-1);
+  letter-spacing: -.5px;
 }
 
-.muted {
-  color: #94a3b8;
+.dash-hero-sub {
+  font-size: 14px;
+  color: var(--text-3);
+  margin-top: 4px;
 }
 
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem;
-}
+/* Colored stat cards */
+.card-blue  { border-top: 3px solid var(--blue); }
+.card-green { border-top: 3px solid var(--green); }
+.card-amber { border-top: 3px solid var(--amber); }
+.card-purple{ border-top: 3px solid var(--purple); }
 
-.stat-card {
-  background: #fff;
-  border-radius: 10px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-  text-decoration: none;
-  transition: box-shadow 0.15s, transform 0.1s;
-}
+.card-blue  .stat-icon { background: var(--blue-bg);   color: var(--blue); }
+.card-green .stat-icon { background: var(--green-bg);  color: var(--green); }
+.card-amber .stat-icon { background: var(--amber-bg);  color: var(--amber); }
+.card-purple .stat-icon{ background: var(--purple-bg); color: var(--purple); }
 
-.stat-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-  transform: translateY(-2px);
-}
-
-.stat-value {
-  font-size: 2.5rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.stat-label {
-  margin-top: 0.5rem;
-  font-size: 0.9rem;
-  color: #64748b;
-}
+.card-blue  .stat-value { color: var(--blue); }
+.card-green .stat-value { color: var(--green); }
+.card-amber .stat-value { color: var(--amber); }
+.card-purple .stat-value{ color: var(--purple); }

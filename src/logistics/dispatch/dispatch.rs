@@ -5,6 +5,23 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use uuid::Uuid;
 
+fn ensure_dispatches_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    conn.exec_drop(
+        "CREATE TABLE IF NOT EXISTS Dispatches (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            customer_id VARCHAR(36) NOT NULL,
+            vehicle_registration_number VARCHAR(255) NOT NULL,
+            stock_description VARCHAR(255) NOT NULL,
+            quantity BIGINT NOT NULL,
+            status VARCHAR(50) NOT NULL,
+            dispatched_at BIGINT NOT NULL
+        )",
+        (),
+    )?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DispatchOrder {
     pub id: Uuid,
@@ -21,23 +38,7 @@ impl DispatchOrder {
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
         let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
         let mut conn = db_connection.get_connection()?;
-
-        conn.exec_drop(
-            "CREATE TABLE IF NOT EXISTS Dispatches (
-                id VARCHAR(36) PRIMARY KEY,
-                org_id VARCHAR(36) NOT NULL,
-                customer_id VARCHAR(36) NOT NULL,
-                vehicle_registration_number VARCHAR(255) NOT NULL,
-                stock_description VARCHAR(255) NOT NULL,
-                quantity BIGINT NOT NULL,
-                status VARCHAR(50) NOT NULL,
-                dispatched_at BIGINT NOT NULL,
-                CONSTRAINT fk_dispatch_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE,
-                CONSTRAINT fk_dispatch_customer FOREIGN KEY (customer_id) REFERENCES Customers(id) ON DELETE CASCADE,
-                CONSTRAINT fk_dispatch_vehicle FOREIGN KEY (vehicle_registration_number) REFERENCES Vehicle(registration_number) ON DELETE CASCADE
-            )",
-            (),
-        )?;
+        ensure_dispatches_table(&mut conn)?;
 
         conn.exec_drop(
             "INSERT INTO Dispatches (id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at)
@@ -60,23 +61,7 @@ impl DispatchOrder {
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
         let mut conn = db_connection.get_connection()?;
-
-        conn.exec_drop(
-            "CREATE TABLE IF NOT EXISTS Dispatches (
-                id VARCHAR(36) PRIMARY KEY,
-                org_id VARCHAR(36) NOT NULL,
-                customer_id VARCHAR(36) NOT NULL,
-                vehicle_registration_number VARCHAR(255) NOT NULL,
-                stock_description VARCHAR(255) NOT NULL,
-                quantity BIGINT NOT NULL,
-                status VARCHAR(50) NOT NULL,
-                dispatched_at BIGINT NOT NULL,
-                CONSTRAINT fk_dispatch_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE,
-                CONSTRAINT fk_dispatch_customer FOREIGN KEY (customer_id) REFERENCES Customers(id) ON DELETE CASCADE,
-                CONSTRAINT fk_dispatch_vehicle FOREIGN KEY (vehicle_registration_number) REFERENCES Vehicle(registration_number) ON DELETE CASCADE
-            )",
-            (),
-        )?;
+        ensure_dispatches_table(&mut conn)?;
 
         let rows: Vec<(String, String, String, String, String, i64, String, i64)> = conn.exec_map(
             "SELECT id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at FROM Dispatches",
@@ -86,8 +71,27 @@ impl DispatchOrder {
             },
         )?;
 
-        let orders = rows
-            .into_iter()
+        Ok(Self::map_rows(rows))
+    }
+
+    pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let mut conn = db_connection.get_connection()?;
+        ensure_dispatches_table(&mut conn)?;
+
+        let rows: Vec<(String, String, String, String, String, i64, String, i64)> = conn.exec_map(
+            "SELECT id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at FROM Dispatches WHERE org_id = :org_id",
+            params! { "org_id" => org_id.to_string() },
+            |(id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at)| {
+                (id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at)
+            },
+        )?;
+
+        Ok(Self::map_rows(rows))
+    }
+
+    fn map_rows(rows: Vec<(String, String, String, String, String, i64, String, i64)>) -> Vec<Self> {
+        rows.into_iter()
             .map(|(id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at)| {
                 DispatchOrder {
                     id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -100,8 +104,6 @@ impl DispatchOrder {
                     dispatched_at,
                 }
             })
-            .collect();
-
-        Ok(orders)
+            .collect()
     }
 }

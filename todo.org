@@ -5,3 +5,4 @@
 * DONE create swagger ui for the api routes defined
 * DONE write unit tests for all the routes defined in the server module
 * DONE Start planning how web interface for logistics system should look like, consider different UI options available and which UI tech stack to use
+* DONE Check if all routes has unit tests coverted, if not write unit tests for those

@@ -5,6 +5,7 @@ use mysql::*;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub enum Unit {
@@ -206,6 +207,35 @@ impl Vehicle {
             .collect();
 
         Ok(vehicles)
+    }
+
+    pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let mut conn = db_connection.get_connection()?;
+
+        let rows: Vec<(String, i64, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, latitude, longitude, last_updated_at, location_address FROM Vehicle WHERE org_id = :org_id",
+            params! { "org_id" => org_id.to_string() },
+            |(reg, cap, unit_str, lat, lng, ts, addr)| (reg, cap, unit_str, lat, lng, ts, addr),
+        )?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(reg, cap, unit_str, lat, lng, ts, addr)| {
+                let location = lat.map(|latitude| Location {
+                    latitude,
+                    longitude: lng.unwrap_or(0.0),
+                    timestamp: ts.unwrap_or(0),
+                    address: addr,
+                });
+                Vehicle {
+                    registration_number: reg,
+                    capacity: cap,
+                    unit: Unit::from_str(&unit_str),
+                    location,
+                }
+            })
+            .collect())
     }
 
     pub fn remove_vehicle(&self) -> Result<(), Box<dyn Error>> {

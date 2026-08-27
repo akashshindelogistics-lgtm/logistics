@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod customer;
 pub mod db;
 pub mod dispatch;

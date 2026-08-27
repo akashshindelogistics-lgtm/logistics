@@ -96,6 +96,36 @@ impl Customer {
         self.location.as_ref()
     }
 
+    pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let mut conn = db_connection.get_connection()?;
+
+        let row: Option<(String, String, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn
+            .exec_first(
+                "SELECT id, name, address, latitude, longitude, last_updated_at, location_address FROM Customers WHERE id = :id",
+                params! { "id" => id.to_string() },
+            )?;
+
+        let (id_str, name, address, lat, lng, ts, addr) = match row {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        let location = lat.map(|latitude| Location {
+            latitude,
+            longitude: lng.unwrap_or(0.0),
+            timestamp: ts.unwrap_or(0),
+            address: addr,
+        });
+
+        Ok(Some(Customer {
+            id: Uuid::parse_str(&id_str).unwrap_or(id),
+            name,
+            address,
+            location,
+        }))
+    }
+
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
         let mut conn = db_connection.get_connection()?;

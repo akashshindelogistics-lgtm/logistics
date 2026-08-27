@@ -13,3 +13,5 @@ edition = "2024"
  tokio = { version = "1", features = ["full"] }
  utoipa = { version = "5", features = ["actix_extras", "uuid"] }
  utoipa-swagger-ui = { version = "8", features = ["actix-web"] }
+ jsonwebtoken = "9"
+ bcrypt = "0.15"
