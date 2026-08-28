@@ -267,7 +267,7 @@ jobs:
                   displayRequestDuration: true,
                   defaultModelsExpandDepth: 2,
                   defaultModelExpandDepth: 2,
-                  tryItOutEnabled: false,
+                  tryItOutEnabled: true,
                   syntaxHighlight: { activated: true, theme: 'monokai' },
                 });
               };

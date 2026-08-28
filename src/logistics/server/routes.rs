@@ -1207,6 +1207,9 @@ impl Modify for SecurityAddon {
 #[derive(OpenApi)]
 #[openapi(
     modifiers(&SecurityAddon),
+    servers(
+        (url = "http://127.0.0.1:8080", description = "Local development server"),
+    ),
     paths(
         health_check,
         auth_orgs,

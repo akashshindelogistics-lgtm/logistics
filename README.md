@@ -144,6 +144,13 @@ the full spec, request/response schemas, and try-it-out support):
 | GET | `/dispatches/{id}/summary` | AI-generated summary of a dispatch |
 | GET | `/health` | Health check |
 
+The published Swagger UI (see CI/CD below) has "Try it out" enabled and its
+OpenAPI spec declares `http://127.0.0.1:8080` as the server, so if you run
+the backend locally (`cargo run`), you can exercise the live API straight
+from the hosted docs — the server enables permissive CORS for this. There
+is no publicly hosted backend yet, so this only works against a local
+instance.
+
 ## CI/CD
 
 GitHub Actions workflows in `.github/workflows/`:
