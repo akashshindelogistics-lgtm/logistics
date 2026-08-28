@@ -278,10 +278,10 @@ jobs:
           echo "Static Swagger UI site built in ./site/"
           ls -la ./site/
 
+      # NOTE: GitHub Pages must be enabled once manually before this step works:
+      #   Repo → Settings → Pages → Build and deployment → Source → GitHub Actions
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
