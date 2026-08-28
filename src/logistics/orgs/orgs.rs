@@ -33,6 +33,50 @@ pub struct Organization {
 }
 
 impl Organization {
+    /// Create every table an organization read/write may touch, if it does not
+    /// already exist. Each entity module also creates its own table lazily on
+    /// first write; this guards the read paths that join across all of them.
+    fn ensure_tables(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+        conn.exec_drop(
+            "CREATE TABLE IF NOT EXISTS Orgs (
+                id VARCHAR(36) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                address VARCHAR(255) NOT NULL,
+                latitude DOUBLE DEFAULT NULL,
+                longitude DOUBLE DEFAULT NULL,
+                last_updated_at BIGINT DEFAULT NULL,
+                location_address VARCHAR(255) DEFAULT NULL
+            )",
+            (),
+        )?;
+        conn.exec_drop(
+            "CREATE TABLE IF NOT EXISTS Vehicle (
+                registration_number VARCHAR(255) PRIMARY KEY,
+                capacity BIGINT NOT NULL,
+                unit VARCHAR(50) NOT NULL,
+                org_id VARCHAR(36) NOT NULL,
+                latitude DOUBLE DEFAULT NULL,
+                longitude DOUBLE DEFAULT NULL,
+                last_updated_at BIGINT DEFAULT NULL,
+                location_address VARCHAR(255) DEFAULT NULL,
+                CONSTRAINT fk_vehicle_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+            )",
+            (),
+        )?;
+        conn.exec_drop(
+            "CREATE TABLE IF NOT EXISTS Stock (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                volume_in_size BIGINT NOT NULL,
+                quantity BIGINT NOT NULL,
+                description VARCHAR(255) NOT NULL,
+                org_id VARCHAR(36) NOT NULL,
+                CONSTRAINT fk_stock_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+            )",
+            (),
+        )?;
+        Ok(())
+    }
+
     pub fn create_organization(
         name: impl Into<String>,
         address: impl Into<String>,
@@ -299,6 +343,12 @@ impl Organization {
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
         let mut conn = db_connection.get_connection()?;
+
+        // Ensure the tables this query touches exist. On a brand-new database the
+        // Vehicle / Stock tables are only created lazily when the first vehicle or
+        // stock item is added, so a freshly-registered org with neither would make
+        // the SELECTs below fail with "table doesn't exist" and surface as a 500.
+        Self::ensure_tables(&mut conn)?;
 
         let row: Option<(String, String, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn
             .exec_first(
