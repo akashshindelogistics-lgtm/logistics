@@ -18,9 +18,15 @@ test.describe('Authentication', () => {
   });
 
   test('login page shows org dropdown and password field', async ({ page }) => {
+    // The login page only renders the org <select> when at least one org exists,
+    // so register one first (then log out) to guarantee a populated dropdown.
+    const org = await registerOrg(page, `Login Form Org ${uid()}`);
+    await clearAuth(page);
+
     await page.goto('/login');
     await expect(page.getByRole('heading', { name: /sign in to your organization/i })).toBeVisible();
     await expect(page.getByLabel('Organization')).toBeVisible();
+    await expect(page.getByLabel('Organization')).toContainText(org.name);
     await expect(page.getByLabel('Password')).toBeVisible();
     await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
   });

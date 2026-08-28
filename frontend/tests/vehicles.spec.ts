@@ -6,7 +6,9 @@ test.describe('Vehicles', () => {
     await registerOrg(page, `Vehicle Empty ${uid()}`);
     await page.goto('/vehicles');
 
-    await expect(page.getByRole('heading', { name: /vehicles/i })).toBeVisible();
+    // Scope to the <h1>; a regex match would also hit the empty-state
+    // <h3>No vehicles registered</h3> and trip strict mode.
+    await expect(page.getByRole('heading', { level: 1, name: /vehicles/i })).toBeVisible();
     // New org has no vehicles
     await expect(page.getByText(/no vehicles registered/i)).toBeVisible({ timeout: 8000 });
   });
