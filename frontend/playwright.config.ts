@@ -5,7 +5,7 @@ export default defineConfig({
   fullyParallel: false, // tests share a DB; run sequentially to avoid races
   retries: 0,
   workers: 1,
-  reporter: 'list',
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
@@ -17,9 +17,14 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // Use the full Chromium binary (headless shell not available without sudo)
-        executablePath: `${process.env.HOME}/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`,
-        channel: undefined,
+        // In CI, let Playwright manage the browser path after `playwright install`.
+        // Locally, point at the full Chromium binary (headless shell may need sudo).
+        ...(process.env.CI
+          ? {}
+          : {
+              executablePath: `${process.env.HOME}/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`,
+              channel: undefined,
+            }),
       },
     },
   ],
