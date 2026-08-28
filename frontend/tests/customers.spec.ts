@@ -6,7 +6,9 @@ test.describe('Customers', () => {
     await registerOrg(page, `Customer Page ${uid()}`);
     await page.goto('/customers');
 
-    await expect(page.getByRole('heading', { name: /customers/i })).toBeVisible();
+    // Scope to the <h1>; a regex match would also hit the empty-state
+    // <h3>No customers yet</h3> and trip strict mode.
+    await expect(page.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
     await expect(page.getByRole('button', { name: /new customer/i })).toBeVisible();
   });
 
