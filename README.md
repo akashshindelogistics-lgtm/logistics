@@ -1,7 +1,9 @@
 # Logistics System
 
 [![Frontend Integration Tests (Playwright)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml)
+
 [![Periodic Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml)
+
 [![Swagger UI — Validate & Deploy to GitHub Pages](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/swagger-pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/swagger-pages.yml)
 
 A logistics management platform for tracking organizations, their vehicle
