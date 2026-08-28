@@ -15,3 +15,4 @@ edition = "2024"
  utoipa-swagger-ui = { version = "8", features = ["actix-web"] }
  jsonwebtoken = "9"
  bcrypt = "0.15"
+ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

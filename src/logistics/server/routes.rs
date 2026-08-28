@@ -1104,6 +1104,86 @@ pub async fn dispatch_stock(
     }
 }
 
+// ── AI dispatch summary (protected) ──────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/dispatches/{id}/summary",
+    tag = "Dispatch",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Dispatch order UUID")),
+    responses(
+        (status = 200, description = "AI-generated plain-English status summary", body = EmptyResponse),
+        (status = 404, description = "Dispatch not found", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/dispatches/{id}/summary")]
+pub async fn get_dispatch_summary(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let dispatch_id = path.into_inner();
+
+    let dispatch = match DispatchOrder::get_by_id(dispatch_id) {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(ApiResponse::<String> {
+                success: false,
+                message: "Dispatch order not found".to_string(),
+                data: None,
+            })
+        }
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch dispatch: {}", err),
+                data: None,
+            })
+        }
+    };
+
+    if dispatch.org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: dispatch belongs to a different organization".to_string(),
+            data: None,
+        });
+    }
+
+    let customer = match Customer::get_by_id(dispatch.customer_id) {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(ApiResponse::<String> {
+                success: false,
+                message: "Customer for this dispatch not found".to_string(),
+                data: None,
+            })
+        }
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch customer: {}", err),
+                data: None,
+            })
+        }
+    };
+
+    match crate::logistics::ai::status::generate_dispatch_summary(&dispatch, &customer).await {
+        Ok(summary) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Summary generated".to_string(),
+            data: Some(summary),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to generate summary: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── OpenAPI + routing ─────────────────────────────────────────────────────────
 
 struct SecurityAddon;
@@ -1150,6 +1230,7 @@ impl Modify for SecurityAddon {
         update_customer_location,
         list_dispatches,
         dispatch_stock,
+        get_dispatch_summary,
     ),
     components(
         schemas(
@@ -1201,7 +1282,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(create_customer)
             .service(update_customer_location)
             .service(list_dispatches)
-            .service(dispatch_stock),
+            .service(dispatch_stock)
+            .service(get_dispatch_summary),
     )
     .service(
         SwaggerUi::new("/swagger-ui/{_:.*}")
@@ -2201,6 +2283,123 @@ mod tests {
         let req = test::TestRequest::delete()
             .uri(&format!("/api/orgs/{}/stock/some-item", target_org_id))
             .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+    }
+
+    // ── GET /api/dispatches/{id}/summary ─────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_get_dispatch_summary_without_token_returns_401() {
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/dispatches/{}/summary", Uuid::new_v4()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_get_dispatch_summary_nonexistent_dispatch_returns_404() {
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let org_id = Uuid::new_v4();
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/dispatches/{}/summary", Uuid::new_v4()))
+            .insert_header(("Authorization", make_auth_header(org_id, "Test")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 404);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+        assert!(body.message.contains("not found"));
+    }
+
+    #[actix_web::test]
+    async fn test_get_dispatch_summary_different_org_returns_403() {
+        let app = test::init_service(App::new().configure(config_routes)).await;
+
+        // Set up an org with a vehicle, stock, and customer, then create a dispatch
+        let create_payload = CreateOrgPayload {
+            name: "Summary Source Org".to_string(),
+            address: "1 Summary Road".to_string(),
+            password: "sum_pass".to_string(),
+        };
+        let req = test::TestRequest::post()
+            .uri("/api/orgs")
+            .set_json(&create_payload)
+            .to_request();
+        let body: ApiResponse<Organization> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let org = body.data.unwrap();
+        let auth = make_auth_header(org.id, &org.name);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vehicles", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateVehiclePayload {
+                registration_number: "SUM-VH-001".to_string(),
+                capacity: 20,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        test::call_service(&app, req).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/stock", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateStockPayload {
+                volume_in_size: 100,
+                quantity: 100,
+                description: "Summary Goods".to_string(),
+            })
+            .to_request();
+        test::call_service(&app, req).await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/customers")
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateCustomerPayload {
+                name: "Summary Customer".to_string(),
+                address: "2 Summary Lane".to_string(),
+            })
+            .to_request();
+        let body: ApiResponse<Customer> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let customer = body.data.unwrap();
+
+        // Set customer location (required for dispatch)
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/customers/{}/location", customer.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&LocationPayload {
+                latitude: 19.0760,
+                longitude: 72.8777,
+                address: Some("Mumbai".to_string()),
+            })
+            .to_request();
+        test::call_service(&app, req).await;
+
+        // Create a dispatch
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&DispatchRequestPayload {
+                customer_id: customer.id,
+                stock_description: "Summary Goods".to_string(),
+                requested_quantity: 10,
+            })
+            .to_request();
+        let body: ApiResponse<DispatchOrder> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let dispatch = body.data.unwrap();
+
+        // Request summary with a different org's token — must be 403
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/dispatches/{}/summary", dispatch.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 403);

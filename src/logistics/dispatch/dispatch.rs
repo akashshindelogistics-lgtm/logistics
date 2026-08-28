@@ -58,6 +58,31 @@ impl DispatchOrder {
         Ok(())
     }
 
+    pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let mut conn = db_connection.get_connection()?;
+        ensure_dispatches_table(&mut conn)?;
+
+        let row: Option<(String, String, String, String, String, i64, String, i64)> = conn
+            .exec_first(
+                "SELECT id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at FROM Dispatches WHERE id = :id",
+                params! { "id" => id.to_string() },
+            )?;
+
+        Ok(row.map(|(id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at)| {
+            DispatchOrder {
+                id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
+                org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
+                customer_id: Uuid::parse_str(&customer_id).unwrap_or_else(|_| Uuid::new_v4()),
+                vehicle_registration_number: vehicle_reg,
+                stock_description: stock_desc,
+                quantity: qty,
+                status,
+                dispatched_at,
+            }
+        }))
+    }
+
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
         let mut conn = db_connection.get_connection()?;
@@ -105,5 +130,30 @@ impl DispatchOrder {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_by_id_returns_none_for_nonexistent_dispatch() {
+        let result = DispatchOrder::get_by_id(Uuid::new_v4());
+        assert!(result.is_ok(), "get_by_id should not error for a missing UUID");
+        assert!(result.unwrap().is_none(), "should return None for a UUID that was never saved");
+    }
+
+    #[test]
+    fn test_list_by_org_returns_empty_for_unknown_org() {
+        let result = DispatchOrder::list_by_org(Uuid::new_v4());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_list_all_succeeds() {
+        let result = DispatchOrder::list_all();
+        assert!(result.is_ok(), "list_all should succeed even when the table is empty");
     }
 }

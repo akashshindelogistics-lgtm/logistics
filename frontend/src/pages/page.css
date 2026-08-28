@@ -414,3 +414,63 @@ tbody tr:hover td { background: #f8fafc; }
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   gap: 20px;
 }
+
+/* ── AI button ── */
+.btn-ai {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s, transform .1s;
+  letter-spacing: .01em;
+}
+.btn-ai:hover { opacity: .88; transform: translateY(-1px); }
+.btn-ai:active { transform: translateY(0); }
+.btn-ai:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+
+/* ── AI summary card ── */
+.ai-summary-card {
+  background: color-mix(in srgb, #6366f1 6%, var(--surface));
+  border: 1px solid color-mix(in srgb, #6366f1 20%, var(--border));
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 2px;
+}
+
+.ai-summary-text {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-1);
+  margin: 0;
+}
+
+.ai-summary-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.ai-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8b5cf6;
+  display: inline-block;
+  animation: ai-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ai-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .4; transform: scale(.7); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-pulse { animation: none; }
+}
