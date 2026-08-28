@@ -104,11 +104,13 @@ jobs:
           for i in {1..20}; do
             if curl -sf http://127.0.0.1:8080/api/health > /dev/null 2>&1; then
               echo "Server is ready ✅"
-              break
+              exit 0
             fi
             echo "Waiting for server... ($i/20)"
             sleep 1
           done
+          echo "::error::Server failed to start within 20 seconds"
+          exit 1
 
       - name: Validate /api-docs/openapi.json endpoint returns 200
         run: |
@@ -278,6 +280,8 @@ jobs:
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
