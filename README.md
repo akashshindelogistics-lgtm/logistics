@@ -11,6 +11,8 @@ fleets, stock, customers, and delivery dispatches. It ships as a Rust REST
 API backed by MySQL, with a React + TypeScript dashboard for day-to-day
 operations, live location maps, and AI-generated dispatch summaries.
 
+📖 **Live API docs (Swagger UI):** <https://akashshindelogistics-lgtm.github.io/logistics/>
+
 ## Features
 
 - **Organizations** — create and manage organizations, each with its own
@@ -26,7 +28,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Authentication** — org-level login secured with JWTs and bcrypt-hashed
   passwords.
 - **Interactive API docs** — a Swagger UI generated from the API with
-  `utoipa`, auto-deployed to GitHub Pages on every push to `main`/`master`.
+  `utoipa`, auto-deployed to
+  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/) on
+  every push to `main`/`master`.
 - **Web dashboard** — a React frontend for organizations, vehicles, stock,
   customers, and dispatches, including a live Leaflet map of locations.
 
@@ -130,8 +134,9 @@ npm run test:e2e
 
 ## API overview
 
-Key REST endpoints exposed by the server (see the generated Swagger UI for
-the full spec, request/response schemas, and try-it-out support):
+Key REST endpoints exposed by the server (see the
+[published Swagger UI](https://akashshindelogistics-lgtm.github.io/logistics/)
+for the full spec, request/response schemas, and try-it-out support):
 
 | Method | Path | Description |
 |---|---|---|
@@ -162,7 +167,9 @@ instance.
 GitHub Actions workflows in `.github/workflows/`:
 
 - **swagger-pages.yml** — validates the OpenAPI spec and deploys the
-  Swagger UI to GitHub Pages on push to `main`/`master`.
+  Swagger UI to
+  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/) on
+  push to `main`/`master`.
 - **frontend-integration.yml** — runs the Playwright end-to-end suite
   against a MySQL service container.
 - **periodic-tests.yml** — runs the Cargo test suite on a schedule and on
