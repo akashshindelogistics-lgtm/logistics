@@ -1299,6 +1299,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logistics::test_support::reset_database;
+    use serial_test::serial;
     use actix_web::{test, App};
     use crate::logistics::auth::auth::generate_token;
 
@@ -1339,7 +1341,9 @@ mod tests {
     // ── Auth: login ───────────────────────────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_auth_login_with_valid_credentials_returns_token() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1372,7 +1376,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_auth_login_with_wrong_password_returns_401() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1403,7 +1409,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_auth_login_with_nonexistent_org_returns_401() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let login_payload = LoginPayload {
             org_id: Uuid::new_v4(),
@@ -1418,7 +1426,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_auth_login_invalid_payload_returns_400() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::post()
             .uri("/api/auth/login")
@@ -1432,7 +1442,9 @@ mod tests {
     // ── Auth: public org list ─────────────────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_auth_orgs_returns_list_without_auth() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         // First register an org so the list is not empty
         let create_payload = CreateOrgPayload {
@@ -1457,7 +1469,9 @@ mod tests {
     // ── Auth: me endpoint ─────────────────────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_auth_me_with_valid_token() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1485,7 +1499,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_auth_me_without_token_returns_401() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::get().uri("/api/auth/me").to_request();
         let resp = test::call_service(&app, req).await;
@@ -1495,7 +1511,9 @@ mod tests {
     // ── Protected route guard ─────────────────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_list_vehicles_without_token_returns_401() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::get().uri("/api/vehicles").to_request();
         let resp = test::call_service(&app, req).await;
@@ -1503,7 +1521,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_list_dispatches_without_token_returns_401() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::get().uri("/api/dispatches").to_request();
         let resp = test::call_service(&app, req).await;
@@ -1511,7 +1531,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_list_orgs_without_token_returns_401() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::get().uri("/api/orgs").to_request();
         let resp = test::call_service(&app, req).await;
@@ -1519,7 +1541,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_list_customers_without_token_returns_401() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::get().uri("/api/customers").to_request();
         let resp = test::call_service(&app, req).await;
@@ -1529,7 +1553,9 @@ mod tests {
     // ── Org scoping ───────────────────────────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_get_org_own_org_returns_200() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1554,7 +1580,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_get_org_different_org_returns_403() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1583,7 +1611,9 @@ mod tests {
     // ── Vehicle scoping ───────────────────────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_list_vehicles_scoped_to_authenticated_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1628,7 +1658,9 @@ mod tests {
     // ── Org creation ──────────────────────────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_create_org_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let payload = CreateOrgPayload {
             name: "API Test Express Org".to_string(),
@@ -1648,7 +1680,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_create_org_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::post()
             .uri("/api/orgs")
@@ -1662,7 +1696,9 @@ mod tests {
     // ── Other existing route tests (updated for auth) ─────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_org_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1696,7 +1732,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_org_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::put()
@@ -1710,7 +1748,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_org_location_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1747,7 +1787,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_delete_org_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -1776,7 +1818,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_add_vehicle_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::post()
@@ -1790,7 +1834,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_add_vehicle_to_nonexistent_org_returns_error() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let payload = CreateVehiclePayload {
@@ -1811,7 +1857,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_vehicle_location_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let payload = LocationPayload {
@@ -1834,7 +1882,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_vehicle_location_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::put()
@@ -1848,7 +1898,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_delete_vehicle_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::delete()
@@ -1863,7 +1915,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_add_stock_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::post()
@@ -1877,7 +1931,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_stock_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let payload = UpdateStockPayload {
@@ -1898,7 +1954,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_stock_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::put()
@@ -1912,7 +1970,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_delete_stock_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::delete()
@@ -1927,7 +1987,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_create_customer_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let payload = CreateCustomerPayload {
@@ -1948,7 +2010,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_create_customer_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::post()
             .uri("/api/customers")
@@ -1961,7 +2025,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_customer_location_endpoint() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let customer_id = Uuid::new_v4();
         let org_id = Uuid::new_v4();
@@ -1985,7 +2051,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_dispatch_stock_no_stock_returns_error() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let customer_id = Uuid::new_v4();
@@ -2006,7 +2074,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_dispatch_stock_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::post()
@@ -2022,7 +2092,9 @@ mod tests {
     // ── GET /api/orgs success path ────────────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_list_orgs_with_valid_token_returns_own_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -2055,7 +2127,9 @@ mod tests {
     // ── GET /api/customers success path ──────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_list_customers_with_valid_token_returns_200() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::get()
@@ -2072,7 +2146,9 @@ mod tests {
     // ── GET /api/dispatches success path ─────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_list_dispatches_with_valid_token_returns_200() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::get()
@@ -2090,7 +2166,9 @@ mod tests {
     // ── POST /api/orgs/{id}/stock success path ────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_add_stock_to_own_org_returns_201() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         let create_payload = CreateOrgPayload {
@@ -2129,7 +2207,9 @@ mod tests {
     // ── Invalid-payload tests for routes missing them ─────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_org_location_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::put()
@@ -2143,7 +2223,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_customer_location_invalid_payload() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let customer_id = Uuid::new_v4();
         let org_id = Uuid::new_v4();
@@ -2160,7 +2242,9 @@ mod tests {
     // ── Cross-org 403 tests for every mutating org-scoped route ──────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_org_returns_403_for_different_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
@@ -2180,7 +2264,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_org_location_returns_403_for_different_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
@@ -2201,7 +2287,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_delete_org_returns_403_for_different_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
@@ -2216,7 +2304,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_add_vehicle_returns_403_for_different_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
@@ -2237,7 +2327,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_add_stock_returns_403_for_different_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
@@ -2258,7 +2350,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_update_stock_returns_403_for_different_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
@@ -2279,7 +2373,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_delete_stock_returns_403_for_different_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
@@ -2296,7 +2392,9 @@ mod tests {
     // ── GET /api/dispatches/{id}/summary ─────────────────────────────────────
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_get_dispatch_summary_without_token_returns_401() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let req = test::TestRequest::get()
             .uri(&format!("/api/dispatches/{}/summary", Uuid::new_v4()))
@@ -2306,7 +2404,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_get_dispatch_summary_nonexistent_dispatch_returns_404() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::get()
@@ -2321,7 +2421,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_get_dispatch_summary_different_org_returns_403() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
 
         // Set up an org with a vehicle, stock, and customer, then create a dispatch
@@ -2411,7 +2513,9 @@ mod tests {
     }
 
     #[actix_web::test]
+    #[serial(db)]
     async fn test_dispatch_stock_returns_403_for_different_org() {
+        reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();

@@ -133,6 +133,8 @@ pub fn decode_token(token: &str) -> Result<Claims, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logistics::test_support::reset_database;
+    use serial_test::serial;
 
     #[test]
     fn test_generate_and_decode_token() {
@@ -154,7 +156,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_create_and_verify_credentials() {
+        reset_database();
         let org_id = Uuid::new_v4();
         let org_name = "Credentials Test Org";
         let password = "super_secure_pass_123";
@@ -167,7 +171,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_verify_wrong_password_returns_none() {
+        reset_database();
         let org_id = Uuid::new_v4();
         OrgCredentials::create(org_id, "Wrong Pass Org", "correct_password")
             .expect("Failed to create credentials");
@@ -178,7 +184,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_verify_nonexistent_org_returns_none() {
+        reset_database();
         let org_id = Uuid::new_v4(); // Never saved to DB
         let result =
             OrgCredentials::verify_login(org_id, "any_password").expect("DB error on verify");
@@ -186,7 +194,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_list_summaries_returns_registered_orgs() {
+        reset_database();
         let org_id = Uuid::new_v4();
         OrgCredentials::create(org_id, "Summary List Org", "pass123")
             .expect("Failed to create credentials");

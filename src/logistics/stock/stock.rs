@@ -96,9 +96,13 @@ impl Stock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logistics::test_support::reset_database;
+    use serial_test::serial;
 
     #[test]
+    #[serial(db)]
     fn test_add_new_stock() {
+        reset_database();
         let org = Organization::create_organization("Stock Warehouse Org", "Sector 18, Logistics Hub")
             .expect("Failed to create organization for stock test");
 
@@ -130,7 +134,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_update_stock() {
+        reset_database();
         let org = Organization::create_organization("Update Stock Org", "Zone A, Warehouse 2")
             .expect("Failed to create organization for update stock test");
 
@@ -164,7 +170,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_remove_stock() {
+        reset_database();
         let org = Organization::create_organization("Remove Stock Org", "Zone B, Cargo Hub")
             .expect("Failed to create organization for remove stock test");
 

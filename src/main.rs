@@ -1,8 +1,6 @@
-mod logistics;
-
 use actix_cors::Cors;
 use actix_web::{App, HttpServer};
-use logistics::server::routes::config_routes;
+use logistics_system::logistics::server::routes::config_routes;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

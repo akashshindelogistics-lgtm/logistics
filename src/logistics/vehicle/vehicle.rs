@@ -256,9 +256,13 @@ impl Vehicle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logistics::test_support::reset_database;
+    use serial_test::serial;
 
     #[test]
+    #[serial(db)]
     fn test_add_new_vehicle_to_org() {
+        reset_database();
         let org = Organization::create_organization("Fleet Org", "Highway 101, Logistics Park")
             .expect("Failed to create organization for vehicle test");
 
@@ -289,7 +293,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_update_vehicle() {
+        reset_database();
         let org = Organization::create_organization("Update Vehicle Org", "Sector 4, Industrial Area")
             .expect("Failed to create organization for update vehicle test");
 
@@ -321,7 +327,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_update_vehicle_location() {
+        reset_database();
         let org = Organization::create_organization("Location Tracking Org", "Sector 62, Noida")
             .expect("Failed to create organization for location test");
 
@@ -364,7 +372,9 @@ mod tests {
     }
 
     #[test]
+    #[serial(db)]
     fn test_remove_vehicle() {
+        reset_database();
         let org = Organization::create_organization("Remove Vehicle Org", "Sector 9, Transport Hub")
             .expect("Failed to create organization for remove vehicle test");
 

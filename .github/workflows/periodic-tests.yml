@@ -64,15 +64,23 @@ jobs:
             sleep 2
           done
 
+      # The test build (cfg(test)) connects to `logistics_test` and creates it
+      # on demand — see src/logistics/test_support.rs and docs/testing-database.md.
+      # DB-touching tests are serialized and truncate every table before each
+      # test, so a warm database no longer masks failures.
+      - name: Create test database
+        run: mysql -h 127.0.0.1 -u root -ppassword -e "CREATE DATABASE IF NOT EXISTS logistics_test;"
+
       - name: Run all tests
         run: cargo test --all --verbose
         env:
-          # Tests connect to MySQL directly — match credentials in source
+          # NOTE: the connection args are still hardcoded in source (localhost,
+          # root/password). These env vars become live in Phase 2 (DbConfig).
           MYSQL_HOST: 127.0.0.1
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PASSWORD: password
-          MYSQL_DATABASE: logistics
+          MYSQL_DATABASE: logistics_test
 
       - name: Notify on failure
         if: failure()

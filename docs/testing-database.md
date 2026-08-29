@@ -58,7 +58,20 @@ gaps are **local runs** and **isolation between tests in a single run**.
 
 ## Recommended plan (phased)
 
-### Phase 1 — deterministic tests, isolated test database *(low risk, do first)*
+### Phase 1 — deterministic tests, isolated test database — **DONE**
+
+Implemented in `src/logistics/test_support.rs` (`migrate`, `reset_database`),
+a `#[cfg(test)]` switch in `DbConnection` that targets `logistics_test`, and
+`#[serial(db)]` + `reset_database()` on all 71 DB-touching tests (5 pure
+unit tests and the trivial `connection.rs` smoke test were left alone).
+
+While doing this we found `src/main.rs` re-declared `mod logistics;` instead of
+using the library crate, so `cargo test` compiled the whole module tree twice
+and ran the suite in two processes concurrently against the same database —
+`#[serial]` cannot serialize across processes. `main.rs` now uses
+`logistics_system::logistics::…`, so only the `lib` test binary has tests.
+
+Original plan for reference:
 
 1. **Add a `test_support` module** (compiled under `#[cfg(test)]`), exposing:
    - `migrate(conn)` — the single source of truth for the schema (moved from the

@@ -11,7 +11,8 @@
 * TODO [#B] Need to plan for MySql test database flushing
   Plan written: [[file:docs/testing-database.md]]
   Phased approach:
-** TODO Phase 1: test_support module (migrate + reset_database), dedicated logistics_test DB, serialize DB tests with serial_test
+** DONE Phase 1: test_support module (migrate + reset_database), dedicated logistics_test DB, serialize DB tests with serial_test
+   Also fixed src/main.rs re-declaring mod logistics (caused cargo test to run twice, defeating #[serial])
 ** TODO Phase 2: DbConfig::from_env() - honour DATABASE_URL / MYSQL_* instead of hardcoded connection args
 ** TODO Phase 3: database-per-test (logistics_test_<uuid> + Drop guard), replace global OnceLock pool, restore parallelism.
 * TODO Organisation can have multiple godowns where they store their inventory. Need to implenment this in backend as well as in the UI. Also need to include unit tests for the same.

@@ -31,19 +31,29 @@ impl DbConnection {
 
     pub fn get_connection(&self) -> Result<PooledConn, Box<dyn std::error::Error>> {
         let pool = DB_POOL.get_or_init(|| {
+            // When the crate is built for tests, transparently target a separate
+            // `<db>_test` database so `cargo test` never reads or truncates the
+            // data a developer's `cargo run` writes. See the `test_support`
+            // module and docs/testing-database.md.
+            let db_name = if cfg!(test) {
+                format!("{}_test", self.db_name)
+            } else {
+                self.db_name.clone()
+            };
+
             let root_url = format!(
                 "mysql://{}:{}@{}:{}",
                 self.username, self.password, self.host, self.port
             );
             if let Ok(p) = Pool::new(root_url.as_str()) {
                 if let Ok(mut conn) = p.get_conn() {
-                    let _ = conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS `{}`", self.db_name));
+                    let _ = conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS `{}`", db_name));
                 }
             }
 
             let url = format!(
                 "mysql://{}:{}@{}:{}/{}",
-                self.username, self.password, self.host, self.port, self.db_name
+                self.username, self.password, self.host, self.port, db_name
             );
             Pool::new(url.as_str()).expect("Failed to initialize MySQL pool")
         });
