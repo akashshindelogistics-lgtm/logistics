@@ -2,8 +2,8 @@ name: Periodic Cargo Tests
 
 on:
   schedule:
-    # Run every 30 minutes
-    - cron: "*/30 * * * *"
+    # Run every 2 hours
+    - cron: "0 */2 * * *"
   push:
     branches: [main, master]
   pull_request:

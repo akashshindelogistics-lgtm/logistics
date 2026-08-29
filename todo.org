@@ -17,3 +17,25 @@
 ** TODO Phase 3: database-per-test (logistics_test_<uuid> + Drop guard), replace global OnceLock pool, restore parallelism.
 * TODO Organisation can have multiple godowns where they store their inventory. Need to implenment this in backend as well as in the UI. Also need to include unit tests for the same.
 * TODO Rust unit tests on the github action should run once in 2 HR instead of 30 mins.
+* Ground-ops research: how a freight/warehousing business actually runs a dispatch, and where this system currently diverges from it
+  Godowns landed the storage layer; the gaps below are about the trip itself - the sequence of
+  events a shipment goes through between "customer asked for stock" and "customer signed for it" -
+  and the operational data (drivers, vehicle paperwork, billing) that a real dispatch depends on but
+  this system does not yet record. Kept as a checklist, roughly in the order they'd get built.
+** TODO [#B] Model dispatch as a lifecycle (PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED / RETURNED / CANCELLED) with a timestamped status history, instead of writing a single "DISPATCHED" status once at creation and never updating it
+** TODO [#B] Require proof of delivery (receiver name, signature or photo, delivery timestamp) before a dispatch can be marked DELIVERED
+** TODO [#B] Add a Driver entity (name, license number, phone) and require an active driver to be assigned to a vehicle before that vehicle can be selected for dispatch
+** TODO [#B] Check the requested stock's volume/quantity against the selected vehicle's capacity before dispatch, and mark a vehicle unavailable while it has an active trip so `dispatch_stock_to_customer` can't double-book the same truck onto two orders at once
+** TODO Allow one dispatch to carry multiple stock line items - today `dispatch_stock_to_customer` takes a single `stock_description`, but a real shipment usually mixes several SKUs in one trip
+** TODO Support stock transfer between two godowns of the same org (distinct from dispatch-to-customer), with an audit trail of the move
+** TODO Add a low-stock / reorder threshold per stock item so a godown can be flagged when quantity drops below it
+** TODO Add a `max_capacity` to Godown and reject or warn on stock additions that would push it over
+** TODO Track vehicle compliance paperwork (insurance, RC, permit, PUC/fitness certificate) with expiry dates and renewal reminders - mandatory for any commercial truck on Indian roads
+** TODO Add freight billing: a cost per dispatch, invoice generation, and a payment status (paid/pending/overdue) per customer
+** TODO Support returns: a customer return should credit stock back into a godown and record a RETURNED dispatch, rather than the system only ever being able to decrement stock
+** TODO Move from one login per org to role-scoped user accounts within an org (admin, dispatcher, warehouse staff) so more than one person at the same org can log in with different permissions
+** TODO Add an endpoint for GPS trackers to push vehicle location automatically, instead of only the manual `PUT .../location` call
+** TODO Support multi-stop routes so one vehicle's trip can serve several customer orders in a sequence, instead of one dispatch always meaning one vehicle to one customer
+** TODO Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
+** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
+** TODO Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
