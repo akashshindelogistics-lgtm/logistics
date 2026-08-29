@@ -6,3 +6,13 @@
 * DONE write unit tests for all the routes defined in the server module
 * DONE Start planning how web interface for logistics system should look like, consider different UI options available and which UI tech stack to use
 * DONE Check if all routes has unit tests coverted, if not write unit tests for those
+* DONE Write integration tests for the UI dashboard
+* DONE Swagger UI doc uploaded by the github action to the github pages doesn't connect to backend server yet, need to fix that - Fix - It connects to localhost backend
+* TODO [#B] Need to plan for MySql test database flushing
+  Plan written: [[file:docs/testing-database.md]]
+  Phased approach:
+** TODO Phase 1: test_support module (migrate + reset_database), dedicated logistics_test DB, serialize DB tests with serial_test
+** TODO Phase 2: DbConfig::from_env() - honour DATABASE_URL / MYSQL_* instead of hardcoded connection args
+** TODO Phase 3: database-per-test (logistics_test_<uuid> + Drop guard), replace global OnceLock pool, restore parallelism.
+* TODO Organisation can have multiple godowns where they store their inventory. Need to implenment this in backend as well as in the UI. Also need to include unit tests for the same.
+* TODO Rust unit tests on the github action should run once in 2 HR instead of 30 mins.
