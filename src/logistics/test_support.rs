@@ -23,6 +23,7 @@ const TABLES: &[&str] = &[
     "Dispatches",
     "OrgCredentials",
     "Stock",
+    "Godowns",
     "Vehicle",
     "Customers",
     "Orgs",
@@ -64,13 +65,44 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create Vehicle");
 
     conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS Godowns (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            address VARCHAR(255) NOT NULL,
+            latitude DOUBLE DEFAULT NULL,
+            longitude DOUBLE DEFAULT NULL,
+            last_updated_at BIGINT DEFAULT NULL,
+            location_address VARCHAR(255) DEFAULT NULL,
+            CONSTRAINT fk_godown_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create Godowns");
+
+    // Transitional: stock used to reference Orgs directly. Databases created
+    // before godowns still have that column; there is no hosted backend and
+    // dev/test stock is disposable, so drop and recreate the table rather than
+    // carry a real data migration. See docs/godowns.md.
+    let legacy_stock: Option<i64> = conn
+        .exec_first(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'Stock' AND column_name = 'org_id'",
+            (),
+        )
+        .expect("migrate: probe legacy Stock schema");
+    if legacy_stock.is_some() {
+        conn.query_drop("DROP TABLE IF EXISTS Stock")
+            .expect("migrate: drop legacy Stock");
+    }
+
+    conn.query_drop(
         "CREATE TABLE IF NOT EXISTS Stock (
             id INT AUTO_INCREMENT PRIMARY KEY,
             volume_in_size BIGINT NOT NULL,
             quantity BIGINT NOT NULL,
             description VARCHAR(255) NOT NULL,
-            org_id VARCHAR(36) NOT NULL,
-            CONSTRAINT fk_stock_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+            godown_id VARCHAR(36) NOT NULL,
+            CONSTRAINT fk_stock_godown FOREIGN KEY (godown_id) REFERENCES Godowns(id) ON DELETE CASCADE
         )",
     )
     .expect("migrate: create Stock");

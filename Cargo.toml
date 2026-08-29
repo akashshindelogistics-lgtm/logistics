@@ -20,3 +20,4 @@ edition = "2024"
 
 [dev-dependencies]
  serial_test = "3"
+ actix-http = "3"

@@ -1,6 +1,7 @@
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
 use crate::logistics::dispatch::dispatch::DispatchOrder;
+use crate::logistics::godown::godown::Godown;
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
 use mysql::prelude::*;
@@ -27,8 +28,8 @@ pub struct Organization {
     pub address: String,
     #[allow(dead_code)]
     pub vehicles: Vec<Vehicle>,
-    #[allow(dead_code)]
-    pub stock: Vec<Stock>,
+    /// Warehouses owned by this organization, each carrying its own stock.
+    pub godowns: Vec<Godown>,
     pub location: Option<Location>,
 }
 
@@ -63,17 +64,8 @@ impl Organization {
             )",
             (),
         )?;
-        conn.exec_drop(
-            "CREATE TABLE IF NOT EXISTS Stock (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                volume_in_size BIGINT NOT NULL,
-                quantity BIGINT NOT NULL,
-                description VARCHAR(255) NOT NULL,
-                org_id VARCHAR(36) NOT NULL,
-                CONSTRAINT fk_stock_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
-            )",
-            (),
-        )?;
+        Godown::ensure_table(conn)?;
+        Stock::ensure_table(conn)?;
         Ok(())
     }
 
@@ -91,7 +83,7 @@ impl Organization {
             name: name_str,
             address: address_str,
             vehicles: Vec::new(),
-            stock: Vec::new(),
+            godowns: Vec::new(),
             location: None,
         };
 
@@ -196,24 +188,29 @@ impl Organization {
         let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
         let mut conn = db_connection.get_connection()?;
 
-        // 1. Verify stock availability in database
-        let stock_row: Option<(i64, i64)> = conn.exec_first(
-            "SELECT volume_in_size, quantity FROM Stock WHERE org_id = :org_id AND description = :desc",
-            params! {
-                "org_id" => self.id.to_string(),
-                "desc" => stock_description,
-            },
-        )?;
+        // 1. Verify stock availability across all of the org's godowns. A stock
+        //    item can be split across several godowns; the requested quantity is
+        //    checked against — and later drawn from — the combined holding.
+        let godowns = Godown::list_by_org(self.id)?;
+        let mut holdings: Vec<(Uuid, i64)> = godowns
+            .iter()
+            .filter_map(|g| {
+                g.stock
+                    .iter()
+                    .find(|s| s.description == stock_description)
+                    .map(|s| (g.id, s.quantity))
+            })
+            .collect();
 
-        if stock_row.is_none() {
-            return Err("Requested stock description not found in organization".into());
+        if holdings.is_empty() {
+            return Err("Requested stock description not found in any of the organization's godowns".into());
         }
 
-        let (_vol, current_quantity) = stock_row.unwrap();
-        if current_quantity < requested_quantity {
+        let total_available: i64 = holdings.iter().map(|(_, qty)| qty).sum();
+        if total_available < requested_quantity {
             return Err(format!(
                 "Insufficient stock quantity. Available: {}, Requested: {}",
-                current_quantity, requested_quantity
+                total_available, requested_quantity
             )
             .into());
         }
@@ -261,16 +258,25 @@ impl Organization {
         let selected_vehicle_reg =
             nearest_vehicle_reg.ok_or("Failed to select vehicle for dispatch")?;
 
-        // 4. Update (decrement) stock quantity in database
-        let new_quantity = current_quantity - requested_quantity;
-        conn.exec_drop(
-            "UPDATE Stock SET quantity = :quantity WHERE org_id = :org_id AND description = :desc",
-            params! {
-                "quantity" => new_quantity,
-                "org_id" => self.id.to_string(),
-                "desc" => stock_description,
-            },
-        )?;
+        // 4. Draw the requested quantity down from the godowns, largest holding
+        //    first, until the request is satisfied.
+        holdings.sort_by(|a, b| b.1.cmp(&a.1));
+        let mut remaining = requested_quantity;
+        for (godown_id, available) in holdings {
+            if remaining <= 0 {
+                break;
+            }
+            let taken = remaining.min(available);
+            conn.exec_drop(
+                "UPDATE Stock SET quantity = :quantity WHERE godown_id = :godown_id AND description = :desc",
+                params! {
+                    "quantity" => available - taken,
+                    "godown_id" => godown_id.to_string(),
+                    "desc" => stock_description,
+                },
+            )?;
+            remaining -= taken;
+        }
 
         // 5. Create and save DispatchOrder
         let now = SystemTime::now()
@@ -331,7 +337,7 @@ impl Organization {
                     name,
                     address,
                     vehicles: Vec::new(),
-                    stock: Vec::new(),
+                    godowns: Vec::new(),
                     location,
                 }
             })
@@ -388,22 +394,14 @@ impl Organization {
                 },
             )?;
 
-        let stock: Vec<Stock> = conn.exec_map(
-            "SELECT volume_in_size, quantity, description FROM Stock WHERE org_id = :org_id",
-            params! { "org_id" => &org_id_str },
-            |(vol, qty, desc): (i64, i64, String)| Stock {
-                volume_in_size: vol,
-                quantity: qty,
-                description: desc,
-            },
-        )?;
+        let godowns = Godown::list_by_org(id)?;
 
         Ok(Some(Organization {
             id: Uuid::parse_str(&org_id_str).unwrap_or(id),
             name,
             address,
             vehicles,
-            stock,
+            godowns,
             location,
         }))
     }
@@ -546,9 +544,11 @@ mod tests {
             .expect("Failed to create organization");
         org.update_location(28.6139, 77.2090, Some("Delhi HQ")).expect("Failed to update org location");
 
-        // Add Stock item to Organization
+        // Add a godown and stock it
+        let godown = Godown::create(org.id, "Delhi Godown", "Okhla Phase 1")
+            .expect("Failed to create godown");
         let stock = Stock::new(50, 100, "High-End Laptops");
-        stock.add_new_stock(&org).expect("Failed to add stock");
+        stock.add_to_godown(godown.id).expect("Failed to add stock");
 
         // Add Vehicle 1 (Far away - Mumbai: 19.0760, 72.8777)
         let mut v1 = Vehicle::new("MH01 AX 1111", 50, Unit::MetricTon);
@@ -583,9 +583,9 @@ mod tests {
 
         let stock_qty: Option<i64> = conn
             .exec_first(
-                "SELECT quantity FROM Stock WHERE org_id = :org_id AND description = :desc",
+                "SELECT quantity FROM Stock WHERE godown_id = :godown_id AND description = :desc",
                 params! {
-                    "org_id" => org.id.to_string(),
+                    "godown_id" => godown.id.to_string(),
                     "desc" => "High-End Laptops",
                 },
             )

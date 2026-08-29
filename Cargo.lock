@@ -1415,6 +1415,7 @@ name = "logistics-system"
 version = "0.1.0"
 dependencies = [
  "actix-cors",
+ "actix-http",
  "actix-web",
  "bcrypt",
  "jsonwebtoken",

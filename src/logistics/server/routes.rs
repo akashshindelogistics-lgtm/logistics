@@ -3,6 +3,7 @@ use crate::logistics::auth::auth::{
 };
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::DispatchOrder;
+use crate::logistics::godown::godown::Godown;
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
@@ -105,6 +106,18 @@ pub struct UpdateStockPayload {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct CreateGodownPayload {
+    pub name: String,
+    pub address: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct UpdateGodownPayload {
+    pub name: String,
+    pub address: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateCustomerPayload {
     pub name: String,
     pub address: String,
@@ -158,6 +171,20 @@ pub struct StockResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Stock>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GodownResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Godown>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GodownListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<Godown>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -485,7 +512,7 @@ pub async fn update_org(
         name: String::new(),
         address: String::new(),
         vehicles: Vec::new(),
-        stock: Vec::new(),
+        godowns: Vec::new(),
         location: None,
     };
 
@@ -535,7 +562,7 @@ pub async fn update_org_location(
         name: String::new(),
         address: String::new(),
         vehicles: Vec::new(),
-        stock: Vec::new(),
+        godowns: Vec::new(),
         location: None,
     };
 
@@ -580,7 +607,7 @@ pub async fn delete_org(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl R
         name: String::new(),
         address: String::new(),
         vehicles: Vec::new(),
-        stock: Vec::new(),
+        godowns: Vec::new(),
         location: None,
     };
 
@@ -658,7 +685,7 @@ pub async fn add_vehicle(
         name: String::new(),
         address: String::new(),
         vehicles: Vec::new(),
-        stock: Vec::new(),
+        godowns: Vec::new(),
         location: None,
     };
 
@@ -744,25 +771,88 @@ pub async fn delete_vehicle(path: web::Path<String>, _auth: AuthenticatedOrg) ->
     }
 }
 
-// ── Stock handlers (protected) ────────────────────────────────────────────────
+// ── Godown handlers (protected) ───────────────────────────────────────────────
+//
+// Stock is held in a godown, not directly on the organization. Every
+// `/api/godowns/{gid}...` route loads the godown and checks it belongs to the
+// authenticated org before acting on it. See docs/godowns.md.
+
+/// Load a godown by id and verify it belongs to `auth_org_id`, or build the
+/// 403/404/500 response a handler should return early with.
+fn load_owned_godown(godown_id: Uuid, auth_org_id: Uuid) -> Result<Godown, HttpResponse> {
+    match Godown::get_by_id(godown_id) {
+        Ok(Some(godown)) if godown.org_id == auth_org_id => Ok(godown),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: godown belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Godown not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch godown: {}", err),
+            data: None,
+        })),
+    }
+}
 
 #[utoipa::path(
-    post,
-    path = "/api/orgs/{id}/stock",
-    tag = "Stock",
+    get,
+    path = "/api/orgs/{id}/godowns",
+    tag = "Godowns",
     security(("bearer_auth" = [])),
     params(("id" = Uuid, Path, description = "Organization UUID")),
-    request_body = CreateStockPayload,
     responses(
-        (status = 201, description = "Stock added successfully", body = StockResponse),
+        (status = 200, description = "List of godowns for the organization", body = GodownListResponse),
         (status = 403, description = "Forbidden", body = EmptyResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
     )
 )]
-#[post("/orgs/{id}/stock")]
-pub async fn add_stock(
+#[get("/orgs/{id}/godowns")]
+pub async fn list_godowns(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match Godown::list_by_org(org_id) {
+        Ok(godowns) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} godowns", godowns.len()),
+            data: Some(godowns),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list godowns: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/orgs/{id}/godowns",
+    tag = "Godowns",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    request_body = CreateGodownPayload,
+    responses(
+        (status = 201, description = "Godown created successfully", body = GodownResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/orgs/{id}/godowns")]
+pub async fn create_godown(
     path: web::Path<Uuid>,
-    payload: web::Json<CreateStockPayload>,
+    payload: web::Json<CreateGodownPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
     let org_id = path.into_inner();
@@ -773,22 +863,186 @@ pub async fn add_stock(
             data: None,
         });
     }
-    let org = Organization {
-        id: org_id,
-        name: String::new(),
-        address: String::new(),
-        vehicles: Vec::new(),
-        stock: Vec::new(),
-        location: None,
-    };
+    match Godown::create(org_id, &payload.name, &payload.address) {
+        Ok(godown) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: "Godown created successfully".to_string(),
+            data: Some(godown),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to create godown: {}", err),
+            data: None,
+        }),
+    }
+}
 
+#[utoipa::path(
+    get,
+    path = "/api/godowns/{gid}",
+    tag = "Godowns",
+    security(("bearer_auth" = [])),
+    params(("gid" = Uuid, Path, description = "Godown UUID")),
+    responses(
+        (status = 200, description = "Godown with its stock", body = GodownResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Godown not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/godowns/{gid}")]
+pub async fn get_godown(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let godown = match load_owned_godown(path.into_inner(), auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
+    };
+    HttpResponse::Ok().json(ApiResponse {
+        success: true,
+        message: "Godown retrieved successfully".to_string(),
+        data: Some(godown),
+    })
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/godowns/{gid}",
+    tag = "Godowns",
+    security(("bearer_auth" = [])),
+    params(("gid" = Uuid, Path, description = "Godown UUID")),
+    request_body = UpdateGodownPayload,
+    responses(
+        (status = 200, description = "Godown updated successfully", body = GodownResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Godown not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/godowns/{gid}")]
+pub async fn update_godown(
+    path: web::Path<Uuid>,
+    payload: web::Json<UpdateGodownPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut godown = match load_owned_godown(path.into_inner(), auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
+    };
+    match godown.update(&payload.name, &payload.address) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Godown updated successfully".to_string(),
+            data: Some(godown),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to update godown: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/godowns/{gid}",
+    tag = "Godowns",
+    security(("bearer_auth" = [])),
+    params(("gid" = Uuid, Path, description = "Godown UUID")),
+    responses(
+        (status = 200, description = "Godown deleted successfully", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Godown not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[delete("/godowns/{gid}")]
+pub async fn delete_godown(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let godown = match load_owned_godown(path.into_inner(), auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
+    };
+    match godown.remove() {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::<String> {
+            success: true,
+            message: "Godown deleted successfully".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to delete godown: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/godowns/{gid}/location",
+    tag = "Godowns",
+    security(("bearer_auth" = [])),
+    params(("gid" = Uuid, Path, description = "Godown UUID")),
+    request_body = LocationPayload,
+    responses(
+        (status = 200, description = "Godown location updated successfully", body = LocationResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Godown not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/godowns/{gid}/location")]
+pub async fn update_godown_location(
+    path: web::Path<Uuid>,
+    payload: web::Json<LocationPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut godown = match load_owned_godown(path.into_inner(), auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
+    };
+    match godown.update_location(payload.latitude, payload.longitude, payload.address.clone()) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Godown location updated successfully".to_string(),
+            data: godown.location,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to update godown location: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/godowns/{gid}/stock",
+    tag = "Godowns",
+    security(("bearer_auth" = [])),
+    params(("gid" = Uuid, Path, description = "Godown UUID")),
+    request_body = CreateStockPayload,
+    responses(
+        (status = 201, description = "Stock added successfully", body = StockResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Godown not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/godowns/{gid}/stock")]
+pub async fn add_godown_stock(
+    path: web::Path<Uuid>,
+    payload: web::Json<CreateStockPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let godown = match load_owned_godown(path.into_inner(), auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
+    };
     let stock = Stock::new(
         payload.volume_in_size,
         payload.quantity,
         &payload.description,
     );
 
-    match stock.add_new_stock(&org) {
+    match stock.add_to_godown(godown.id) {
         Ok(_) => HttpResponse::Created().json(ApiResponse {
             success: true,
             message: "Stock added successfully".to_string(),
@@ -804,42 +1058,30 @@ pub async fn add_stock(
 
 #[utoipa::path(
     put,
-    path = "/api/orgs/{id}/stock",
-    tag = "Stock",
+    path = "/api/godowns/{gid}/stock",
+    tag = "Godowns",
     security(("bearer_auth" = [])),
-    params(("id" = Uuid, Path, description = "Organization UUID")),
+    params(("gid" = Uuid, Path, description = "Godown UUID")),
     request_body = UpdateStockPayload,
     responses(
         (status = 200, description = "Stock updated successfully", body = StockResponse),
         (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Godown not found", body = EmptyResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
     )
 )]
-#[put("/orgs/{id}/stock")]
-pub async fn update_stock(
+#[put("/godowns/{gid}/stock")]
+pub async fn update_godown_stock(
     path: web::Path<Uuid>,
     payload: web::Json<UpdateStockPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
-    let org_id = path.into_inner();
-    if org_id != auth.org_id {
-        return HttpResponse::Forbidden().json(ApiResponse::<String> {
-            success: false,
-            message: "Access denied".to_string(),
-            data: None,
-        });
-    }
-    let org = Organization {
-        id: org_id,
-        name: String::new(),
-        address: String::new(),
-        vehicles: Vec::new(),
-        stock: Vec::new(),
-        location: None,
+    let godown = match load_owned_godown(path.into_inner(), auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
     };
-
     let mut stock = Stock::new(0, 0, &payload.description);
-    match stock.update_stock(&org, payload.volume_in_size, payload.quantity) {
+    match stock.update_in_godown(godown.id, payload.volume_in_size, payload.quantity) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: "Stock updated successfully".to_string(),
@@ -855,43 +1097,32 @@ pub async fn update_stock(
 
 #[utoipa::path(
     delete,
-    path = "/api/orgs/{id}/stock/{desc}",
-    tag = "Stock",
+    path = "/api/godowns/{gid}/stock/{desc}",
+    tag = "Godowns",
     security(("bearer_auth" = [])),
     params(
-        ("id" = Uuid, Path, description = "Organization UUID"),
+        ("gid" = Uuid, Path, description = "Godown UUID"),
         ("desc" = String, Path, description = "Stock item description")
     ),
     responses(
         (status = 200, description = "Stock removed successfully", body = EmptyResponse),
         (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Godown not found", body = EmptyResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
     )
 )]
-#[delete("/orgs/{id}/stock/{desc}")]
-pub async fn delete_stock(
+#[delete("/godowns/{gid}/stock/{desc}")]
+pub async fn delete_godown_stock(
     path: web::Path<(Uuid, String)>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
-    let (org_id, desc) = path.into_inner();
-    if org_id != auth.org_id {
-        return HttpResponse::Forbidden().json(ApiResponse::<String> {
-            success: false,
-            message: "Access denied".to_string(),
-            data: None,
-        });
-    }
-    let org = Organization {
-        id: org_id,
-        name: String::new(),
-        address: String::new(),
-        vehicles: Vec::new(),
-        stock: Vec::new(),
-        location: None,
+    let (godown_id, desc) = path.into_inner();
+    let godown = match load_owned_godown(godown_id, auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
     };
-
     let stock = Stock::new(0, 0, &desc);
-    match stock.remove_stock(&org) {
+    match stock.remove_from_godown(godown.id) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse::<String> {
             success: true,
             message: "Stock removed successfully".to_string(),
@@ -1064,7 +1295,7 @@ pub async fn dispatch_stock(
         name: String::new(),
         address: String::new(),
         vehicles: Vec::new(),
-        stock: Vec::new(),
+        godowns: Vec::new(),
         location: None,
     };
 
@@ -1225,9 +1456,15 @@ impl Modify for SecurityAddon {
         add_vehicle,
         update_vehicle_location,
         delete_vehicle,
-        add_stock,
-        update_stock,
-        delete_stock,
+        list_godowns,
+        create_godown,
+        get_godown,
+        update_godown,
+        delete_godown,
+        update_godown_location,
+        add_godown_stock,
+        update_godown_stock,
+        delete_godown_stock,
         list_customers,
         create_customer,
         update_customer_location,
@@ -1240,11 +1477,13 @@ impl Modify for SecurityAddon {
             LoginPayload, LoginData,
             CreateOrgPayload, UpdateOrgPayload, LocationPayload,
             CreateVehiclePayload, CreateStockPayload, UpdateStockPayload,
+            CreateGodownPayload, UpdateGodownPayload,
             CreateCustomerPayload, DispatchRequestPayload,
-            Organization, Vehicle, Unit, Location, Stock, Customer, DispatchOrder,
+            Organization, Vehicle, Unit, Location, Stock, Godown, Customer, DispatchOrder,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
-            StockResponse, CustomerResponse, CustomerListResponse,
+            StockResponse, GodownResponse, GodownListResponse,
+            CustomerResponse, CustomerListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
@@ -1254,7 +1493,7 @@ impl Modify for SecurityAddon {
         (name = "Auth", description = "Authentication endpoints"),
         (name = "Organizations", description = "Organization management"),
         (name = "Vehicles", description = "Vehicle fleet management"),
-        (name = "Stock", description = "Stock inventory management"),
+        (name = "Godowns", description = "Warehouse (godown) and stock management"),
         (name = "Customers", description = "Customer management"),
         (name = "Dispatch", description = "Stock dispatch"),
     )
@@ -1278,9 +1517,15 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(add_vehicle)
             .service(update_vehicle_location)
             .service(delete_vehicle)
-            .service(add_stock)
-            .service(update_stock)
-            .service(delete_stock)
+            .service(list_godowns)
+            .service(create_godown)
+            .service(get_godown)
+            .service(update_godown)
+            .service(delete_godown)
+            .service(update_godown_location)
+            .service(add_godown_stock)
+            .service(update_godown_stock)
+            .service(delete_godown_stock)
             .service(list_customers)
             .service(create_customer)
             .service(update_customer_location)
@@ -1914,14 +2159,54 @@ mod tests {
         assert_eq!(body.message, "Vehicle deleted successfully");
     }
 
+    /// Create an org (with credentials) and one godown under it, returning
+    /// `(org, godown, auth_header)`. Shared by the godown/stock route tests below.
+    async fn setup_org_with_godown(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_name: &str,
+        godown_name: &str,
+    ) -> (Organization, Godown, String) {
+        let create_payload = CreateOrgPayload {
+            name: org_name.to_string(),
+            address: format!("1 {} Road", org_name),
+            password: "godown_test_pass".to_string(),
+        };
+        let req = test::TestRequest::post()
+            .uri("/api/orgs")
+            .set_json(&create_payload)
+            .to_request();
+        let body: ApiResponse<Organization> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        let org = body.data.unwrap();
+        let auth_header = make_auth_header(org.id, &org.name);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/godowns", org.id))
+            .insert_header(("Authorization", auth_header.clone()))
+            .set_json(&CreateGodownPayload {
+                name: godown_name.to_string(),
+                address: format!("Plot 1, {}", godown_name),
+            })
+            .to_request();
+        let body: ApiResponse<Godown> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        let godown = body.data.unwrap();
+
+        (org, godown, auth_header)
+    }
+
     #[actix_web::test]
     #[serial(db)]
-    async fn test_add_stock_invalid_payload() {
+    async fn test_create_godown_invalid_payload() {
         reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
         let req = test::TestRequest::post()
-            .uri(&format!("/api/orgs/{}/stock", org_id))
+            .uri(&format!("/api/orgs/{}/godowns", org_id))
             .insert_header(("Content-Type", "application/json"))
             .insert_header(("Authorization", make_auth_header(org_id, "Test")))
             .set_payload("{bad json}")
@@ -1932,18 +2217,322 @@ mod tests {
 
     #[actix_web::test]
     #[serial(db)]
-    async fn test_update_stock_endpoint() {
+    async fn test_create_godown_for_nonexistent_org_returns_error() {
         reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let org_id = Uuid::new_v4();
+        let payload = CreateGodownPayload {
+            name: "Ghost Godown".to_string(),
+            address: "Nowhere".to_string(),
+        };
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/godowns", org_id))
+            .insert_header(("Authorization", make_auth_header(org_id, "Test")))
+            .set_json(&payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 500);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+        assert!(body.message.contains("Failed to create godown"));
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_list_godowns_endpoint() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, godown, auth_header) =
+            setup_org_with_godown(&app, "List Godowns Org", "List Godown").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/godowns", org.id))
+            .insert_header(("Authorization", auth_header))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<Vec<Godown>> = test::read_body_json(resp).await;
+        assert!(body.success);
+        let godowns = body.data.unwrap();
+        assert_eq!(godowns.len(), 1);
+        assert_eq!(godowns[0].id, godown.id);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_get_godown_endpoint() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Get Godown Org", "Get Godown").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/godowns/{}", godown.id))
+            .insert_header(("Authorization", auth_header))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<Godown> = test::read_body_json(resp).await;
+        assert!(body.success);
+        assert_eq!(body.data.unwrap().id, godown.id);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_get_godown_not_found_returns_404() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/godowns/{}", Uuid::new_v4()))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_get_godown_returns_403_for_different_org() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, _auth_header) =
+            setup_org_with_godown(&app, "Owner Org", "Owner Godown").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/godowns/{}", godown.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_update_godown_endpoint() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Update Godown Org", "Old Godown Name").await;
+
+        let payload = UpdateGodownPayload {
+            name: "New Godown Name".to_string(),
+            address: "New Godown Address".to_string(),
+        };
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/godowns/{}", godown.id))
+            .insert_header(("Authorization", auth_header))
+            .set_json(&payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<Godown> = test::read_body_json(resp).await;
+        assert!(body.success);
+        let updated = body.data.unwrap();
+        assert_eq!(updated.name, "New Godown Name");
+        assert_eq!(updated.address, "New Godown Address");
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_update_godown_invalid_payload() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/godowns/{}", Uuid::new_v4()))
+            .insert_header(("Content-Type", "application/json"))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
+            .set_payload("{bad json}")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_update_godown_returns_403_for_different_org() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, _auth_header) =
+            setup_org_with_godown(&app, "Update Owner Org", "Update Owner Godown").await;
+
+        let payload = UpdateGodownPayload {
+            name: "Hacked Godown".to_string(),
+            address: "Hacked Address".to_string(),
+        };
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/godowns/{}", godown.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .set_json(&payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_update_godown_location_endpoint() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Godown Location Org", "Godown Location Warehouse").await;
+
+        let payload = LocationPayload {
+            latitude: 19.0760,
+            longitude: 72.8777,
+            address: Some("Mumbai, Maharashtra".to_string()),
+        };
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/godowns/{}/location", godown.id))
+            .insert_header(("Authorization", auth_header))
+            .set_json(&payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<Location> = test::read_body_json(resp).await;
+        assert!(body.success);
+        let loc = body.data.unwrap();
+        assert_eq!(loc.latitude, 19.0760);
+        assert_eq!(loc.longitude, 72.8777);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_update_godown_location_invalid_payload() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/godowns/{}/location", Uuid::new_v4()))
+            .insert_header(("Content-Type", "application/json"))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
+            .set_payload("{bad json}")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_delete_godown_endpoint() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, godown, auth_header) =
+            setup_org_with_godown(&app, "Delete Godown Org", "Doomed Godown").await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/godowns/{}", godown.id))
+            .insert_header(("Authorization", auth_header.clone()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(body.success);
+        assert_eq!(body.message, "Godown deleted successfully");
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/godowns", org.id))
+            .insert_header(("Authorization", auth_header))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        let body: ApiResponse<Vec<Godown>> = test::read_body_json(resp).await;
+        assert!(body.data.unwrap().is_empty());
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_delete_godown_returns_403_for_different_org() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, _auth_header) =
+            setup_org_with_godown(&app, "Delete Owner Org", "Delete Owner Godown").await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/godowns/{}", godown.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_add_godown_stock_invalid_payload() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", Uuid::new_v4()))
+            .insert_header(("Content-Type", "application/json"))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
+            .set_payload("{bad json}")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_add_godown_stock_nonexistent_godown_returns_404() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let payload = CreateStockPayload {
+            volume_in_size: 50,
+            quantity: 100,
+            description: "Ghost Stock".to_string(),
+        };
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", Uuid::new_v4()))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
+            .set_json(&payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_add_godown_stock_returns_403_for_different_org() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, _auth_header) =
+            setup_org_with_godown(&app, "Stock Owner Org", "Stock Owner Godown").await;
+
+        let payload = CreateStockPayload {
+            volume_in_size: 50,
+            quantity: 100,
+            description: "Stolen Goods".to_string(),
+        };
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .set_json(&payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_update_godown_stock_endpoint() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Update Stock Org", "Update Stock Godown").await;
+
         let payload = UpdateStockPayload {
             volume_in_size: 200,
             quantity: 75,
             description: "Nonexistent Stock Description".to_string(),
         };
         let req = test::TestRequest::put()
-            .uri(&format!("/api/orgs/{}/stock", org_id))
-            .insert_header(("Authorization", make_auth_header(org_id, "Test")))
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth_header))
             .set_json(&payload)
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1955,14 +2544,13 @@ mod tests {
 
     #[actix_web::test]
     #[serial(db)]
-    async fn test_update_stock_invalid_payload() {
+    async fn test_update_godown_stock_invalid_payload() {
         reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
-        let org_id = Uuid::new_v4();
         let req = test::TestRequest::put()
-            .uri(&format!("/api/orgs/{}/stock", org_id))
+            .uri(&format!("/api/godowns/{}/stock", Uuid::new_v4()))
             .insert_header(("Content-Type", "application/json"))
-            .insert_header(("Authorization", make_auth_header(org_id, "Test")))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
             .set_payload("{bad json}")
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1971,19 +2559,63 @@ mod tests {
 
     #[actix_web::test]
     #[serial(db)]
-    async fn test_delete_stock_endpoint() {
+    async fn test_update_godown_stock_returns_403_for_different_org() {
         reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
-        let org_id = Uuid::new_v4();
+        let (_org, godown, _auth_header) =
+            setup_org_with_godown(&app, "Update Stock Owner Org", "Update Stock Owner Godown").await;
+
+        let payload = UpdateStockPayload {
+            volume_in_size: 999,
+            quantity: 999,
+            description: "Tampered Stock".to_string(),
+        };
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .set_json(&payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_delete_godown_stock_endpoint() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Delete Stock Org", "Delete Stock Godown").await;
+
         let req = test::TestRequest::delete()
-            .uri(&format!("/api/orgs/{}/stock/nonexistent-description", org_id))
-            .insert_header(("Authorization", make_auth_header(org_id, "Test")))
+            .uri(&format!("/api/godowns/{}/stock/nonexistent-description", godown.id))
+            .insert_header(("Authorization", auth_header))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 200);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(body.success);
         assert_eq!(body.message, "Stock removed successfully");
+    }
+
+    #[actix_web::test]
+    #[serial(db)]
+    async fn test_delete_godown_stock_returns_403_for_different_org() {
+        reset_database();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, _auth_header) =
+            setup_org_with_godown(&app, "Delete Stock Owner Org", "Delete Stock Owner Godown").await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/godowns/{}/stock/some-item", godown.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
     }
 
     #[actix_web::test]
@@ -2163,27 +2795,15 @@ mod tests {
         assert_eq!(body.data.unwrap().len(), 0);
     }
 
-    // ── POST /api/orgs/{id}/stock success path ────────────────────────────────
+    // ── POST /api/godowns/{gid}/stock success path ────────────────────────────
 
     #[actix_web::test]
     #[serial(db)]
-    async fn test_add_stock_to_own_org_returns_201() {
+    async fn test_add_stock_to_own_godown_returns_201() {
         reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
-
-        let create_payload = CreateOrgPayload {
-            name: "Stock Test Org".to_string(),
-            address: "11 Warehouse Blvd".to_string(),
-            password: "stock_pass".to_string(),
-        };
-        let req = test::TestRequest::post()
-            .uri("/api/orgs")
-            .set_json(&create_payload)
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        let body: ApiResponse<Organization> = test::read_body_json(resp).await;
-        let org = body.data.unwrap();
-        let auth_header = make_auth_header(org.id, &org.name);
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Stock Test Org", "Stock Test Godown").await;
 
         let stock_payload = CreateStockPayload {
             volume_in_size: 100,
@@ -2191,7 +2811,7 @@ mod tests {
             description: "Test Widget".to_string(),
         };
         let req = test::TestRequest::post()
-            .uri(&format!("/api/orgs/{}/stock", org.id))
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
             .insert_header(("Authorization", auth_header))
             .set_json(&stock_payload)
             .to_request();
@@ -2328,60 +2948,19 @@ mod tests {
 
     #[actix_web::test]
     #[serial(db)]
-    async fn test_add_stock_returns_403_for_different_org() {
+    async fn test_create_godown_returns_403_for_different_org() {
         reset_database();
         let app = test::init_service(App::new().configure(config_routes)).await;
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
-        let payload = CreateStockPayload {
-            volume_in_size: 50,
-            quantity: 100,
-            description: "Stolen Goods".to_string(),
+        let payload = CreateGodownPayload {
+            name: "Stolen Godown".to_string(),
+            address: "Stolen Address".to_string(),
         };
         let req = test::TestRequest::post()
-            .uri(&format!("/api/orgs/{}/stock", target_org_id))
+            .uri(&format!("/api/orgs/{}/godowns", target_org_id))
             .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
             .set_json(&payload)
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status().as_u16(), 403);
-        let body: ApiResponse<String> = test::read_body_json(resp).await;
-        assert!(!body.success);
-    }
-
-    #[actix_web::test]
-    #[serial(db)]
-    async fn test_update_stock_returns_403_for_different_org() {
-        reset_database();
-        let app = test::init_service(App::new().configure(config_routes)).await;
-        let target_org_id = Uuid::new_v4();
-        let attacker_org_id = Uuid::new_v4();
-        let payload = UpdateStockPayload {
-            volume_in_size: 999,
-            quantity: 999,
-            description: "Tampered Stock".to_string(),
-        };
-        let req = test::TestRequest::put()
-            .uri(&format!("/api/orgs/{}/stock", target_org_id))
-            .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
-            .set_json(&payload)
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status().as_u16(), 403);
-        let body: ApiResponse<String> = test::read_body_json(resp).await;
-        assert!(!body.success);
-    }
-
-    #[actix_web::test]
-    #[serial(db)]
-    async fn test_delete_stock_returns_403_for_different_org() {
-        reset_database();
-        let app = test::init_service(App::new().configure(config_routes)).await;
-        let target_org_id = Uuid::new_v4();
-        let attacker_org_id = Uuid::new_v4();
-        let req = test::TestRequest::delete()
-            .uri(&format!("/api/orgs/{}/stock/some-item", target_org_id))
-            .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 403);
@@ -2453,7 +3032,19 @@ mod tests {
         test::call_service(&app, req).await;
 
         let req = test::TestRequest::post()
-            .uri(&format!("/api/orgs/{}/stock", org.id))
+            .uri(&format!("/api/orgs/{}/godowns", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateGodownPayload {
+                name: "Summary Godown".to_string(),
+                address: "1 Summary Godown Road".to_string(),
+            })
+            .to_request();
+        let body: ApiResponse<Godown> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let godown = body.data.unwrap();
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
             .insert_header(("Authorization", auth.clone()))
             .set_json(&CreateStockPayload {
                 volume_in_size: 100,

@@ -3,10 +3,19 @@ import { Link, useParams } from 'react-router-dom';
 import { getOrg, dispatchStock } from '../api/orgs';
 import { addVehicle, deleteVehicle } from '../api/vehicles';
 import { listCustomers } from '../api/customers';
+import { createGodown, deleteGodown, addGodownStock } from '../api/godowns';
 import type { Organization, Customer } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck } from '../components/Icons';
 import './page.css';
+
+interface StockFormState {
+  description: string;
+  quantity: string;
+  volumeInSize: string;
+}
+
+const emptyStockForm: StockFormState = { description: '', quantity: '', volumeInSize: '' };
 
 export default function OrganizationDetail() {
   const { id } = useParams<{ id: string }>();
@@ -17,6 +26,12 @@ export default function OrganizationDetail() {
   const [vReg, setVReg] = useState('');
   const [vCap, setVCap] = useState('');
   const [vSubmitting, setVSubmitting] = useState(false);
+
+  const [gName, setGName] = useState('');
+  const [gAddress, setGAddress] = useState('');
+  const [gSubmitting, setGSubmitting] = useState(false);
+  const [stockForms, setStockForms] = useState<Record<string, StockFormState>>({});
+  const [stockSubmitting, setStockSubmitting] = useState<Record<string, boolean>>({});
 
   const [dCustomerId, setDCustomerId] = useState('');
   const [dStock, setDStock] = useState('');
@@ -45,6 +60,38 @@ export default function OrganizationDetail() {
     if (!confirm(`Remove vehicle ${reg}?`)) return;
     await deleteVehicle(reg);
     load();
+  };
+
+  const handleAddGodown = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGSubmitting(true);
+    try { await createGodown(id!, gName, gAddress); setGName(''); setGAddress(''); load(); }
+    finally { setGSubmitting(false); }
+  };
+
+  const handleDeleteGodown = async (godownId: string, name: string) => {
+    if (!confirm(`Remove godown "${name}" and all its stock?`)) return;
+    await deleteGodown(godownId);
+    load();
+  };
+
+  const stockFormFor = (godownId: string) => stockForms[godownId] ?? emptyStockForm;
+
+  const updateStockForm = (godownId: string, field: keyof StockFormState, value: string) => {
+    setStockForms(prev => ({ ...prev, [godownId]: { ...stockFormFor(godownId), [field]: value } }));
+  };
+
+  const handleAddStock = async (e: React.FormEvent, godownId: string) => {
+    e.preventDefault();
+    const form = stockFormFor(godownId);
+    setStockSubmitting(prev => ({ ...prev, [godownId]: true }));
+    try {
+      await addGodownStock(godownId, form.description, Number(form.quantity), Number(form.volumeInSize));
+      setStockForms(prev => ({ ...prev, [godownId]: emptyStockForm }));
+      load();
+    } finally {
+      setStockSubmitting(prev => ({ ...prev, [godownId]: false }));
+    }
   };
 
   const handleDispatch = async (e: React.FormEvent) => {
@@ -90,6 +137,10 @@ export default function OrganizationDetail() {
     if (v.location)
       mapPins.push({ lat: v.location.latitude, lng: v.location.longitude, label: v.registration_number, detail: `${v.capacity} MT` });
   });
+  org.godowns.forEach(g => {
+    if (g.location)
+      mapPins.push({ lat: g.location.latitude, lng: g.location.longitude, label: g.name, detail: g.address });
+  });
 
   return (
     <div className="page">
@@ -120,8 +171,8 @@ export default function OrganizationDetail() {
             <div className="muted">Vehicles</div>
           </div>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontSize: 13, textAlign: 'center' }}>
-            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--purple)' }}>{org.stock.length}</div>
-            <div className="muted">Stock items</div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--purple)' }}>{org.godowns.length}</div>
+            <div className="muted">Godowns</div>
           </div>
         </div>
       </div>
@@ -206,44 +257,127 @@ export default function OrganizationDetail() {
           </div>
         </div>
 
-        {/* Stock inventory */}
-        <div className="section-card">
+        {/* Godowns (warehouses) and their stock */}
+        <div className="section-card" style={{ gridColumn: '1 / -1' }}>
           <div className="section-card-header">
-            <span className="section-card-title"><IconPackage size={15} />Stock Inventory</span>
-            <span className="badge">{org.stock.length} items</span>
+            <span className="section-card-title"><IconBuilding size={15} />Godowns</span>
+            <span className="badge">{org.godowns.length}</span>
           </div>
 
-          {org.stock.length === 0 ? (
+          {org.godowns.length === 0 ? (
             <div className="empty-state" style={{ padding: '28px 20px' }}>
-              <div className="empty-state-icon"><IconPackage size={22} /></div>
-              <h3>No stock</h3>
-              <p>Stock is added via the API when goods arrive at this organization.</p>
+              <div className="empty-state-icon"><IconBuilding size={22} /></div>
+              <h3>No godowns</h3>
+              <p>Add a godown below, then add stock to it.</p>
             </div>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr><th>Description</th><th>Quantity</th><th>Volume</th></tr>
-                </thead>
-                <tbody>
-                  {org.stock.map(s => (
-                    <tr key={s.description}>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{ width: 26, height: 26, borderRadius: 6, background: 'var(--purple-bg)', color: 'var(--purple)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <IconPackage size={12} />
-                          </div>
-                          <span className="entity-name">{s.description}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px 20px' }}>
+              {org.godowns.map(g => {
+                const form = stockFormFor(g.id);
+                const submitting = !!stockSubmitting[g.id];
+                return (
+                  <div key={g.id} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
+                      <div>
+                        <div style={{ fontWeight: 700 }}>{g.name}</div>
+                        <div className="muted" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                          <IconPin size={11} />{g.address}
                         </div>
-                      </td>
-                      <td><span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{s.quantity}</span> <span className="muted">units</span></td>
-                      <td><span className="badge tag-blue">{s.volume_in_size}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleDeleteGodown(g.id, g.name)}>
+                        <IconTrash size={12} />
+                      </button>
+                    </div>
+
+                    {g.stock.length === 0 ? (
+                      <p className="muted" style={{ padding: '14px', margin: 0, fontSize: 13 }}>No stock in this godown yet.</p>
+                    ) : (
+                      <div className="table-wrap">
+                        <table>
+                          <thead>
+                            <tr><th>Description</th><th>Quantity</th><th>Volume</th></tr>
+                          </thead>
+                          <tbody>
+                            {g.stock.map(s => (
+                              <tr key={s.description}>
+                                <td>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ width: 26, height: 26, borderRadius: 6, background: 'var(--purple-bg)', color: 'var(--purple)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                      <IconPackage size={12} />
+                                    </div>
+                                    <span className="entity-name">{s.description}</span>
+                                  </div>
+                                </td>
+                                <td><span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{s.quantity}</span> <span className="muted">units</span></td>
+                                <td><span className="badge tag-blue">{s.volume_in_size}</span></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    <form
+                      onSubmit={e => handleAddStock(e, g.id)}
+                      style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', padding: '12px 14px', borderTop: '1px solid var(--border)' }}
+                    >
+                      <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+                        <label htmlFor={`stock-desc-${g.id}`}>Stock Item</label>
+                        <input
+                          id={`stock-desc-${g.id}`}
+                          placeholder="What is being stored?"
+                          value={form.description}
+                          onChange={e => updateStockForm(g.id, 'description', e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="field" style={{ flex: '0 0 100px', marginBottom: 0 }}>
+                        <label htmlFor={`stock-qty-${g.id}`}>Stock Quantity</label>
+                        <input
+                          id={`stock-qty-${g.id}`}
+                          type="number"
+                          value={form.quantity}
+                          onChange={e => updateStockForm(g.id, 'quantity', e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="field" style={{ flex: '0 0 100px', marginBottom: 0 }}>
+                        <label htmlFor={`stock-vol-${g.id}`}>Volume</label>
+                        <input
+                          id={`stock-vol-${g.id}`}
+                          type="number"
+                          value={form.volumeInSize}
+                          onChange={e => updateStockForm(g.id, 'volumeInSize', e.target.value)}
+                          required
+                        />
+                      </div>
+                      <button className="btn btn-primary btn-sm" type="submit" disabled={submitting}>
+                        <IconPlus size={12} />{submitting ? 'Adding…' : 'Add Stock'}
+                      </button>
+                    </form>
+                  </div>
+                );
+              })}
             </div>
           )}
+
+          {/* Add godown inline */}
+          <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Add Godown</p>
+            <form onSubmit={handleAddGodown} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div className="field" style={{ flex: 1, minWidth: 160, marginBottom: 0 }}>
+                <label htmlFor="g-name">Godown Name</label>
+                <input id="g-name" placeholder="e.g. North Godown" value={gName} onChange={e => setGName(e.target.value)} required />
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 160, marginBottom: 0 }}>
+                <label htmlFor="g-address">Address</label>
+                <input id="g-address" placeholder="e.g. Plot 5, Industrial Area" value={gAddress} onChange={e => setGAddress(e.target.value)} required />
+              </div>
+              <button className="btn btn-primary" type="submit" disabled={gSubmitting} style={{ alignSelf: 'flex-end' }}>
+                <IconPlus size={14} />{gSubmitting ? 'Adding…' : 'Add Godown'}
+              </button>
+            </form>
+          </div>
         </div>
 
         {/* Dispatch form */}
