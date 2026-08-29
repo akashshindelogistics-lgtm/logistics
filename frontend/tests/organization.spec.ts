@@ -15,7 +15,7 @@ test.describe('Organization', () => {
     // Stat cards (scoped to .page-header .muted labels to avoid sidebar nav ambiguity)
     const statLabels = page.locator('.page-header .muted');
     await expect(statLabels.filter({ hasText: 'Vehicles' })).toBeVisible();
-    await expect(statLabels.filter({ hasText: 'Stock items' })).toBeVisible();
+    await expect(statLabels.filter({ hasText: 'Godowns' })).toBeVisible();
   });
 
   test('sidebar shows org name and truncated id', async ({ page }) => {
@@ -57,11 +57,34 @@ test.describe('Organization', () => {
     await expect(page.getByRole('button', { name: /add vehicle/i })).toBeVisible();
   });
 
-  test('org detail shows Stock Inventory section', async ({ page }) => {
-    const org = await registerOrg(page, `Stock Section Org ${uid()}`);
+  test('org detail shows Godowns section with add-godown form', async ({ page }) => {
+    const org = await registerOrg(page, `Godown Section Org ${uid()}`);
     await page.goto(`/orgs/${org.id}`);
 
-    await expect(page.getByText('Stock Inventory')).toBeVisible();
+    await expect(page.getByText('Godowns').first()).toBeVisible();
+    await expect(page.getByLabel('Godown Name')).toBeVisible();
+    await expect(page.getByLabel('Address')).toBeVisible();
+    await expect(page.getByRole('button', { name: /add godown/i })).toBeVisible();
+  });
+
+  test('create a godown and add stock to it via the UI', async ({ page }) => {
+    const org = await registerOrg(page, `Godown Flow Org ${uid()}`);
+    const godownName = `Warehouse ${uid()}`;
+    const stockDesc = `Bags of Rice ${uid()}`;
+    await page.goto(`/orgs/${org.id}`);
+
+    await page.getByLabel('Godown Name').fill(godownName);
+    await page.getByLabel('Address').fill('Plot 5, Industrial Area');
+    await page.getByRole('button', { name: /add godown/i }).click();
+    await expect(page.getByText(godownName)).toBeVisible({ timeout: 8000 });
+
+    await page.getByLabel('Stock Item').fill(stockDesc);
+    await page.getByLabel('Stock Quantity').fill('250');
+    await page.getByLabel('Volume').fill('50');
+    await page.getByRole('button', { name: /add stock/i }).click();
+
+    await expect(page.getByText(stockDesc)).toBeVisible({ timeout: 8000 });
+    await expect(page.getByText('250')).toBeVisible();
   });
 
   test('org detail shows Dispatch Stock form', async ({ page }) => {

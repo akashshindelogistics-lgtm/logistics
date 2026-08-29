@@ -18,12 +18,21 @@ export interface Stock {
   description: string;
 }
 
+export interface Godown {
+  id: string;
+  org_id: string;
+  name: string;
+  address: string;
+  location?: Location;
+  stock: Stock[];
+}
+
 export interface Organization {
   id: string;
   name: string;
   address: string;
   vehicles: Vehicle[];
-  stock: Stock[];
+  godowns: Godown[];
   location?: Location;
 }
 

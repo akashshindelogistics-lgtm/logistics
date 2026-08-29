@@ -2,12 +2,23 @@ import { test, expect } from '@playwright/test';
 import { registerOrg, uid } from './helpers';
 
 /**
- * Helper: add stock to an org via the API directly (stock has no UI form).
+ * Helper: add stock to an org via the API directly (stock lives in a godown,
+ * which this creates on the fly, and dispatch sums stock across all of an
+ * org's godowns so tests don't need to care which one).
  * Reads the JWT from localStorage so the request is authenticated.
  */
 async function addStockViaApi(page: import('@playwright/test').Page, orgId: string, description: string, quantity: number) {
   const token = await page.evaluate(() => localStorage.getItem('logi_token'));
-  const resp = await page.request.post(`/api/orgs/${orgId}/stock`, {
+  const godownResp = await page.request.post(`/api/orgs/${orgId}/godowns`, {
+    data: { name: `Godown ${description}`, address: '1 Warehouse Road' },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!godownResp.ok()) {
+    throw new Error(`addStockViaApi: create godown failed: ${godownResp.status()} ${await godownResp.text()}`);
+  }
+  const godownBody = await godownResp.json() as { data: { id: string } };
+
+  const resp = await page.request.post(`/api/godowns/${godownBody.data.id}/stock`, {
     data: { description, quantity, volume_in_size: 100 },
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -78,7 +89,7 @@ test.describe('Dispatches', () => {
 
     await page.getByLabel('Customer').selectOption({ value: custId });
     await page.getByLabel('Stock Description').fill(stockDesc);
-    await page.getByLabel('Quantity').fill('10');
+    await page.getByLabel('Quantity', { exact: true }).fill('10');
     await page.getByRole('button', { name: /dispatch stock/i }).click();
 
     // Success message
@@ -100,7 +111,7 @@ test.describe('Dispatches', () => {
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Customer').selectOption({ value: custId });
     await page.getByLabel('Stock Description').fill('Steel Rods');
-    await page.getByLabel('Quantity').fill('100'); // more than available
+    await page.getByLabel('Quantity', { exact: true }).fill('100'); // more than available
     await page.getByRole('button', { name: /dispatch stock/i }).click();
 
     await expect(page.getByText(/dispatch failed/i)).toBeVisible({ timeout: 10000 });
@@ -127,7 +138,7 @@ test.describe('Dispatches', () => {
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Customer').selectOption({ value: custId });
     await page.getByLabel('Stock Description').fill(stockDesc);
-    await page.getByLabel('Quantity').fill('20');
+    await page.getByLabel('Quantity', { exact: true }).fill('20');
     await page.getByRole('button', { name: /dispatch stock/i }).click();
     await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
 
@@ -147,7 +158,7 @@ test.describe('Dispatches', () => {
     await page.goto(`/orgs/${org.id}`);
     // Fill stock and quantity but leave customer unselected
     await page.getByLabel('Stock Description').fill('Wood');
-    await page.getByLabel('Quantity').fill('5');
+    await page.getByLabel('Quantity', { exact: true }).fill('5');
     await page.getByRole('button', { name: /dispatch stock/i }).click();
 
     // HTML5 required on select prevents submission; stays on same page
