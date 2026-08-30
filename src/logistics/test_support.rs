@@ -118,7 +118,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
 /// and annotate that test with `#[serial_test::serial(db)]` so a reset never
 /// races a concurrent test sharing the same database.
 pub fn reset_database() {
-    let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+    let mut conn = DbConnection::from_env()
         .get_connection()
         .expect("reset_database: connect to test database");
 

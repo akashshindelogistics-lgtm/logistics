@@ -20,7 +20,7 @@ impl Customer {
         name: impl Into<String>,
         address: impl Into<String>,
     ) -> Result<Self, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         let customer = Customer {
@@ -61,7 +61,7 @@ impl Customer {
         longitude: f64,
         address: Option<impl Into<String>>,
     ) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         let now = SystemTime::now()
@@ -97,7 +97,7 @@ impl Customer {
     }
 
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         let row: Option<(String, String, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn
@@ -127,7 +127,7 @@ impl Customer {
     }
 
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(loc.latitude, lat);
         assert_eq!(loc.longitude, lng);
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for customer verification");

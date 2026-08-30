@@ -13,10 +13,12 @@
   Phased approach:
 ** DONE Phase 1: test_support module (migrate + reset_database), dedicated logistics_test DB, serialize DB tests with serial_test
    Also fixed src/main.rs re-declaring mod logistics (caused cargo test to run twice, defeating #[serial])
-** TODO Phase 2: DbConfig::from_env() - honour DATABASE_URL / MYSQL_* instead of hardcoded connection args
+** DONE Phase 2: DbConfig::from_env() - honour DATABASE_URL / MYSQL_* instead of hardcoded connection args
 ** TODO Phase 3: database-per-test (logistics_test_<uuid> + Drop guard), replace global OnceLock pool, restore parallelism.
 * TODO Organisation can have multiple godowns where they store their inventory. Need to implenment this in backend as well as in the UI. Also need to include unit tests for the same.
-* TODO Rust unit tests on the github action should run once in 2 HR instead of 30 mins.
+  Implemented on branch [[https://github.com/akashshindelogistics-lgtm/logistics/compare/master...resume-godown-feature][resume-godown-feature]] (pushed to origin, not yet merged) -
+  backend CRUD + routes, frontend UI in OrganizationDetail, and tests. Needs review/merge.
+* DONE Rust unit tests on the github action should run once in 2 HR instead of 30 mins.
 * Ground-ops research: how a freight/warehousing business actually runs a dispatch, and where this system currently diverges from it
   Godowns landed the storage layer; the gaps below are about the trip itself - the sequence of
   events a shipment goes through between "customer asked for stock" and "customer signed for it" -

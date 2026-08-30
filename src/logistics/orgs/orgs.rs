@@ -81,7 +81,7 @@ impl Organization {
         name: impl Into<String>,
         address: impl Into<String>,
     ) -> Result<Self, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         let name_str = name.into();
@@ -129,7 +129,7 @@ impl Organization {
         let new_name = name.into();
         let new_address = address.into();
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -152,7 +152,7 @@ impl Organization {
         longitude: f64,
         address: Option<impl Into<String>>,
     ) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         let now = SystemTime::now()
@@ -193,7 +193,7 @@ impl Organization {
         stock_description: &str,
         requested_quantity: i64,
     ) -> Result<DispatchOrder, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         // 1. Verify stock availability in database
@@ -295,7 +295,7 @@ impl Organization {
     }
 
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -341,7 +341,7 @@ impl Organization {
     }
 
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         // Ensure the tables this query touches exist. On a brand-new database the
@@ -409,7 +409,7 @@ impl Organization {
     }
 
     pub fn remove_organization(&self) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -440,7 +440,7 @@ mod tests {
         let org = Organization::create_organization(test_name, test_address)
             .expect("Failed to create organization in database");
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for verification");
@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(org.name, "Updated Org Name");
         assert_eq!(org.address, "Updated Address Location");
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for verification");
@@ -516,7 +516,7 @@ mod tests {
         assert_eq!(loc.longitude, lng);
         assert_eq!(loc.address.as_deref(), Some(addr));
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for org location verification");
@@ -576,7 +576,7 @@ mod tests {
         assert_eq!(dispatch_order.status, "DISPATCHED");
 
         // Verify stock quantity decremented in MySQL database (100 - 15 = 85)
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for stock verification");
@@ -605,7 +605,7 @@ mod tests {
         let remove_res = org.remove_organization();
         assert!(remove_res.is_ok(), "Failed to remove organization");
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for verification");

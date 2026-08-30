@@ -22,7 +22,7 @@ impl Stock {
     }
 
     pub fn add_new_stock(&self, org: &Organization) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         // Ensure Stock table exists in database
@@ -59,7 +59,7 @@ impl Stock {
         volume_in_size: i64,
         quantity: i64,
     ) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -78,7 +78,7 @@ impl Stock {
     }
 
     pub fn remove_stock(&self, org: &Organization) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -110,7 +110,7 @@ mod tests {
         stock.add_new_stock(&org).expect("Failed to add stock to organization in database");
 
         // Verify stock record in MySQL database
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for stock verification");
@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(stock.volume_in_size, 120);
         assert_eq!(stock.quantity, 800);
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for stock update verification");
@@ -182,7 +182,7 @@ mod tests {
         let remove_res = stock.remove_stock(&org);
         assert!(remove_res.is_ok(), "Failed to remove stock");
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for stock removal verification");

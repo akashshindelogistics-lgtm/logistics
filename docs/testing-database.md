@@ -97,7 +97,21 @@ Cost: ~77 test functions get a `#[serial(db)]` attribute and a
 `reset_database();` first line. Mechanical, reviewable in one pass. Test wall
 time goes up (serial), acceptable at this suite size.
 
-### Phase 2 — make the connection configurable
+### Phase 2 — make the connection configurable — **DONE**
+
+Implemented in `src/logistics/db/connection.rs`: `DbConfig::from_env()` reads
+`DATABASE_URL` (parsed via `mysql::Opts::from_url`) if set, else the discrete
+`MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` /
+`MYSQL_DATABASE` vars, else the historical hardcoded defaults so an
+unconfigured local `cargo run`/`cargo test` keeps working unchanged.
+`DbConnection::from_env()` builds a `DbConnection` from it, and every one of
+the ~41 previously-hardcoded `DbConnection::new("localhost", 3306,
+"logistics", "root", "password")` call sites (production code and
+`test_support.rs`) now calls `DbConnection::from_env()` instead. This also
+fixes the latent CI footgun where `periodic-tests.yml`'s exported `MYSQL_*`
+vars did nothing — they're now actually honoured.
+
+Original plan for reference:
 
 Replace the hardcoded `DbConnection::new("localhost", 3306, "logistics", …)`
 call sites with a single constructor that reads configuration once:
@@ -131,5 +145,5 @@ extraction and the Phase 2 config plumbing, so it is sequenced last.
 
 ## Immediate next step
 
-Implement **Phase 1**. It is self-contained, unblocks tighter assertions, and
-is a prerequisite for Phases 2–3. Phases 2 and 3 can follow as separate PRs.
+Phases 1 and 2 are done. **Phase 3** (database-per-test, restore parallelism)
+remains — it is larger and optional, and can follow as a separate PR.

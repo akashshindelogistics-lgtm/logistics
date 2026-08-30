@@ -36,7 +36,7 @@ pub struct DispatchOrder {
 
 impl DispatchOrder {
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
 
@@ -59,7 +59,7 @@ impl DispatchOrder {
     }
 
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
 
@@ -84,7 +84,7 @@ impl DispatchOrder {
     }
 
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
 
@@ -100,7 +100,7 @@ impl DispatchOrder {
     }
 
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
 
