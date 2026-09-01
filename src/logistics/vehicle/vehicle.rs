@@ -55,7 +55,7 @@ impl Vehicle {
     }
 
     pub fn add_new_vehicle_to_org(&self, org: &Organization) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         // Ensure Vehicle table exists with location columns
@@ -105,7 +105,7 @@ impl Vehicle {
     }
 
     pub fn update_vehicle(&mut self, capacity: i64, unit: Unit) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -128,7 +128,7 @@ impl Vehicle {
         longitude: f64,
         address: Option<impl Into<String>>,
     ) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         let now = SystemTime::now()
@@ -164,7 +164,7 @@ impl Vehicle {
     }
 
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -210,7 +210,7 @@ impl Vehicle {
     }
 
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         let rows: Vec<(String, i64, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
@@ -239,7 +239,7 @@ impl Vehicle {
     }
 
     pub fn remove_vehicle(&self) -> Result<(), Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
         conn.exec_drop(
@@ -270,7 +270,7 @@ mod tests {
         let res = vehicle.add_new_vehicle_to_org(&org);
         assert!(res.is_ok(), "Failed to add vehicle to organization in database");
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for vehicle verification");
@@ -306,7 +306,7 @@ mod tests {
         assert!(update_res.is_ok(), "Failed to update vehicle");
         assert_eq!(vehicle.capacity, 75);
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for vehicle update verification");
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(loc.longitude, lng);
         assert_eq!(loc.address.as_deref(), Some(addr));
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for location verification");
@@ -384,7 +384,7 @@ mod tests {
         let remove_res = vehicle.remove_vehicle();
         assert!(remove_res.is_ok(), "Failed to remove vehicle");
 
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection
             .get_connection()
             .expect("Failed to connect to database for vehicle removal verification");

@@ -47,7 +47,7 @@ impl Godown {
         name: impl Into<String>,
         address: impl Into<String>,
     ) -> Result<Self, Box<dyn Error>> {
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
         Self::ensure_table(&mut conn)?;
 
@@ -81,7 +81,7 @@ impl Godown {
         let new_name = name.into();
         let new_address = address.into();
 
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
 
         conn.exec_drop(
@@ -104,7 +104,7 @@ impl Godown {
         longitude: f64,
         address: Option<impl Into<String>>,
     ) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
 
         let now = SystemTime::now()
@@ -134,7 +134,7 @@ impl Godown {
     }
 
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
         Self::ensure_table(&mut conn)?;
 
@@ -167,7 +167,7 @@ impl Godown {
     }
 
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
         Self::ensure_table(&mut conn)?;
 
@@ -199,7 +199,7 @@ impl Godown {
     }
 
     pub fn remove(&self) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
         conn.exec_drop(
             "DELETE FROM Godowns WHERE id = :id",

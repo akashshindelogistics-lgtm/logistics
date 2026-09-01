@@ -62,7 +62,7 @@ impl Stock {
     }
 
     pub fn add_to_godown(&self, godown_id: Uuid) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
         Self::ensure_table(&mut conn)?;
 
@@ -85,7 +85,7 @@ impl Stock {
         volume_in_size: i64,
         quantity: i64,
     ) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
 
         conn.exec_drop(
@@ -104,7 +104,7 @@ impl Stock {
     }
 
     pub fn remove_from_godown(&self, godown_id: Uuid) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()?;
 
         conn.exec_drop(
@@ -141,7 +141,7 @@ mod tests {
         let stock = Stock::new(100, 500, "Electronic Components");
         stock.add_to_godown(godown.id).expect("Failed to add stock to godown");
 
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()
             .expect("Failed to connect to database for stock verification");
 
@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(stock.volume_in_size, 120);
         assert_eq!(stock.quantity, 800);
 
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()
             .expect("Failed to connect to database for stock update verification");
 
@@ -205,7 +205,7 @@ mod tests {
 
         stock.remove_from_godown(godown.id).expect("Failed to remove stock");
 
-        let mut conn = DbConnection::new("localhost", 3306, "logistics", "root", "password")
+        let mut conn = DbConnection::from_env()
             .get_connection()
             .expect("Failed to connect to database for stock removal verification");
 

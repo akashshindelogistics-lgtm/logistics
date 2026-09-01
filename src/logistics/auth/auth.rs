@@ -41,7 +41,7 @@ impl OrgCredentials {
 
     pub fn create(org_id: Uuid, org_name: &str, password: &str) -> Result<(), Box<dyn Error>> {
         let password_hash = hash(password, DEFAULT_COST)?;
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
         Self::ensure_table(&mut conn)?;
 
@@ -61,7 +61,7 @@ impl OrgCredentials {
 
     /// Returns org_name on successful verification, None if org not found or password wrong.
     pub fn verify_login(org_id: Uuid, password: &str) -> Result<Option<String>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
         Self::ensure_table(&mut conn)?;
 
@@ -83,7 +83,7 @@ impl OrgCredentials {
     }
 
     pub fn list_summaries() -> Result<Vec<OrgSummary>, Box<dyn Error>> {
-        let db_connection = DbConnection::new("localhost", 3306, "logistics", "root", "password");
+        let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
         Self::ensure_table(&mut conn)?;
 
