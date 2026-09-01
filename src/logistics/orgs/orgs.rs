@@ -424,14 +424,12 @@ impl Organization {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logistics::test_support::reset_database;
-    use serial_test::serial;
+    use crate::logistics::test_support::TestDb;
     use crate::logistics::vehicle::vehicle::Unit;
 
     #[test]
-    #[serial(db)]
     fn test_create_organization() {
-        reset_database();
+        let _db = TestDb::create();
         let test_name = "Flow Logic";
         let test_address = "Shop 60, Market No.1, N.I.T Faridabad, New Delhi";
 
@@ -460,9 +458,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_update_organization() {
-        reset_database();
+        let _db = TestDb::create();
         let org_res = Organization::create_organization("Initial Org Name", "Initial Address");
         assert!(org_res.is_ok(), "Failed to create organization");
 
@@ -495,9 +492,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_update_organization_location() {
-        reset_database();
+        let _db = TestDb::create();
         let mut org = Organization::create_organization("Org Location Test", "Central HQ, Cyber City")
             .expect("Failed to create organization for location test");
 
@@ -537,9 +533,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_dispatch_stock_to_customer_nearest_vehicle() {
-        reset_database();
+        let _db = TestDb::create();
         let mut org = Organization::create_organization("Global Logistics", "Delhi HQ")
             .expect("Failed to create organization");
         org.update_location(28.6139, 77.2090, Some("Delhi HQ")).expect("Failed to update org location");
@@ -595,9 +590,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_remove_organization() {
-        reset_database();
+        let _db = TestDb::create();
         let org_res = Organization::create_organization("Org To Delete", "Delete Address");
         assert!(org_res.is_ok(), "Failed to create organization for removal test");
 

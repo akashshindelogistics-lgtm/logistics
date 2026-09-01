@@ -123,8 +123,7 @@ mod tests {
     use super::*;
     use crate::logistics::godown::godown::Godown;
     use crate::logistics::orgs::orgs::Organization;
-    use crate::logistics::test_support::reset_database;
-    use serial_test::serial;
+    use crate::logistics::test_support::TestDb;
 
     fn make_godown() -> Godown {
         let org = Organization::create_organization("Stock Warehouse Org", "Sector 18, Logistics Hub")
@@ -133,9 +132,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_add_new_stock() {
-        reset_database();
+        let _db = TestDb::create();
         let godown = make_godown();
 
         let stock = Stock::new(100, 500, "Electronic Components");
@@ -164,9 +162,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_update_stock() {
-        reset_database();
+        let _db = TestDb::create();
         let godown = make_godown();
 
         let mut stock = Stock::new(50, 200, "Raw Aluminum Sheets");
@@ -195,9 +192,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_remove_stock() {
-        reset_database();
+        let _db = TestDb::create();
         let godown = make_godown();
 
         let stock = Stock::new(30, 150, "Steel Rods");

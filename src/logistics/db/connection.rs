@@ -1,8 +1,69 @@
 use mysql::prelude::*;
 use mysql::*;
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
-static DB_POOL: OnceLock<Pool> = OnceLock::new();
+/// Pools, keyed by database name. `host`/`port`/`username`/`password` are
+/// constant for a process (they come from one set of env vars), so the
+/// database name is the only axis tests vary — see [`TestDb`] in
+/// `test_support.rs` and `docs/testing-database.md` (Phase 3).
+static POOLS: OnceLock<Mutex<HashMap<String, Pool>>> = OnceLock::new();
+
+fn pools() -> &'static Mutex<HashMap<String, Pool>> {
+    POOLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Lock the pool registry, recovering from poisoning instead of panicking.
+///
+/// A poisoned `Mutex` normally means "some other thread panicked while
+/// holding this lock, the data might be in a torn state" — but the only
+/// thing ever mutated under this lock is a `HashMap<String, Pool>` via
+/// `insert`/`remove`/`get`, so even a panic mid-mutation leaves nothing
+/// worse than a missing entry, which the caller already handles (it just
+/// creates the pool again). Under `cargo test`'s default parallelism, many
+/// [`TestDb`]-backed pools can be created at once; if any single one fails
+/// (e.g. MySQL's connection limit), unwrapping a poisoned lock instead of
+/// recovering it would cascade that one failure into every other test that
+/// happens to touch the registry afterwards, including ones already
+/// unwinding from an unrelated panic — which aborts the whole process
+/// (a second panic inside a `Drop` run during unwinding is not allowed to
+/// unwind itself).
+fn lock_pools() -> std::sync::MutexGuard<'static, HashMap<String, Pool>> {
+    pools()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test-only override of the database name [`DbConfig::from_env`]
+    /// resolves to on the calling thread. Set by [`TestDb::create`] so a
+    /// test can target its own private, uniquely-named database without
+    /// mutating process-wide environment variables — which would race every
+    /// other test thread reading them concurrently under `cargo test`'s
+    /// default parallelism.
+    static TEST_DB_OVERRIDE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_db_override(name: Option<String>) {
+    TEST_DB_OVERRIDE.with(|cell| *cell.borrow_mut() = name);
+}
+
+#[cfg(test)]
+fn test_db_override() -> Option<String> {
+    TEST_DB_OVERRIDE.with(|cell| cell.borrow().clone())
+}
+
+/// Drop a database's pool from the registry, closing its connections. Used
+/// by [`TestDb`]'s `Drop` impl once it has dropped the database itself, so a
+/// long test run doesn't accumulate one live `Pool` per test forever.
+#[cfg(test)]
+pub(crate) fn drop_pool(db_name: &str) {
+    if POOLS.get().is_some() {
+        lock_pools().remove(db_name);
+    }
+}
 
 /// Connection settings resolved from the environment.
 ///
@@ -17,8 +78,9 @@ static DB_POOL: OnceLock<Pool> = OnceLock::new();
 /// Under `cfg(test)` the database-name default is `logistics_test` instead
 /// of `logistics`, so `cargo test` never reads or truncates a developer's
 /// dev database when no env vars are set. CI (`periodic-tests.yml`) sets
-/// `MYSQL_DATABASE=logistics_test` explicitly for the same reason. See
-/// `docs/testing-database.md` (Phase 2).
+/// `MYSQL_DATABASE=logistics_test` explicitly for the same reason. A test
+/// running under a [`TestDb`] guard gets its own database name in place of
+/// either of these — see `docs/testing-database.md` (Phases 2 and 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbConfig {
     pub host: String,
@@ -30,6 +92,21 @@ pub struct DbConfig {
 
 impl DbConfig {
     pub fn from_env() -> Self {
+        let cfg = Self::resolve_from_env();
+
+        #[cfg(test)]
+        let cfg = {
+            let mut cfg = cfg;
+            if let Some(name) = test_db_override() {
+                cfg.db_name = name;
+            }
+            cfg
+        };
+
+        cfg
+    }
+
+    fn resolve_from_env() -> Self {
         if let Ok(url) = std::env::var("DATABASE_URL") {
             match Self::parse_database_url(&url) {
                 Some(cfg) => return cfg,
@@ -63,7 +140,7 @@ impl DbConfig {
     /// on anything that doesn't fit that shape (missing scheme, missing
     /// db name, unparsable port, ...) rather than panicking, so a malformed
     /// `DATABASE_URL` degrades to the `MYSQL_*` / hardcoded fallback in
-    /// [`Self::from_env`].
+    /// [`Self::resolve_from_env`].
     fn parse_database_url(url: &str) -> Option<Self> {
         let rest = url.strip_prefix("mysql://")?;
         let (userinfo, hostinfo) = rest.split_once('@')?;
@@ -128,28 +205,62 @@ impl DbConnection {
         DbConfig::from_env().connection()
     }
 
+    /// Get a pooled connection to `self.db_name`, creating both the
+    /// database and its pool on first use.
+    ///
+    /// Pools are cached in a registry keyed by database name (see
+    /// [`POOLS`]) rather than behind one process-global `OnceLock<Pool>`, so
+    /// concurrently running tests — each with their own [`TestDb`] — get
+    /// independent pools instead of contending for one.
     pub fn get_connection(&self) -> Result<PooledConn, Box<dyn std::error::Error>> {
-        let pool = DB_POOL.get_or_init(|| {
-            let root_url = format!(
-                "mysql://{}:{}@{}:{}",
-                self.username, self.password, self.host, self.port
-            );
-            if let Ok(p) = Pool::new(root_url.as_str()) {
-                if let Ok(mut conn) = p.get_conn() {
-                    let _ = conn
-                        .query_drop(format!("CREATE DATABASE IF NOT EXISTS `{}`", self.db_name));
-                }
+        let mut pools = lock_pools();
+        if let Some(pool) = pools.get(&self.db_name) {
+            return Ok(pool.get_conn()?);
+        }
+
+        let root_url = format!(
+            "mysql://{}:{}@{}:{}",
+            self.username, self.password, self.host, self.port
+        );
+        if let Ok(p) = build_pool(&root_url) {
+            if let Ok(mut conn) = p.get_conn() {
+                let _ =
+                    conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS `{}`", self.db_name));
             }
+        }
 
-            let url = format!(
-                "mysql://{}:{}@{}:{}/{}",
-                self.username, self.password, self.host, self.port, self.db_name
-            );
-            Pool::new(url.as_str()).expect("Failed to initialize MySQL pool")
-        });
-
+        let url = format!(
+            "mysql://{}:{}@{}:{}/{}",
+            self.username, self.password, self.host, self.port, self.db_name
+        );
+        let pool = build_pool(&url)?;
         let conn = pool.get_conn()?;
+        pools.insert(self.db_name.clone(), pool);
         Ok(conn)
+    }
+}
+
+/// Build a `Pool` for `url`.
+///
+/// Under `cfg(test)` this caps the pool at a handful of connections instead
+/// of the `mysql` crate's default (min 10, max 100): [`DbConnection`] mints
+/// one `Pool` per database, and tests mint one database each via
+/// [`TestDb`], so under `cargo test`'s default per-core parallelism the
+/// default constraints alone can exceed MySQL's default `max_connections`
+/// (151) — each test typically holds one connection at a time, so a small
+/// cap is still generous.
+fn build_pool(url: &str) -> Result<Pool, mysql::Error> {
+    #[cfg(test)]
+    {
+        let opts = mysql::OptsBuilder::from_opts(mysql::Opts::from_url(url)?).pool_opts(
+            mysql::PoolOpts::default()
+                .with_constraints(mysql::PoolConstraints::new(1, 4).expect("1 <= 4")),
+        );
+        Pool::new(opts)
+    }
+    #[cfg(not(test))]
+    {
+        Pool::new(url)
     }
 }
 
@@ -173,6 +284,14 @@ mod tests {
         // to for this run (CI sets MYSQL_DATABASE=logistics_test explicitly).
         let cfg = DbConfig::from_env();
         assert_ne!(cfg.db_name, "logistics");
+    }
+
+    #[test]
+    fn from_env_honours_the_test_db_override() {
+        set_test_db_override(Some("logistics_test_override_probe".to_string()));
+        let cfg = DbConfig::from_env();
+        set_test_db_override(None);
+        assert_eq!(cfg.db_name, "logistics_test_override_probe");
     }
 
     #[test]

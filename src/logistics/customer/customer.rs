@@ -174,13 +174,11 @@ impl Customer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logistics::test_support::reset_database;
-    use serial_test::serial;
+    use crate::logistics::test_support::TestDb;
 
     #[test]
-    #[serial(db)]
     fn test_create_and_update_customer() {
-        reset_database();
+        let _db = TestDb::create();
         let customer_res = Customer::create_customer("Acme Retail Corp", "100 Market St, Mumbai");
         assert!(customer_res.is_ok(), "Failed to create customer");
 

@@ -1,7 +1,9 @@
 # Plan: MySQL test database flushing & isolation
 
-Status: **proposal** — tracked by the `[#B]` item in `todo.org`
-("Need to plan for MySql test database flushing").
+Status: **all three phases done** — tracked by the `[#B]` item in `todo.org`
+("Need to plan for MySql test database flushing"). The problem statement and
+options below describe the state before Phase 1; see each phase's section
+for what actually shipped.
 
 ## Problem
 
@@ -124,23 +126,60 @@ hardcoded defaults. Verified locally by pointing `MYSQL_DATABASE` and,
 separately, `DATABASE_URL` at scratch databases and confirming
 `cargo test` connects to and migrates each one.
 
-### Phase 3 — database-per-test, restore parallelism *(optional, larger)*
+### Phase 3 — database-per-test, restore parallelism — **DONE**
 
-1. Replace the single `static OnceLock<Pool>` with a small registry
-   (`Mutex<HashMap<String, Pool>>` keyed by database name) or a thread-local
-   override, so different tests can target different databases in one process.
-2. A test fixture guard:
-   ```rust
-   let db = TestDb::create();          // CREATE DATABASE logistics_test_<uuid>; migrate()
-   // ... use db.config() for connections ...
-   // Drop for TestDb runs: DROP DATABASE logistics_test_<uuid>;
-   ```
-3. Drop `#[serial]`; tests run in parallel again, each fully isolated.
-4. A CI/local cleanup step drops any leftover `logistics_test_%` databases from
-   crashed runs.
+Implemented as planned, with one addition the plan didn't anticipate:
 
-This is the "correct" end state but depends on the Phase 1 `migrate()`
-extraction and the Phase 2 config plumbing, so it is sequenced last.
+1. `src/logistics/db/connection.rs`'s single `static DB_POOL: OnceLock<Pool>`
+   became `static POOLS: OnceLock<Mutex<HashMap<String, Pool>>>`, keyed by
+   database name — `DbConnection::get_connection()` fetches or creates the
+   pool for `self.db_name` instead of every call site sharing one pool bound
+   to whichever database happened to initialize it first.
+2. Rather than passing a `DbConfig` through every function (it would have
+   touched every call site across the domain modules a second time), a
+   `#[cfg(test)]` thread-local override does the job: `TestDb::create()`
+   (`src/logistics/test_support.rs`) generates a `logistics_test_<uuid>`
+   name, calls `connection::set_test_db_override(Some(name))`, migrates the
+   new database, and returns a guard. Every `DbConnection::from_env()` call
+   made on that thread afterwards resolves to it. This is safe under
+   `cargo test`'s default parallelism because libtest gives each `#[test]`
+   its own OS thread, and `#[actix_web::test]` runs its whole async body on
+   a single-threaded executor pinned to that same thread (`actix_rt::System
+   ::new().block_on(...)`), so the override holds across every `.await`
+   too — confirmed empirically, not just by reading the executor source.
+   `Drop for TestDb` drops the database, evicts its pool from the registry,
+   and clears the override.
+3. All ~90 tests that called `reset_database()` under `#[serial_test::serial
+   (db)]` now start with `let _db = TestDb::create();` instead, with no
+   `#[serial]` — `cargo test` runs at full parallelism. The `serial_test`
+   dev-dependency was removed as a result.
+4. Not implemented: an automated cleanup step for `logistics_test_%`
+   databases orphaned by a crashed run (a hard process abort, not a normal
+   panic — `Drop` still runs on a panic unwind, so an assertion failure
+   alone does not leak one). Left as manual (`DROP DATABASE`) since the
+   plan's own local/CI cleanup step turned out to be unnecessary for the
+   common case.
+
+**The addition the plan missed:** minting one `Pool` per test (up to
+`nproc` of them at once, each with the `mysql` crate's default `min: 10,
+max: 100` connection bounds) exceeded MySQL's default `max_connections`
+(151) well before 20 tests were even running concurrently, which surfaced
+as a `Mutex` poisoned by one test's connection failure aborting *every*
+other test whose `TestDb::drop()` touched the registry afterwards — a
+poisoned-lock panic inside a `Drop` that runs during an unrelated panic's
+unwind is a double panic, which Rust turns into a process abort rather than
+a normal test failure. Fixed by (a) capping pool size to `(1, 4)` under
+`cfg(test)` — each test only ever needs one or two connections at a time —
+and (b) having the registry's lock recover from poisoning
+(`.unwrap_or_else(|poisoned| poisoned.into_inner())`) instead of
+propagating it, since the only state behind that lock is a `HashMap` that
+tolerates a torn insert/remove just fine.
+
+Verified against a live MySQL: `cargo test --all` — 106 tests, 0 failures,
+in ~11-14s at default (`nproc`-wide) parallelism, down from ~50-55s
+serialized in Phase 1/2; repeated across three consecutive full runs with
+no flakiness; confirmed no `logistics_test_%` databases or extra
+`Threads_connected` were left behind after a clean run.
 
 ## Immediate next step
 
