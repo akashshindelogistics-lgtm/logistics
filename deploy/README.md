@@ -87,15 +87,18 @@ After the first backend deploy, either:
    may take ~30s to obtain the first certificate).
 4. Open the Pages URL, register an org, log in.
 
-## ARM note
+## Architecture note
 
-Oracle's free VMs are ARM64. `docker/build-push-action` in `deploy-backend.yml`
-builds `linux/amd64` by default. Either:
-- add `platforms: linux/arm64` to the build step (slower — uses QEMU emulation
-  in CI), **or**
-- add `linux/amd64,linux/arm64` for a multi-arch image, **or**
-- pick an x86 "Always Free" `VM.Standard.E2.1.Micro` instead (only 1 GB RAM —
-  give MySQL a tight buffer pool).
+Oracle's free Ampere VMs are ARM64, so `deploy-backend.yml` builds a
+single-arch `linux/arm64` image on GitHub's native `ubuntu-24.04-arm` runner
+(free for public repos). Cross-building this crate for arm64 under QEMU
+emulation crashes rustc, so emulation is avoided entirely.
+
+If you deploy to an x86 box instead (e.g. the `VM.Standard.E2.1.Micro` free
+tier — 1 GB RAM, give MySQL a tight `innodb_buffer_pool_size`), switch the
+runner back to `ubuntu-24.04` and the platform to `linux/amd64`. For both,
+use a matrix over the two native runners and merge with
+`docker buildx imagetools create` — never a single QEMU multi-arch build.
 
 ## Local production-style run
 
