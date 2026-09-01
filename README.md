@@ -6,14 +6,17 @@
 
 [![Periodic Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml)
 
-[![Swagger UI — Validate & Deploy to GitHub Pages](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/swagger-pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/swagger-pages.yml)
+[![Pages — Deploy Frontend + Swagger UI](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml)
+
+[![Deploy Backend](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/deploy-backend.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/deploy-backend.yml)
 
 A logistics management platform for tracking organizations, their vehicle
 fleets, stock, customers, and delivery dispatches. It ships as a Rust REST
 API backed by MySQL, with a React + TypeScript dashboard for day-to-day
 operations, live location maps, and AI-generated dispatch summaries.
 
-📖 **Live API docs (Swagger UI):** <https://akashshindelogistics-lgtm.github.io/logistics/>
+📖 **Live dashboard:** <https://akashshindelogistics-lgtm.github.io/logistics/>
+&nbsp;·&nbsp; **API docs (Swagger UI):** <https://akashshindelogistics-lgtm.github.io/logistics/api-docs/>
 
 ## Features
 
@@ -35,10 +38,11 @@ operations, live location maps, and AI-generated dispatch summaries.
   passwords.
 - **Interactive API docs** — a Swagger UI generated from the API with
   `utoipa`, auto-deployed to
-  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/) on
-  every push to `main`/`master`.
+  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/api-docs/)
+  on every push to `main`/`master`.
 - **Web dashboard** — a React frontend for organizations, vehicles, stock,
-  customers, and dispatches, including a live Leaflet map of locations.
+  customers, and dispatches, including a live Leaflet map of locations,
+  deployed alongside the docs on GitHub Pages.
 
 ## Tech stack
 
@@ -145,7 +149,7 @@ npm run test:e2e
 ## API overview
 
 Key REST endpoints exposed by the server (see the
-[published Swagger UI](https://akashshindelogistics-lgtm.github.io/logistics/)
+[published Swagger UI](https://akashshindelogistics-lgtm.github.io/logistics/api-docs/)
 for the full spec, request/response schemas, and try-it-out support):
 
 | Method | Path | Description |
@@ -171,17 +175,28 @@ for the full spec, request/response schemas, and try-it-out support):
 | GET | `/dispatches/{id}/summary` | AI-generated summary of a dispatch |
 | GET | `/health` | Health check |
 
-The published Swagger UI (see CI/CD below) has "Try it out" enabled and its
-OpenAPI spec declares `http://127.0.0.1:8080` as the server, so if you run
-the backend locally (`cargo run`), you can exercise the live API straight
-from the hosted docs — the server enables permissive CORS for this. There
-is no publicly hosted backend yet, so this only works against a local
-instance.
+The published Swagger UI (see CI/CD below) has "Try it out" enabled and the
+server enables permissive CORS, so it can call the deployed API directly.
+Run the backend locally with `cargo run` to exercise it against a local
+instance instead.
+
+## Deployment
+
+Free-tier hosting: the frontend + Swagger UI on **GitHub Pages**, the Rust
+API + MySQL on an **Oracle Cloud "Always Free"** VM (`docker compose` —
+Caddy for auto-HTTPS, plus a DuckDNS updater), both rolled out by GitHub
+Actions. Full runbook in [`deploy/README.md`](deploy/README.md).
 
 ## CI/CD
 
 GitHub Actions workflows in `.github/workflows/`:
 
+- **pages.yml** — builds the React dashboard, validates the OpenAPI spec,
+  and deploys both to
+  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/)
+  (app at `/`, Swagger UI at `/api-docs/`) on push to `main`/`master`.
+- **deploy-backend.yml** — builds the API container, pushes it to GHCR, and
+  SSHes into the Oracle VM to roll it out with `docker compose`.
 - **swagger-pages.yml** — validates the OpenAPI spec and deploys the
   Swagger UI to
   [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/) on
