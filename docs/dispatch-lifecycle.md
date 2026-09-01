@@ -18,7 +18,9 @@ PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED
 - `PENDING` — the order is recorded, stock is reserved and a vehicle is
   selected (this all still happens synchronously in
   `Organization::dispatch_stock_to_customer`), but nothing has physically
-  moved.
+  moved. Only vehicles with an **active assigned driver** are eligible for
+  selection; if the org has none, dispatch is rejected before a `PENDING`
+  order is created.
 - `CONFIRMED` — ops has confirmed the order will be fulfilled as booked.
 - `LOADED` — stock has been physically loaded onto the assigned vehicle.
 - `IN_TRANSIT` — the vehicle has left for the delivery address.

@@ -24,6 +24,9 @@ operations, live location maps, and AI-generated dispatch summaries.
   location, vehicles, stock, and customers.
 - **Vehicles** — register vehicles per organization and track their live
   location.
+- **Drivers** — keep driver records (name, licence number, phone) per
+  organization and assign one to a vehicle. A vehicle needs an **active**
+  assigned driver before it can be selected for a dispatch.
 - **Stock** — add, update, and remove stock items held by an organization.
 - **Customers** — manage customer records and their delivery locations.
 - **Dispatches** — create dispatch orders that move stock from an
@@ -73,6 +76,7 @@ operations, live location maps, and AI-generated dispatch summaries.
 │   │   ├── customer/    # Customer domain model
 │   │   ├── db/          # Database connection setup
 │   │   ├── dispatch/    # Dispatch order domain model
+│   │   ├── driver/      # Driver domain model
 │   │   ├── orgs/        # Organization domain model
 │   │   ├── server/      # Actix routes and API wiring
 │   │   ├── stock/       # Stock domain model
@@ -167,6 +171,9 @@ for the full spec, request/response schemas, and try-it-out support):
 | POST | `/orgs/{id}/vehicles` | Add a vehicle to an organization |
 | GET/DELETE | `/vehicles`, `/vehicles/{reg}` | List vehicles / remove one |
 | PUT | `/vehicles/{reg}/location` | Update a vehicle's location |
+| PUT | `/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
+| GET/POST | `/drivers`, `/orgs/{id}/drivers` | List / add drivers |
+| PUT/DELETE | `/drivers/{id}` | Update (incl. active flag) or remove a driver |
 | GET/POST | `/customers` | List / create customers |
 | PUT | `/customers/{id}/location` | Update a customer's location |
 | POST | `/orgs/{id}/dispatch` | Dispatch stock from an org to a customer |

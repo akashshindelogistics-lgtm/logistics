@@ -28,7 +28,14 @@
 ** DONE Require proof of delivery (receiver name, signature or photo, delivery timestamp) before a dispatch can be marked DELIVERED
    Plan written: [[file:docs/dispatch-lifecycle.md]]
    DispatchOrder::transition_to now rejects a DELIVERED move without a ProofOfDeliveryInput (receiver_name + signature_or_photo_url); RETURNED has no such gate. Stored insert-only in a new DispatchProofOfDelivery table (dispatch_id PK), delivered_at stamped server-side same as the status-history entry, not caller-supplied. Exposed via PUT /api/dispatches/{id}/status's optional proof_of_delivery payload field and DispatchOrder.proof_of_delivery on responses. 8 new tests (4 in dispatch.rs, 4 route-level covering the missing-proof 400, the happy path, and that an illegal jump is still rejected even with proof attached).
-** TODO [#B] Add a Driver entity (name, license number, phone) and require an active driver to be assigned to a vehicle before that vehicle can be selected for dispatch
+** DONE [#B] Add a Driver entity (name, license number, phone) and require an active driver to be assigned to a vehicle before that vehicle can be selected for dispatch
+   Driver model (id, org_id, name, license_number, phone, is_active) with
+   CRUD routes (GET /api/drivers, POST /api/orgs/{id}/drivers, PUT/DELETE
+   /api/drivers/{id}). Vehicle gains assigned_driver_id, set via
+   PUT /api/vehicles/{reg}/driver (rejects a driver from another org).
+   dispatch_stock_to_customer now only considers vehicles JOINed to an
+   is_active driver; with none it returns a 400 telling the caller to
+   assign one. Deleting a driver clears the assignment. UI not updated.
 ** TODO [#B] Check the requested stock's volume/quantity against the selected vehicle's capacity before dispatch, and mark a vehicle unavailable while it has an active trip so `dispatch_stock_to_customer` can't double-book the same truck onto two orders at once
 ** TODO Allow one dispatch to carry multiple stock line items - today `dispatch_stock_to_customer` takes a single `stock_description`, but a real shipment usually mixes several SKUs in one trip
 ** TODO Support stock transfer between two godowns of the same org (distinct from dispatch-to-customer), with an audit trail of the move
