@@ -1,0 +1,201 @@
+name: Pages — Deploy Frontend + Swagger UI
+
+# One GitHub Pages site for the repo:
+#   /                 → the React dashboard (Vite build)
+#   /api-docs/        → Swagger UI for the REST API
+#
+# Replaces the old swagger-only workflow. GitHub Pages must be set to
+# "GitHub Actions" as its source once: Repo → Settings → Pages.
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ────────────────────────────────────────────────────────
+  # Generate + validate the OpenAPI spec (no MySQL needed)
+  # ────────────────────────────────────────────────────────
+  validate-swagger:
+    name: Validate OpenAPI spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Generate OpenAPI spec JSON
+        run: cargo run --bin gen_openapi --release > openapi.json
+
+      - name: Validate OpenAPI JSON is well-formed
+        run: |
+          python3 -c "
+          import json, sys
+          spec = json.load(open('openapi.json'))
+          paths = spec.get('paths', {})
+          print(f'OpenAPI {spec[\"openapi\"]} — {len(paths)} paths')
+          expected = [
+              '/api/health', '/api/orgs', '/api/orgs/{id}', '/api/orgs/{id}/location',
+              '/api/orgs/{id}/vehicles', '/api/orgs/{id}/godowns', '/api/godowns/{gid}',
+              '/api/godowns/{gid}/location', '/api/godowns/{gid}/stock',
+              '/api/godowns/{gid}/stock/{desc}', '/api/orgs/{id}/dispatch',
+              '/api/dispatches/{id}/status', '/api/vehicles/{reg}/location',
+              '/api/vehicles/{reg}', '/api/customers', '/api/customers/{id}/location',
+          ]
+          missing = [p for p in expected if p not in paths]
+          if missing:
+              print('MISSING paths:', missing, file=sys.stderr); sys.exit(1)
+          print('All expected API paths present ✅')
+          "
+
+      - name: Upload openapi.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: openapi.json
+          retention-days: 1
+
+  # ────────────────────────────────────────────────────────
+  # Build the React dashboard
+  # ────────────────────────────────────────────────────────
+  build-frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        env:
+          # Served from https://<owner>.github.io/<repo>/ — the repo name is the base path.
+          VITE_BASE: /${{ github.event.repository.name }}/
+          # Repo variable: Settings → Secrets and variables → Actions → Variables.
+          # e.g. https://logi-api.duckdns.org/api
+          VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          if [ -z "$VITE_API_BASE_URL" ]; then
+            echo "::error::Repository variable API_BASE_URL is not set — the built app would call the wrong origin."
+            exit 1
+          fi
+          npm run build
+          # SPA fallback: unknown deep links 404 on Pages otherwise.
+          cp dist/index.html dist/404.html
+
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 1
+
+  # ────────────────────────────────────────────────────────
+  # Assemble the site and deploy
+  # ────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [validate-swagger, build-frontend]
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: ./site
+
+      - name: Download OpenAPI spec
+        uses: actions/download-artifact@v4
+        with:
+          name: openapi-spec
+          path: ./site/api-docs
+
+      - name: Add Swagger UI page
+        run: |
+          cat > ./site/api-docs/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>Logistics System API — Swagger UI</title>
+            <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+            <link rel="icon" href="https://unpkg.com/swagger-ui-dist@5/favicon-32x32.png" sizes="32x32" />
+            <style>
+              body { font-family: 'Inter', system-ui, sans-serif; background: #0f1117; margin: 0; }
+              #header { background: linear-gradient(135deg, #1a1d2e, #0f3460); padding: 24px 32px; }
+              #header h1 { color: #fff; font-size: 22px; margin: 0; }
+              #header p { color: rgba(255,255,255,0.55); font-size: 13px; margin: 4px 0 0; }
+              .swagger-ui .topbar { display: none; }
+            </style>
+          </head>
+          <body>
+            <div id="header">
+              <h1>🚚 Logistics System API</h1>
+              <p>Rust · Actix-Web · MySQL — Interactive REST API Documentation</p>
+            </div>
+            <div id="swagger-ui"></div>
+            <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+            <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+            <script>
+              window.onload = () => SwaggerUIBundle({
+                url: './openapi.json',
+                dom_id: '#swagger-ui',
+                presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+                layout: 'StandaloneLayout',
+                deepLinking: true,
+                tryItOutEnabled: true,
+              });
+            </script>
+          </body>
+          </html>
+          HTMLEOF
+          # Pages' default Jekyll processing would drop files it considers special; skip it.
+          touch ./site/.nojekyll
+          find ./site -maxdepth 2 -type f | sort
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
