@@ -63,6 +63,11 @@ pub struct Vehicle {
     pub capacity: i64,
     pub unit: Unit,
     pub location: Option<Location>,
+    /// The driver currently assigned to this vehicle, if any. A vehicle
+    /// can only be selected for a dispatch when this is set and the driver
+    /// is active. Managed through `PUT /api/vehicles/{reg}/driver`.
+    #[serde(default)]
+    pub assigned_driver_id: Option<Uuid>,
 }
 
 impl Vehicle {
@@ -72,7 +77,27 @@ impl Vehicle {
             capacity,
             unit,
             location: None,
+            assigned_driver_id: None,
         }
+    }
+
+    /// Assign a driver to this vehicle, or clear the assignment with `None`.
+    /// The caller is responsible for checking the driver belongs to the same
+    /// org and (if it matters) is active.
+    pub fn assign_driver(&mut self, driver_id: Option<Uuid>) -> Result<(), Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+
+        conn.exec_drop(
+            "UPDATE Vehicle SET assigned_driver_id = :driver_id WHERE registration_number = :registration_number",
+            params! {
+                "registration_number" => &self.registration_number,
+                "driver_id" => driver_id.map(|d| d.to_string()),
+            },
+        )?;
+
+        self.assigned_driver_id = driver_id;
+        Ok(())
     }
 
     pub fn add_new_vehicle_to_org(&self, org: &Organization) -> Result<(), Box<dyn Error>> {
@@ -86,6 +111,7 @@ impl Vehicle {
                 capacity BIGINT NOT NULL,
                 unit VARCHAR(50) NOT NULL,
                 org_id VARCHAR(36) NOT NULL,
+                assigned_driver_id VARCHAR(36) DEFAULT NULL,
                 latitude DOUBLE DEFAULT NULL,
                 longitude DOUBLE DEFAULT NULL,
                 last_updated_at BIGINT DEFAULT NULL,
@@ -194,6 +220,7 @@ impl Vehicle {
                 capacity BIGINT NOT NULL,
                 unit VARCHAR(50) NOT NULL,
                 org_id VARCHAR(36) NOT NULL,
+                assigned_driver_id VARCHAR(36) DEFAULT NULL,
                 latitude DOUBLE DEFAULT NULL,
                 longitude DOUBLE DEFAULT NULL,
                 last_updated_at BIGINT DEFAULT NULL,
@@ -203,15 +230,15 @@ impl Vehicle {
             (),
         )?;
 
-        let rows: Vec<(String, i64, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, latitude, longitude, last_updated_at, location_address FROM Vehicle",
+        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address FROM Vehicle",
             (),
-            |(reg, cap, unit_str, lat, lng, ts, addr)| (reg, cap, unit_str, lat, lng, ts, addr),
+            |(reg, cap, unit_str, driver, lat, lng, ts, addr)| (reg, cap, unit_str, driver, lat, lng, ts, addr),
         )?;
 
         let vehicles = rows
             .into_iter()
-            .map(|(reg, cap, unit_str, lat, lng, ts, addr)| {
+            .map(|(reg, cap, unit_str, driver, lat, lng, ts, addr)| {
                 let location = lat.map(|latitude| Location {
                     latitude,
                     longitude: lng.unwrap_or(0.0),
@@ -223,6 +250,7 @@ impl Vehicle {
                     capacity: cap,
                     unit: Unit::from_str(&unit_str),
                     location,
+                    assigned_driver_id: driver.and_then(|d| Uuid::parse_str(&d).ok()),
                 }
             })
             .collect();
@@ -234,15 +262,15 @@ impl Vehicle {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
-        let rows: Vec<(String, i64, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, latitude, longitude, last_updated_at, location_address FROM Vehicle WHERE org_id = :org_id",
+        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address FROM Vehicle WHERE org_id = :org_id",
             params! { "org_id" => org_id.to_string() },
-            |(reg, cap, unit_str, lat, lng, ts, addr)| (reg, cap, unit_str, lat, lng, ts, addr),
+            |(reg, cap, unit_str, driver, lat, lng, ts, addr)| (reg, cap, unit_str, driver, lat, lng, ts, addr),
         )?;
 
         Ok(rows
             .into_iter()
-            .map(|(reg, cap, unit_str, lat, lng, ts, addr)| {
+            .map(|(reg, cap, unit_str, driver, lat, lng, ts, addr)| {
                 let location = lat.map(|latitude| Location {
                     latitude,
                     longitude: lng.unwrap_or(0.0),
@@ -254,6 +282,7 @@ impl Vehicle {
                     capacity: cap,
                     unit: Unit::from_str(&unit_str),
                     location,
+                    assigned_driver_id: driver.and_then(|d| Uuid::parse_str(&d).ok()),
                 }
             })
             .collect())

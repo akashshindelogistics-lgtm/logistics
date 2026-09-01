@@ -7,7 +7,8 @@ import * as orgsApi from '../api/orgs';
 import * as vehiclesApi from '../api/vehicles';
 import * as customersApi from '../api/customers';
 import * as godownsApi from '../api/godowns';
-import type { Customer, Organization } from '../types';
+import * as driversApi from '../api/drivers';
+import type { Customer, Driver, Organization } from '../types';
 
 vi.mock('react-router-dom', async importOriginal => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
@@ -17,6 +18,7 @@ vi.mock('../api/orgs');
 vi.mock('../api/vehicles');
 vi.mock('../api/customers');
 vi.mock('../api/godowns');
+vi.mock('../api/drivers');
 vi.mock('../components/LocationMap', () => ({
   default: ({ pins }: { pins: unknown[] }) => <div data-testid="map">{pins.length} pins</div>,
 }));
@@ -36,9 +38,14 @@ function org(overrides: Partial<Organization> = {}): Organization {
 
 const customer: Customer = { id: 'c1', name: 'TechHub Stores', address: '5 Market St' };
 
-function mockLoad(orgValue: Organization | null, customers: Customer[] = [customer]) {
+function mockLoad(
+  orgValue: Organization | null,
+  customers: Customer[] = [customer],
+  drivers: Driver[] = [],
+) {
   vi.mocked(orgsApi.getOrg).mockResolvedValue(ok(orgValue ?? undefined));
   vi.mocked(customersApi.listCustomers).mockResolvedValue(ok(customers));
+  vi.mocked(driversApi.listDrivers).mockResolvedValue(ok(drivers));
 }
 
 function renderPage() {
@@ -46,7 +53,12 @@ function renderPage() {
 }
 
 describe('OrganizationDetail page', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    // Every render calls listDrivers(); default it so tests that don't care
+    // about drivers don't have to mock it.
+    vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it('shows a not-found state when the org cannot be loaded', async () => {
@@ -171,5 +183,39 @@ describe('OrganizationDetail page', () => {
 
     expect(vehiclesApi.deleteVehicle).toHaveBeenCalledWith('MH01AB1234');
     await waitFor(() => expect(screen.queryByText('MH01AB1234')).not.toBeInTheDocument());
+  });
+
+  it('lists drivers and adds one through the inline form', async () => {
+    const user = userEvent.setup();
+    mockLoad(org(), [customer], [
+      { id: 'd1', org_id: 'o1', name: 'Ravi Kumar', license_number: 'DL-1', phone: '111', is_active: true },
+    ]);
+    vi.mocked(driversApi.addDriver).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    expect(await screen.findByText('Ravi Kumar')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Driver Name'), 'Sunita Rao');
+    await user.type(screen.getByLabelText('Licence Number'), 'MH-9');
+    await user.type(screen.getByLabelText('Phone'), '+91 99999 00000');
+    await user.click(screen.getByRole('button', { name: /add driver/i }));
+
+    expect(driversApi.addDriver).toHaveBeenCalledWith('o1', 'Sunita Rao', 'MH-9', '+91 99999 00000');
+  });
+
+  it('assigns a driver to a vehicle from the fleet table', async () => {
+    const user = userEvent.setup();
+    mockLoad(
+      org({ vehicles: [{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }] }),
+      [customer],
+      [{ id: 'd1', org_id: 'o1', name: 'Ravi Kumar', license_number: 'DL-1', phone: '111', is_active: true }],
+    );
+    vi.mocked(driversApi.assignVehicleDriver).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    const select = await screen.findByLabelText('Driver for MH01AB1234');
+    await user.selectOptions(select, 'd1');
+
+    expect(driversApi.assignVehicleDriver).toHaveBeenCalledWith('MH01AB1234', 'd1');
   });
 });

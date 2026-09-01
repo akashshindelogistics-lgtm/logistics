@@ -66,6 +66,17 @@ fn ensure_proof_of_delivery_table(conn: &mut mysql::PooledConn) -> Result<(), Bo
     Ok(())
 }
 
+/// Create every dispatch-related table if it does not exist. Useful for
+/// callers that query `Dispatches` before any dispatch has ever been saved
+/// (e.g. the vehicle-availability check in
+/// [`Organization::dispatch_stock_to_customer`](crate::logistics::orgs::orgs::Organization::dispatch_stock_to_customer)).
+pub fn ensure_tables(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    ensure_dispatches_table(conn)?;
+    ensure_status_history_table(conn)?;
+    ensure_proof_of_delivery_table(conn)?;
+    Ok(())
+}
+
 /// A dispatch's place in its lifecycle, from order creation to a final
 /// outcome. Modeled as a linear-with-branches state machine (see
 /// [`Self::can_transition_to`]) rather than a free-form string so an invalid

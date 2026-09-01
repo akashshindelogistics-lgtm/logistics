@@ -10,6 +10,16 @@ export interface Vehicle {
   capacity: number;
   unit: 'MetricTon';
   location?: Location;
+  assigned_driver_id?: string | null;
+}
+
+export interface Driver {
+  id: string;
+  org_id: string;
+  name: string;
+  license_number: string;
+  phone: string;
+  is_active: boolean;
 }
 
 export interface Stock {

@@ -5,6 +5,7 @@ use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::{
     DispatchOrder, DispatchStatus, DispatchStatusEvent, ProofOfDelivery, ProofOfDeliveryInput,
 };
+use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::stock::stock::Stock;
@@ -142,6 +143,30 @@ pub struct CreateCustomerPayload {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct CreateDriverPayload {
+    pub name: String,
+    pub license_number: String,
+    pub phone: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct UpdateDriverPayload {
+    pub name: String,
+    pub license_number: String,
+    pub phone: String,
+    /// Whether the driver is available to run a trip. A vehicle whose
+    /// assigned driver is inactive cannot be selected for dispatch.
+    pub is_active: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct AssignDriverPayload {
+    /// Driver to assign to the vehicle, or `null` to clear the assignment.
+    #[serde(default)]
+    pub driver_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct DispatchRequestPayload {
     pub customer_id: Uuid,
     pub stock_description: String,
@@ -225,6 +250,20 @@ pub struct CustomerResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Customer>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Driver>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<Driver>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -799,6 +838,254 @@ pub async fn delete_vehicle(path: web::Path<String>, _auth: AuthenticatedOrg) ->
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to delete vehicle: {}", err),
+            data: None,
+        }),
+    }
+}
+
+// ── Driver handlers (protected) ───────────────────────────────────────────────
+
+/// Load a driver by id, returning an error `HttpResponse` unless it exists
+/// and belongs to `auth_org_id`.
+fn load_owned_driver(driver_id: Uuid, auth_org_id: Uuid) -> Result<Driver, HttpResponse> {
+    match Driver::get_by_id(driver_id) {
+        Ok(Some(driver)) if driver.org_id == auth_org_id => Ok(driver),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: driver belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Driver not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch driver: {}", err),
+            data: None,
+        })),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/drivers",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Drivers for the authenticated organization", body = DriverListResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/drivers")]
+pub async fn list_drivers(auth: AuthenticatedOrg) -> impl Responder {
+    match Driver::list_by_org(auth.org_id) {
+        Ok(drivers) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} drivers", drivers.len()),
+            data: Some(drivers),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list drivers: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/orgs/{id}/drivers",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    request_body = CreateDriverPayload,
+    responses(
+        (status = 201, description = "Driver created successfully", body = DriverResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/orgs/{id}/drivers")]
+pub async fn add_driver(
+    path: web::Path<Uuid>,
+    payload: web::Json<CreateDriverPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match Driver::create(
+        org_id,
+        &payload.name,
+        &payload.license_number,
+        &payload.phone,
+    ) {
+        Ok(driver) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: "Driver created successfully".to_string(),
+            data: Some(driver),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to create driver: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/drivers/{id}",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Driver UUID")),
+    request_body = UpdateDriverPayload,
+    responses(
+        (status = 200, description = "Driver updated successfully", body = DriverResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Driver not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/drivers/{id}")]
+pub async fn update_driver(
+    path: web::Path<Uuid>,
+    payload: web::Json<UpdateDriverPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut driver = match load_owned_driver(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match driver.update(
+        &payload.name,
+        &payload.license_number,
+        &payload.phone,
+        payload.is_active,
+    ) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Driver updated successfully".to_string(),
+            data: Some(driver),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to update driver: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/drivers/{id}",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Driver UUID")),
+    responses(
+        (status = 200, description = "Driver deleted successfully", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Driver not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[delete("/drivers/{id}")]
+pub async fn delete_driver(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let driver = match load_owned_driver(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match driver.delete() {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::<String> {
+            success: true,
+            message: "Driver deleted successfully".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to delete driver: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/vehicles/{reg}/driver",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    params(("reg" = String, Path, description = "Vehicle registration number")),
+    request_body = AssignDriverPayload,
+    responses(
+        (status = 200, description = "Driver assignment updated", body = VehicleResponse),
+        (status = 400, description = "Driver is not in this organization", body = EmptyResponse),
+        (status = 404, description = "Vehicle not found in this organization", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/vehicles/{reg}/driver")]
+pub async fn assign_vehicle_driver(
+    path: web::Path<String>,
+    payload: web::Json<AssignDriverPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let reg_number = path.into_inner();
+
+    let mut vehicle = match Vehicle::list_by_org(auth.org_id) {
+        Ok(vehicles) => match vehicles
+            .into_iter()
+            .find(|v| v.registration_number == reg_number)
+        {
+            Some(v) => v,
+            None => {
+                return HttpResponse::NotFound().json(ApiResponse::<String> {
+                    success: false,
+                    message: "Vehicle not found in this organization".to_string(),
+                    data: None,
+                })
+            }
+        },
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle: {}", err),
+                data: None,
+            })
+        }
+    };
+
+    // A driver assignment must reference one of this org's own drivers.
+    // "belongs to another org" and "not found" both collapse to a 400 here —
+    // from the caller's side it's just an invalid driver_id for them.
+    if let Some(driver_id) = payload.driver_id
+        && load_owned_driver(driver_id, auth.org_id).is_err()
+    {
+        return HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: "driver_id is not a driver in this organization".to_string(),
+            data: None,
+        });
+    }
+
+    match vehicle.assign_driver(payload.driver_id) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: match payload.driver_id {
+                Some(_) => "Driver assigned to vehicle".to_string(),
+                None => "Driver assignment cleared".to_string(),
+            },
+            data: Some(vehicle),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to assign driver: {}", err),
             data: None,
         }),
     }
@@ -1570,6 +1857,11 @@ impl Modify for SecurityAddon {
         add_vehicle,
         update_vehicle_location,
         delete_vehicle,
+        list_drivers,
+        add_driver,
+        update_driver,
+        delete_driver,
+        assign_vehicle_driver,
         list_godowns,
         create_godown,
         get_godown,
@@ -1594,13 +1886,15 @@ impl Modify for SecurityAddon {
             CreateVehiclePayload, CreateStockPayload, UpdateStockPayload,
             CreateGodownPayload, UpdateGodownPayload,
             CreateCustomerPayload, DispatchRequestPayload,
+            CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload,
-            Organization, Vehicle, Unit, Location, Stock, Godown, Customer,
+            Organization, Vehicle, Unit, Location, Stock, Godown, Customer, Driver,
             DispatchOrder, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             StockResponse, GodownResponse, GodownListResponse,
             CustomerResponse, CustomerListResponse,
+            DriverResponse, DriverListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
@@ -1610,6 +1904,7 @@ impl Modify for SecurityAddon {
         (name = "Auth", description = "Authentication endpoints"),
         (name = "Organizations", description = "Organization management"),
         (name = "Vehicles", description = "Vehicle fleet management"),
+        (name = "Drivers", description = "Driver records and vehicle assignment"),
         (name = "Godowns", description = "Warehouse (godown) and stock management"),
         (name = "Customers", description = "Customer management"),
         (name = "Dispatch", description = "Stock dispatch"),
@@ -1634,6 +1929,11 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(add_vehicle)
             .service(update_vehicle_location)
             .service(delete_vehicle)
+            .service(list_drivers)
+            .service(add_driver)
+            .service(update_driver)
+            .service(delete_driver)
+            .service(assign_vehicle_driver)
             .service(list_godowns)
             .service(create_godown)
             .service(get_godown)
@@ -2323,11 +2623,34 @@ mod tests {
             .insert_header(("Authorization", auth.clone()))
             .set_json(&CreateVehiclePayload {
                 registration_number: "DISP-VH-001".to_string(),
-                capacity: 20,
+                capacity: 100_000,
                 unit: "MetricTon".to_string(),
             })
             .to_request();
         test::call_service(app, req).await;
+
+        // A vehicle needs an active assigned driver to be dispatch-eligible.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/drivers", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateDriverPayload {
+                name: format!("{} Driver", org_name),
+                license_number: "DISP-LIC-001".to_string(),
+                phone: "+91 90000 00000".to_string(),
+            })
+            .to_request();
+        let body: ApiResponse<Driver> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        let driver = body.data.unwrap();
+
+        let req = test::TestRequest::put()
+            .uri("/api/vehicles/DISP-VH-001/driver")
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&AssignDriverPayload {
+                driver_id: Some(driver.id),
+            })
+            .to_request();
+        assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
 
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/godowns", org.id))
@@ -3531,5 +3854,258 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 403);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(!body.success);
+    }
+
+    // ── Drivers ─────────────────────────────────────────────────────────────
+
+    /// Create an org (with credentials) and return `(org, auth_header)`.
+    async fn setup_org(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_name: &str,
+    ) -> (Organization, String) {
+        let req = test::TestRequest::post()
+            .uri("/api/orgs")
+            .set_json(&CreateOrgPayload {
+                name: org_name.to_string(),
+                address: format!("1 {org_name} Road"),
+                password: "driver_test_pass".to_string(),
+            })
+            .to_request();
+        let body: ApiResponse<Organization> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        let org = body.data.unwrap();
+        let auth = make_auth_header(org.id, &org.name);
+        (org, auth)
+    }
+
+    async fn create_driver_via_api(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth: &str,
+        name: &str,
+    ) -> Driver {
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{org_id}/drivers"))
+            .insert_header(("Authorization", auth.to_string()))
+            .set_json(&CreateDriverPayload {
+                name: name.to_string(),
+                license_number: format!("LIC-{name}"),
+                phone: "+91 90000 00000".to_string(),
+            })
+            .to_request();
+        let resp = test::call_service(app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        test::read_body_json::<ApiResponse<Driver>, _>(resp)
+            .await
+            .data
+            .unwrap()
+    }
+
+    #[actix_web::test]
+    async fn test_driver_crud_and_listing() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Fleet Ops").await;
+
+        let driver = create_driver_via_api(&app, org.id, &auth, "Ravi").await;
+        assert!(driver.is_active);
+
+        // Update: rename + deactivate.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/drivers/{}", driver.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateDriverPayload {
+                name: "Ravi Kumar".to_string(),
+                license_number: "LIC-Ravi".to_string(),
+                phone: "+91 90000 00001".to_string(),
+                is_active: false,
+            })
+            .to_request();
+        let body: ApiResponse<Driver> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(body.data.as_ref().unwrap().name, "Ravi Kumar");
+        assert!(!body.data.unwrap().is_active);
+
+        // List.
+        let req = test::TestRequest::get()
+            .uri("/api/drivers")
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let body: ApiResponse<Vec<Driver>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(body.data.unwrap().len(), 1);
+
+        // Delete.
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/drivers/{}", driver.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let req = test::TestRequest::get()
+            .uri("/api/drivers")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let body: ApiResponse<Vec<Driver>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert!(body.data.unwrap().is_empty());
+    }
+
+    #[actix_web::test]
+    async fn test_update_driver_returns_403_for_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Owner Org").await;
+        let driver = create_driver_via_api(&app, org.id, &auth, "Owned").await;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/drivers/{}", driver.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .set_json(&UpdateDriverPayload {
+                name: "Hijacked".to_string(),
+                license_number: "X".to_string(),
+                phone: "0".to_string(),
+                is_active: true,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_assign_vehicle_driver_rejects_foreign_driver() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, auth_a) = setup_org(&app, "Org A").await;
+        let (org_b, auth_b) = setup_org(&app, "Org B").await;
+
+        // Org A gets a vehicle.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vehicles", org_a.id))
+            .insert_header(("Authorization", auth_a.clone()))
+            .set_json(&CreateVehiclePayload {
+                registration_number: "A-VH-1".to_string(),
+                capacity: 10,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+
+        // Org B's driver can't be assigned to org A's vehicle.
+        let foreign = create_driver_via_api(&app, org_b.id, &auth_b, "Bee").await;
+        let req = test::TestRequest::put()
+            .uri("/api/vehicles/A-VH-1/driver")
+            .insert_header(("Authorization", auth_a.clone()))
+            .set_json(&AssignDriverPayload { driver_id: Some(foreign.id) })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+
+        // Org A's own driver assigns fine, and clearing works.
+        let own = create_driver_via_api(&app, org_a.id, &auth_a, "Ay").await;
+        let req = test::TestRequest::put()
+            .uri("/api/vehicles/A-VH-1/driver")
+            .insert_header(("Authorization", auth_a.clone()))
+            .set_json(&AssignDriverPayload { driver_id: Some(own.id) })
+            .to_request();
+        let body: ApiResponse<Vehicle> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(body.data.unwrap().assigned_driver_id, Some(own.id));
+
+        let req = test::TestRequest::put()
+            .uri("/api/vehicles/A-VH-1/driver")
+            .insert_header(("Authorization", auth_a))
+            .set_json(&AssignDriverPayload { driver_id: None })
+            .to_request();
+        let body: ApiResponse<Vehicle> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(body.data.unwrap().assigned_driver_id, None);
+    }
+
+    #[actix_web::test]
+    async fn test_dispatch_rejected_when_no_vehicle_has_an_active_driver() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "NoDriver Co").await;
+
+        // Vehicle, godown+stock, customer with a location — but no driver.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vehicles", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateVehiclePayload {
+                registration_number: "ND-VH-1".to_string(),
+                capacity: 20,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/godowns", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateGodownPayload {
+                name: "ND Godown".to_string(),
+                address: "1 ND Road".to_string(),
+                max_capacity: None,
+            })
+            .to_request();
+        let godown: ApiResponse<Godown> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let godown = godown.data.unwrap();
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateStockPayload {
+                volume_in_size: 1,
+                quantity: 100,
+                description: "Widgets".to_string(),
+                reorder_threshold: None,
+            })
+            .to_request();
+        test::call_service(&app, req).await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/customers")
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateCustomerPayload {
+                name: "ND Customer".to_string(),
+                address: "2 ND Lane".to_string(),
+            })
+            .to_request();
+        let customer: ApiResponse<Customer> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let customer = customer.data.unwrap();
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/customers/{}/location", customer.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&LocationPayload {
+                latitude: 19.07,
+                longitude: 72.87,
+                address: Some("Mumbai".to_string()),
+            })
+            .to_request();
+        test::call_service(&app, req).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&DispatchRequestPayload {
+                customer_id: customer.id,
+                stock_description: "Widgets".to_string(),
+                requested_quantity: 5,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(body.message.contains("active assigned driver"), "{}", body.message);
     }
 }

@@ -1,6 +1,7 @@
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
 use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus};
+use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
@@ -50,12 +51,14 @@ impl Organization {
             )",
             (),
         )?;
+        Driver::ensure_table(conn)?;
         conn.exec_drop(
             "CREATE TABLE IF NOT EXISTS Vehicle (
                 registration_number VARCHAR(255) PRIMARY KEY,
                 capacity BIGINT NOT NULL,
                 unit VARCHAR(50) NOT NULL,
                 org_id VARCHAR(36) NOT NULL,
+                assigned_driver_id VARCHAR(36) DEFAULT NULL,
                 latitude DOUBLE DEFAULT NULL,
                 longitude DOUBLE DEFAULT NULL,
                 last_updated_at BIGINT DEFAULT NULL,
@@ -192,15 +195,14 @@ impl Organization {
         //    item can be split across several godowns; the requested quantity is
         //    checked against — and later drawn from — the combined holding.
         let godowns = Godown::list_by_org(self.id)?;
-        let mut holdings: Vec<(Uuid, i64)> = godowns
-            .iter()
-            .filter_map(|g| {
-                g.stock
-                    .iter()
-                    .find(|s| s.description == stock_description)
-                    .map(|s| (g.id, s.quantity))
-            })
-            .collect();
+        let mut holdings: Vec<(Uuid, i64)> = Vec::new();
+        let mut stock_volume_in_size: Option<i64> = None;
+        for g in &godowns {
+            if let Some(s) = g.stock.iter().find(|s| s.description == stock_description) {
+                holdings.push((g.id, s.quantity));
+                stock_volume_in_size.get_or_insert(s.volume_in_size);
+            }
+        }
 
         if holdings.is_empty() {
             return Err("Requested stock description not found in any of the organization's godowns".into());
@@ -215,17 +217,63 @@ impl Organization {
             .into());
         }
 
-        // 2. Fetch all vehicles for this organization from database
+        // Total volume this shipment occupies — checked against a vehicle's
+        // rated `capacity` below.
+        let required_volume = stock_volume_in_size
+            .unwrap_or(0)
+            .saturating_mul(requested_quantity);
+
+        // 2. Fetch this org's vehicles that can actually take this trip:
+        //    - an *active* driver is assigned (Vehicle.assigned_driver_id ->
+        //      an is_active Driver row),
+        //    - the vehicle's rated `capacity` covers `required_volume`, and
+        //    - the vehicle is not already on an active (non-terminal) trip,
+        //      so the same truck can't be double-booked onto two orders.
+        Driver::ensure_table(&mut conn)?;
+        crate::logistics::dispatch::dispatch::ensure_tables(&mut conn)?;
         let vehicle_rows: Vec<(String, i64, String, Option<f64>, Option<f64>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, latitude, longitude FROM Vehicle WHERE org_id = :org_id",
+            "SELECT v.registration_number, v.capacity, v.unit, v.latitude, v.longitude
+             FROM Vehicle v
+             JOIN Drivers d ON d.id = v.assigned_driver_id AND d.is_active = TRUE
+             WHERE v.org_id = :org_id
+               AND v.capacity >= :required_volume
+               AND NOT EXISTS (
+                   SELECT 1 FROM Dispatches disp
+                   WHERE disp.vehicle_registration_number = v.registration_number
+                     AND disp.status NOT IN ('DELIVERED', 'RETURNED', 'CANCELLED')
+               )",
             params! {
                 "org_id" => self.id.to_string(),
+                "required_volume" => required_volume,
             },
             |(reg, cap, unit, lat, lng)| (reg, cap, unit, lat, lng),
         )?;
 
         if vehicle_rows.is_empty() {
-            return Err("No vehicles registered under this organization for dispatch".into());
+            let any_vehicle: Option<i64> = conn.exec_first(
+                "SELECT 1 FROM Vehicle WHERE org_id = :org_id LIMIT 1",
+                params! { "org_id" => self.id.to_string() },
+            )?;
+            let with_active_driver: Option<i64> = conn.exec_first(
+                "SELECT 1 FROM Vehicle v
+                 JOIN Drivers d ON d.id = v.assigned_driver_id AND d.is_active = TRUE
+                 WHERE v.org_id = :org_id LIMIT 1",
+                params! { "org_id" => self.id.to_string() },
+            )?;
+            return Err(if any_vehicle.is_none() {
+                "No vehicles registered under this organization for dispatch".into()
+            } else if with_active_driver.is_none() {
+                "No vehicle with an active assigned driver is available for dispatch; \
+                 assign one via PUT /api/vehicles/{reg}/driver"
+                    .into()
+            } else {
+                format!(
+                    "No vehicle is free and large enough for this shipment \
+                     (needs capacity >= {required_volume}); every eligible vehicle is \
+                     either below capacity or already on an active trip"
+                )
+                .into()
+            });
         }
 
         // Customer target coordinates
@@ -383,9 +431,9 @@ impl Organization {
 
         let vehicles: Vec<Vehicle> = conn
             .exec_map(
-                "SELECT registration_number, capacity, unit, latitude, longitude, last_updated_at, location_address FROM Vehicle WHERE org_id = :org_id",
+                "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address FROM Vehicle WHERE org_id = :org_id",
                 params! { "org_id" => &org_id_str },
-                |(reg, cap, unit_str, v_lat, v_lng, v_ts, v_addr): (String, i64, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)| {
+                |(reg, cap, unit_str, driver, v_lat, v_lng, v_ts, v_addr): (String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>)| {
                     let v_location = v_lat.map(|latitude| Location {
                         latitude,
                         longitude: v_lng.unwrap_or(0.0),
@@ -397,6 +445,7 @@ impl Organization {
                         capacity: cap,
                         unit: Unit::from_str(&unit_str),
                         location: v_location,
+                        assigned_driver_id: driver.and_then(|d| Uuid::parse_str(&d).ok()),
                     }
                 },
             )?;
@@ -552,15 +601,21 @@ mod tests {
         let stock = Stock::new(50, 100, "High-End Laptops");
         stock.add_to_godown(godown.id).expect("Failed to add stock");
 
+        // Each vehicle needs an active assigned driver to be dispatch-eligible.
+        let d1 = Driver::create(org.id, "Driver One", "LIC-1", "111").expect("driver 1");
+        let d2 = Driver::create(org.id, "Driver Two", "LIC-2", "222").expect("driver 2");
+
         // Add Vehicle 1 (Far away - Mumbai: 19.0760, 72.8777)
-        let mut v1 = Vehicle::new("MH01 AX 1111", 50, Unit::MetricTon);
+        let mut v1 = Vehicle::new("MH01 AX 1111", 10_000, Unit::MetricTon);
         v1.add_new_vehicle_to_org(&org).expect("Failed to add v1");
         v1.update_location(19.0760, 72.8777, Some("Mumbai Port")).expect("Failed to update v1 location");
+        v1.assign_driver(Some(d1.id)).expect("assign d1");
 
         // Add Vehicle 2 (Near Customer - Noida: 28.5355, 77.3910)
-        let mut v2 = Vehicle::new("UP16 BZ 2222", 50, Unit::MetricTon);
+        let mut v2 = Vehicle::new("UP16 BZ 2222", 10_000, Unit::MetricTon);
         v2.add_new_vehicle_to_org(&org).expect("Failed to add v2");
         v2.update_location(28.5355, 77.3910, Some("Noida Hub")).expect("Failed to update v2 location");
+        v2.assign_driver(Some(d2.id)).expect("assign d2");
 
         // Create Customer (Located in Delhi / NCR: 28.6200, 77.2100)
         let mut customer = Customer::create_customer("Tech Store India", "Connaught Place, New Delhi")
@@ -599,6 +654,155 @@ mod tests {
             .expect("Failed to query stock from DB");
 
         assert_eq!(stock_qty, Some(85));
+    }
+
+    #[test]
+    fn test_dispatch_requires_a_vehicle_with_an_active_driver() {
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("Driverless Logistics", "Pune HQ")
+            .expect("create org");
+        org.update_location(18.5204, 73.8567, Some("Pune HQ")).expect("org location");
+
+        let godown = Godown::create(org.id, "Pune Godown", "Hinjewadi", None).expect("godown");
+        Stock::new(50, 100, "Ceramic Tiles").add_to_godown(godown.id).expect("stock");
+
+        let mut vehicle = Vehicle::new("MH12 ZZ 9999", 10_000, Unit::MetricTon);
+        vehicle.add_new_vehicle_to_org(&org).expect("add vehicle");
+        vehicle.update_location(18.53, 73.85, Some("Pune")).expect("vehicle location");
+
+        let mut customer = Customer::create_customer("Tile Mart", "FC Road, Pune").expect("customer");
+        customer.update_location(18.52, 73.84, Some("FC Road")).expect("customer location");
+
+        // No driver assigned yet -> rejected.
+        let err = org
+            .dispatch_stock_to_customer(&customer, "Ceramic Tiles", 10)
+            .expect_err("dispatch should fail without an active assigned driver");
+        assert!(
+            err.to_string().contains("active assigned driver"),
+            "unexpected error: {err}"
+        );
+
+        // Assign an *inactive* driver -> still rejected.
+        let mut driver = Driver::create(org.id, "On Leave", "LIC-X", "000").expect("driver");
+        driver.update("On Leave", "LIC-X", "000", false).expect("deactivate");
+        vehicle.assign_driver(Some(driver.id)).expect("assign");
+        assert!(
+            org.dispatch_stock_to_customer(&customer, "Ceramic Tiles", 10)
+                .is_err(),
+            "dispatch should fail with an inactive driver"
+        );
+
+        // Reactivate the driver -> dispatch succeeds.
+        driver.update("Back To Work", "LIC-X", "000", true).expect("reactivate");
+        let order = org
+            .dispatch_stock_to_customer(&customer, "Ceramic Tiles", 10)
+            .expect("dispatch should succeed once an active driver is assigned");
+        assert_eq!(order.vehicle_registration_number, "MH12 ZZ 9999");
+    }
+
+    #[test]
+    fn test_dispatch_checks_vehicle_capacity() {
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("Capacity Logistics", "Nagpur HQ")
+            .expect("org");
+        org.update_location(21.1458, 79.0882, Some("Nagpur")).expect("org loc");
+
+        let godown = Godown::create(org.id, "Nagpur Godown", "MIDC", None).expect("godown");
+        // 20 units at volume 10 each -> a 5-unit shipment needs volume 50.
+        Stock::new(10, 20, "Marble Slabs").add_to_godown(godown.id).expect("stock");
+
+        let mut customer = Customer::create_customer("Stone Co", "Civil Lines").expect("customer");
+        customer.update_location(21.15, 79.09, Some("Civil Lines")).expect("cust loc");
+
+        let driver = Driver::create(org.id, "Cap Driver", "LIC-C", "000").expect("driver");
+
+        // Too-small vehicle (capacity 40 < 50) -> rejected.
+        let mut small = Vehicle::new("MH31 SM 0001", 40, Unit::MetricTon);
+        small.add_new_vehicle_to_org(&org).expect("add small");
+        small.update_location(21.15, 79.08, Some("Nagpur")).expect("loc");
+        small.assign_driver(Some(driver.id)).expect("assign");
+
+        let err = org
+            .dispatch_stock_to_customer(&customer, "Marble Slabs", 5)
+            .expect_err("should reject: vehicle too small");
+        assert!(err.to_string().contains("capacity >= 50"), "unexpected: {err}");
+
+        // Big-enough vehicle -> succeeds and is the one chosen.
+        let driver2 = Driver::create(org.id, "Big Driver", "LIC-B", "000").expect("driver2");
+        let mut big = Vehicle::new("MH31 BG 0002", 500, Unit::MetricTon);
+        big.add_new_vehicle_to_org(&org).expect("add big");
+        big.update_location(21.15, 79.08, Some("Nagpur")).expect("loc");
+        big.assign_driver(Some(driver2.id)).expect("assign");
+
+        let order = org
+            .dispatch_stock_to_customer(&customer, "Marble Slabs", 5)
+            .expect("should succeed with a big-enough vehicle");
+        assert_eq!(order.vehicle_registration_number, "MH31 BG 0002");
+    }
+
+    #[test]
+    fn test_dispatch_does_not_double_book_a_vehicle() {
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("Busy Fleet", "Surat HQ").expect("org");
+        org.update_location(21.1702, 72.8311, Some("Surat")).expect("org loc");
+
+        let godown = Godown::create(org.id, "Surat Godown", "Sachin GIDC", None).expect("godown");
+        Stock::new(1, 100, "Fabric Rolls").add_to_godown(godown.id).expect("stock");
+
+        let mut customer = Customer::create_customer("Textile Buyer", "Ring Road").expect("customer");
+        customer.update_location(21.18, 72.83, Some("Ring Road")).expect("cust loc");
+
+        // Two eligible vehicles, both near the customer.
+        let d1 = Driver::create(org.id, "D1", "L1", "1").expect("d1");
+        let d2 = Driver::create(org.id, "D2", "L2", "2").expect("d2");
+        let mut v1 = Vehicle::new("GJ05 AA 0001", 1_000, Unit::MetricTon);
+        v1.add_new_vehicle_to_org(&org).expect("v1");
+        v1.update_location(21.18, 72.83, Some("Surat")).expect("v1 loc");
+        v1.assign_driver(Some(d1.id)).expect("assign d1");
+        let mut v2 = Vehicle::new("GJ05 BB 0002", 1_000, Unit::MetricTon);
+        v2.add_new_vehicle_to_org(&org).expect("v2");
+        v2.update_location(21.18, 72.83, Some("Surat")).expect("v2 loc");
+        v2.assign_driver(Some(d2.id)).expect("assign d2");
+
+        let first = org
+            .dispatch_stock_to_customer(&customer, "Fabric Rolls", 10)
+            .expect("first dispatch");
+        let second = org
+            .dispatch_stock_to_customer(&customer, "Fabric Rolls", 10)
+            .expect("second dispatch uses the other vehicle");
+        assert_ne!(
+            first.vehicle_registration_number, second.vehicle_registration_number,
+            "the same vehicle must not be booked onto two active trips"
+        );
+
+        // Both vehicles are now on active trips -> a third dispatch fails.
+        let err = org
+            .dispatch_stock_to_customer(&customer, "Fabric Rolls", 10)
+            .expect_err("third dispatch: no vehicle free");
+        assert!(err.to_string().contains("active trip"), "unexpected: {err}");
+
+        // Completing the first trip frees its vehicle for reuse.
+        let mut first = DispatchOrder::get_by_id(first.id).expect("get").expect("exists");
+        first.transition_to(DispatchStatus::Confirmed, None).expect("confirm");
+        first.transition_to(DispatchStatus::Loaded, None).expect("load");
+        first.transition_to(DispatchStatus::InTransit, None).expect("in transit");
+        first
+            .transition_to(
+                DispatchStatus::Delivered,
+                Some(crate::logistics::dispatch::dispatch::ProofOfDeliveryInput {
+                    receiver_name: "Buyer".to_string(),
+                    signature_or_photo_url: "https://example.test/sig.png".to_string(),
+                }),
+            )
+            .expect("deliver");
+
+        let fourth = org
+            .dispatch_stock_to_customer(&customer, "Fabric Rolls", 10)
+            .expect("a freed vehicle can be dispatched again");
+        assert_eq!(
+            fourth.vehicle_registration_number, first.vehicle_registration_number,
+            "the delivered trip's vehicle should be available again"
+        );
     }
 
     #[test]
