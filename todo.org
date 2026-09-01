@@ -32,15 +32,22 @@
 ** TODO [#B] Check the requested stock's volume/quantity against the selected vehicle's capacity before dispatch, and mark a vehicle unavailable while it has an active trip so `dispatch_stock_to_customer` can't double-book the same truck onto two orders at once
 ** TODO Allow one dispatch to carry multiple stock line items - today `dispatch_stock_to_customer` takes a single `stock_description`, but a real shipment usually mixes several SKUs in one trip
 ** TODO Support stock transfer between two godowns of the same org (distinct from dispatch-to-customer), with an audit trail of the move
-** TODO Add a low-stock / reorder threshold per stock item so a godown can be flagged when quantity drops below it
-** TODO Add a `max_capacity` to Godown and reject or warn on stock additions that would push it over
+** DONE Add a low-stock / reorder threshold per stock item so a godown can be flagged when quantity drops below it
+   Stock.reorder_threshold (Option<i64>) plus a server-computed below_threshold
+   bool exposed on every read. Settable via POST/PUT /api/godowns/{gid}/stock.
+** DONE Add a `max_capacity` to Godown and reject or warn on stock additions that would push it over
+   Godown.max_capacity (Option<i64>) — a cap on Σ(volume_in_size × quantity)
+   across the godown's stock. add/update stock over the cap is rejected 409.
+   Set on create or PUT /api/godowns/{id}. None = unlimited.
 ** TODO Track vehicle compliance paperwork (insurance, RC, permit, PUC/fitness certificate) with expiry dates and renewal reminders - mandatory for any commercial truck on Indian roads
 ** TODO Add freight billing: a cost per dispatch, invoice generation, and a payment status (paid/pending/overdue) per customer
 ** TODO Support returns: a customer return should credit stock back into a godown and record a RETURNED dispatch, rather than the system only ever being able to decrement stock
 ** TODO Move from one login per org to role-scoped user accounts within an org (admin, dispatcher, warehouse staff) so more than one person at the same org can log in with different permissions
 ** TODO Add an endpoint for GPS trackers to push vehicle location automatically, instead of only the manual `PUT .../location` call
 ** TODO Support multi-stop routes so one vehicle's trip can serve several customer orders in a sequence, instead of one dispatch always meaning one vehicle to one customer
-** TODO Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
+** DONE Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
+   Unit enum gains Kg/Litre/Box/Pallet/Piece; Unit::from_str is now
+   case-insensitive with aliases and still falls back to MetricTon.
 ** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
 ** TODO Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
 * DONE Fix failing swagger ui doc generation github action - godown feature merge (PR #6) removed /api/orgs/{id}/stock* in favor of /api/orgs/{id}/godowns and /api/godowns/{gid}/..., but the workflow's expected-path list still checked for the old stock routes
