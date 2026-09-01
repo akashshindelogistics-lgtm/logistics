@@ -1,33 +1,34 @@
-//! Test-only helpers for provisioning and flushing the MySQL test database.
+//! Test-only helpers for provisioning an isolated MySQL database per test.
 //!
-//! Every unit and integration test in this crate runs against a real MySQL
-//! server, and they all share one database. To keep tests deterministic and
-//! independent of each other and of previous runs:
+//! Every unit and integration test in this crate talks to a real MySQL
+//! server. [`TestDb::create`] gives each test its own uniquely-named
+//! database (`logistics_test_<uuid>`), migrated and ready to use, and
+//! overrides [`DbConfig::from_env`] on the calling thread so every
+//! `DbConnection::from_env()` call made by that test resolves to it —
+//! without mutating process-wide environment variables, which would race
+//! every other test thread reading them concurrently. Dropping the guard
+//! drops the database and clears the override.
 //!
-//! * When the crate is built for tests (`cfg(test)`), [`DbConnection`] targets
-//!   the `logistics_test` database instead of `logistics`, so `cargo test`
-//!   never touches the data a developer's `cargo run` writes.
-//! * Every test that reads or writes MySQL is annotated
-//!   `#[serial_test::serial(db)]` and calls [`reset_database`] as its first
-//!   line, which recreates the schema and truncates every table back to empty.
+//! ```ignore
+//! #[test]
+//! fn test_something() {
+//!     let _db = TestDb::create();
+//!     // ... exercise the app; every DB call in this test's thread lands
+//!     // in this test's private database ...
+//! }
+//! ```
 //!
-//! See `docs/testing-database.md` for the rationale and the planned follow-up
-//! phases (env-driven config, database-per-test).
+//! Because each test owns its own database, tests no longer need to
+//! serialize against each other (no more `#[serial_test::serial(db)]`) and
+//! `cargo test` runs at full parallelism again. See
+//! `docs/testing-database.md` (Phase 3) for the history: an earlier phase
+//! shared one `logistics_test` database across all tests, serialized with
+//! `serial_test` and a `reset_database()` truncate-everything call at the
+//! top of each test.
 
-use crate::logistics::db::connection::DbConnection;
+use crate::logistics::db::connection::{self, DbConfig, DbConnection};
 use mysql::prelude::*;
-
-/// Every table in the schema. Order is irrelevant because [`reset_database`]
-/// truncates with `FOREIGN_KEY_CHECKS` disabled.
-const TABLES: &[&str] = &[
-    "Dispatches",
-    "OrgCredentials",
-    "Stock",
-    "Godowns",
-    "Vehicle",
-    "Customers",
-    "Orgs",
-];
+use uuid::Uuid;
 
 /// Create every table the application uses, if it does not already exist.
 ///
@@ -144,24 +145,116 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create OrgCredentials");
 }
 
-/// Truncate every table so the calling test starts from a known-empty database.
+/// A private, uniquely-named MySQL database scoped to exactly one test.
 ///
-/// Call this as the very first line of every test that reads or writes MySQL,
-/// and annotate that test with `#[serial_test::serial(db)]` so a reset never
-/// races a concurrent test sharing the same database.
-pub fn reset_database() {
-    let mut conn = DbConnection::from_env()
-        .get_connection()
-        .expect("reset_database: connect to test database");
+/// Hold the guard for the duration of the test (`let _db = TestDb::create();`
+/// as the first line is the usual pattern). While it is alive, every
+/// `DbConnection::from_env()` call made on the *same thread* resolves to
+/// this database — safe under `cargo test`'s default parallelism because
+/// libtest gives each test its own OS thread, and `#[actix_web::test]`
+/// (`actix_rt::System::new().block_on(...)`) runs its whole async body on a
+/// single-threaded executor pinned to that same thread, so the override
+/// stays valid across every `.await` point too.
+///
+/// Dropping the guard drops the database and clears the override. A test
+/// that panics still runs `Drop` (the database is dropped as the panic
+/// unwinds), so a failure doesn't leak it; only a hard process abort (e.g. a
+/// segfault, or `cargo test` being killed) would leave one behind — a
+/// `logistics_test_%` database left over from a crashed run is safe to drop
+/// by hand.
+pub struct TestDb {
+    name: String,
+}
 
-    migrate(&mut conn);
+impl TestDb {
+    /// Provision a fresh `logistics_test_<uuid>` database, migrate it, and
+    /// start overriding `DbConfig::from_env()` on this thread to target it.
+    pub fn create() -> Self {
+        let name = format!("logistics_test_{}", Uuid::new_v4().simple());
+        connection::set_test_db_override(Some(name.clone()));
 
-    conn.query_drop("SET FOREIGN_KEY_CHECKS = 0")
-        .expect("reset_database: disable FK checks");
-    for table in TABLES {
-        conn.query_drop(format!("TRUNCATE TABLE `{table}`"))
-            .unwrap_or_else(|e| panic!("reset_database: truncate {table}: {e}"));
+        let mut conn = DbConnection::from_env()
+            .get_connection()
+            .expect("TestDb::create: connect to fresh test database");
+        migrate(&mut conn);
+
+        Self { name }
     }
-    conn.query_drop("SET FOREIGN_KEY_CHECKS = 1")
-        .expect("reset_database: re-enable FK checks");
+
+    /// The database's name, e.g. for a diagnostic message.
+    #[allow(dead_code)]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Drop for TestDb {
+    fn drop(&mut self) {
+        // The override is still active for this thread at this point, so
+        // `from_env()` resolves back to `self.name` — reuse it rather than
+        // hand-building a config, then tear everything down.
+        if let Ok(mut conn) = DbConnection::from_env().get_connection() {
+            let _ = conn.query_drop(format!("DROP DATABASE IF EXISTS `{}`", self.name));
+        }
+        connection::drop_pool(&self.name);
+        connection::set_test_db_override(None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_provisions_a_reachable_migrated_database() {
+        let db = TestDb::create();
+        assert!(db.name().starts_with("logistics_test_"));
+
+        let mut conn = DbConnection::from_env()
+            .get_connection()
+            .expect("should connect to the TestDb-provisioned database");
+        let count: Option<i64> = conn
+            .exec_first("SELECT COUNT(*) FROM Orgs", ())
+            .expect("Orgs table should exist after TestDb::create");
+        assert_eq!(count, Some(0));
+    }
+
+    #[test]
+    fn drop_removes_the_database_and_the_override() {
+        let db = TestDb::create();
+        let name = db.name().to_string();
+        drop(db);
+
+        assert_eq!(DbConfig::from_env().db_name, "logistics_test");
+
+        let mut admin = DbConnection::from_env()
+            .get_connection()
+            .expect("connect to default test database to check cleanup");
+        let exists: Option<String> = admin
+            .exec_first(
+                "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?",
+                (name,),
+            )
+            .expect("query information_schema for the dropped database");
+        assert!(exists.is_none(), "dropped TestDb database should be gone");
+    }
+
+    #[test]
+    fn two_test_dbs_on_the_same_thread_are_independent() {
+        let db_a = TestDb::create();
+        let mut conn_a = DbConnection::from_env().get_connection().unwrap();
+        conn_a
+            .query_drop(
+                "INSERT INTO Orgs (id, name, address) VALUES ('11111111-1111-1111-1111-111111111111', 'A', 'A')",
+            )
+            .unwrap();
+        drop(db_a);
+
+        // A fresh TestDb, still on this same thread, must not see the row
+        // written to the previous one.
+        let _db_b = TestDb::create();
+        let mut conn_b = DbConnection::from_env().get_connection().unwrap();
+        let count: Option<i64> = conn_b.exec_first("SELECT COUNT(*) FROM Orgs", ()).unwrap();
+        assert_eq!(count, Some(0));
+    }
 }

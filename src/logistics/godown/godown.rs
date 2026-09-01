@@ -213,8 +213,7 @@ impl Godown {
 mod tests {
     use super::*;
     use crate::logistics::orgs::orgs::Organization;
-    use crate::logistics::test_support::reset_database;
-    use serial_test::serial;
+    use crate::logistics::test_support::TestDb;
 
     fn make_org() -> Organization {
         Organization::create_organization("Godown Test Org", "1 Warehouse Way")
@@ -222,9 +221,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_create_and_get_godown() {
-        reset_database();
+        let _db = TestDb::create();
         let org = make_org();
         let g = Godown::create(org.id, "North Godown", "Plot 5, Industrial Area").expect("create godown");
 
@@ -236,9 +234,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_update_godown_and_location() {
-        reset_database();
+        let _db = TestDb::create();
         let org = make_org();
         let mut g = Godown::create(org.id, "Old Name", "Old Address").expect("create godown");
 
@@ -254,9 +251,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_list_by_org_and_remove() {
-        reset_database();
+        let _db = TestDb::create();
         let org = make_org();
         Godown::create(org.id, "G1", "A1").expect("g1");
         Godown::create(org.id, "G2", "A2").expect("g2");
@@ -272,9 +268,8 @@ mod tests {
     }
 
     #[test]
-    #[serial(db)]
     fn test_deleting_org_cascades_to_godowns() {
-        reset_database();
+        let _db = TestDb::create();
         let org = make_org();
         Godown::create(org.id, "Doomed Godown", "X").expect("create");
         org.remove_organization().expect("remove org");

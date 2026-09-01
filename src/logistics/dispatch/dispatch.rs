@@ -136,31 +136,27 @@ impl DispatchOrder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logistics::test_support::reset_database;
-    use serial_test::serial;
+    use crate::logistics::test_support::TestDb;
 
     #[test]
-    #[serial(db)]
     fn test_get_by_id_returns_none_for_nonexistent_dispatch() {
-        reset_database();
+        let _db = TestDb::create();
         let result = DispatchOrder::get_by_id(Uuid::new_v4());
         assert!(result.is_ok(), "get_by_id should not error for a missing UUID");
         assert!(result.unwrap().is_none(), "should return None for a UUID that was never saved");
     }
 
     #[test]
-    #[serial(db)]
     fn test_list_by_org_returns_empty_for_unknown_org() {
-        reset_database();
+        let _db = TestDb::create();
         let result = DispatchOrder::list_by_org(Uuid::new_v4());
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
     }
 
     #[test]
-    #[serial(db)]
     fn test_list_all_succeeds() {
-        reset_database();
+        let _db = TestDb::create();
         let result = DispatchOrder::list_all();
         assert!(result.is_ok(), "list_all should succeed even when the table is empty");
     }

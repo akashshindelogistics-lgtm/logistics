@@ -66,8 +66,11 @@ jobs:
 
       # The test build (cfg(test)) connects to `logistics_test` and creates it
       # on demand — see src/logistics/test_support.rs and docs/testing-database.md.
-      # DB-touching tests are serialized and truncate every table before each
-      # test, so a warm database no longer masks failures.
+      # Every DB-touching test provisions its own logistics_test_<uuid>
+      # database via TestDb (Phase 3) and drops it when the test ends, so
+      # tests run at full parallelism instead of being serialized against one
+      # shared database. This step just seeds the base `logistics_test`
+      # database that TestDb's own connection.rs unit tests still target.
       - name: Create test database
         run: mysql -h 127.0.0.1 -u root -ppassword -e "CREATE DATABASE IF NOT EXISTS logistics_test;"
 
