@@ -5,11 +5,44 @@ use mysql::prelude::*;
 use mysql::*;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-pub const JWT_SECRET: &[u8] = b"logistics_jwt_secret_2024_changeme_in_prod";
 const TOKEN_EXPIRY_SECS: u64 = 86400; // 24 hours
+
+/// The HMAC secret used to sign and verify auth JWTs.
+///
+/// Resolved once, from the `JWT_SECRET` environment variable:
+///
+/// - a value of at least 32 characters is used as-is, in any build;
+/// - otherwise a `debug` build (this includes `cargo test` and `cargo run`)
+///   falls back to a fixed, clearly-insecure development secret so local work
+///   needs no setup;
+/// - otherwise a **release build panics** rather than sign tokens with a key
+///   that is public in this source tree.
+fn jwt_secret() -> &'static [u8] {
+    static SECRET: OnceLock<Vec<u8>> = OnceLock::new();
+    SECRET.get_or_init(|| match std::env::var("JWT_SECRET") {
+        Ok(s) if s.len() >= 32 => s.into_bytes(),
+        _ if cfg!(debug_assertions) => {
+            b"insecure-development-only-jwt-secret-change-me".to_vec()
+        }
+        Ok(_) => panic!(
+            "JWT_SECRET must be at least 32 characters — refusing to sign tokens with a short key"
+        ),
+        Err(_) => {
+            panic!("JWT_SECRET environment variable must be set for a release build")
+        }
+    })
+}
+
+/// Resolve the JWT secret now, so a release build with a missing or too-short
+/// `JWT_SECRET` fails at startup with a clear message rather than on the first
+/// login attempt. Call once from `main`.
+pub fn ensure_jwt_secret_configured() {
+    let _ = jwt_secret();
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
@@ -115,7 +148,7 @@ pub fn generate_token(org_id: Uuid, org_name: &str) -> Result<String, Box<dyn Er
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
+        &EncodingKey::from_secret(jwt_secret()),
     )?;
 
     Ok(token)
@@ -124,7 +157,7 @@ pub fn generate_token(org_id: Uuid, org_name: &str) -> Result<String, Box<dyn Er
 pub fn decode_token(token: &str) -> Result<Claims, Box<dyn Error>> {
     let data = decode::<Claims>(
         token,
-        &DecodingKey::from_secret(JWT_SECRET),
+        &DecodingKey::from_secret(jwt_secret()),
         &Validation::default(),
     )?;
     Ok(data.claims)
@@ -152,6 +185,14 @@ mod tests {
     fn test_decode_invalid_token_returns_error() {
         let result = decode_token("not.a.valid.jwt");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_active_jwt_secret_meets_the_length_floor() {
+        // Under `cargo test` this is the built-in dev fallback; a real
+        // deployment supplies its own via the JWT_SECRET env var. Either way
+        // the secret backing token signing must be at least 32 bytes.
+        assert!(jwt_secret().len() >= 32);
     }
 
     #[test]

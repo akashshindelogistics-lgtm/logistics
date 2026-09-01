@@ -32,6 +32,8 @@ services:
       PORT: 8080
       # The app self-provisions its schema (CREATE TABLE IF NOT EXISTS) on boot.
       DATABASE_URL: mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}
+      # Required — the release binary refuses to start without it.
+      JWT_SECRET: ${JWT_SECRET}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     expose:
       - "8080"
