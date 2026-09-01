@@ -98,6 +98,10 @@ pub struct CreateStockPayload {
     pub volume_in_size: i64,
     pub quantity: i64,
     pub description: String,
+    /// Optional reorder point — the item is flagged (`below_threshold`) once
+    /// `quantity` drops under this.
+    #[serde(default)]
+    pub reorder_threshold: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -105,18 +109,30 @@ pub struct UpdateStockPayload {
     pub volume_in_size: i64,
     pub quantity: i64,
     pub description: String,
+    /// Optional reorder point. Sending `null` (or omitting it) clears any
+    /// existing threshold.
+    #[serde(default)]
+    pub reorder_threshold: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateGodownPayload {
     pub name: String,
     pub address: String,
+    /// Optional total volume cap for the godown, in the same units as a
+    /// stock item's `volume_in_size * quantity`. Omit for no limit.
+    #[serde(default)]
+    pub max_capacity: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct UpdateGodownPayload {
     pub name: String,
     pub address: String,
+    /// Optional total volume cap. Sending `null` (or omitting it) removes an
+    /// existing cap.
+    #[serde(default)]
+    pub max_capacity: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -880,7 +896,7 @@ pub async fn create_godown(
             data: None,
         });
     }
-    match Godown::create(org_id, &payload.name, &payload.address) {
+    match Godown::create(org_id, &payload.name, &payload.address, payload.max_capacity) {
         Ok(godown) => HttpResponse::Created().json(ApiResponse {
             success: true,
             message: "Godown created successfully".to_string(),
@@ -944,7 +960,7 @@ pub async fn update_godown(
         Ok(g) => g,
         Err(resp) => return resp,
     };
-    match godown.update(&payload.name, &payload.address) {
+    match godown.update(&payload.name, &payload.address, payload.max_capacity) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: "Godown updated successfully".to_string(),
@@ -1038,6 +1054,7 @@ pub async fn update_godown_location(
     request_body = CreateStockPayload,
     responses(
         (status = 201, description = "Stock added successfully", body = StockResponse),
+        (status = 409, description = "Would exceed the godown's max_capacity", body = EmptyResponse),
         (status = 403, description = "Forbidden", body = EmptyResponse),
         (status = 404, description = "Godown not found", body = EmptyResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
@@ -1053,11 +1070,22 @@ pub async fn add_godown_stock(
         Ok(g) => g,
         Err(resp) => return resp,
     };
+
+    let incoming_volume = payload.volume_in_size.saturating_mul(payload.quantity);
+    if let Err(msg) = godown.check_capacity_for(incoming_volume, None) {
+        return HttpResponse::Conflict().json(ApiResponse::<String> {
+            success: false,
+            message: msg,
+            data: None,
+        });
+    }
+
     let stock = Stock::new(
         payload.volume_in_size,
         payload.quantity,
         &payload.description,
-    );
+    )
+    .with_reorder_threshold(payload.reorder_threshold);
 
     match stock.add_to_godown(godown.id) {
         Ok(_) => HttpResponse::Created().json(ApiResponse {
@@ -1082,6 +1110,7 @@ pub async fn add_godown_stock(
     request_body = UpdateStockPayload,
     responses(
         (status = 200, description = "Stock updated successfully", body = StockResponse),
+        (status = 409, description = "Would exceed the godown's max_capacity", body = EmptyResponse),
         (status = 403, description = "Forbidden", body = EmptyResponse),
         (status = 404, description = "Godown not found", body = EmptyResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
@@ -1097,8 +1126,23 @@ pub async fn update_godown_stock(
         Ok(g) => g,
         Err(resp) => return resp,
     };
+
+    let incoming_volume = payload.volume_in_size.saturating_mul(payload.quantity);
+    if let Err(msg) = godown.check_capacity_for(incoming_volume, Some(&payload.description)) {
+        return HttpResponse::Conflict().json(ApiResponse::<String> {
+            success: false,
+            message: msg,
+            data: None,
+        });
+    }
+
     let mut stock = Stock::new(0, 0, &payload.description);
-    match stock.update_in_godown(godown.id, payload.volume_in_size, payload.quantity) {
+    match stock.update_in_godown(
+        godown.id,
+        payload.volume_in_size,
+        payload.quantity,
+        payload.reorder_threshold,
+    ) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: "Stock updated successfully".to_string(),
@@ -2238,6 +2282,7 @@ mod tests {
             .set_json(&CreateGodownPayload {
                 name: godown_name.to_string(),
                 address: format!("Plot 1, {}", godown_name),
+                max_capacity: None,
             })
             .to_request();
         let body: ApiResponse<Godown> =
@@ -2290,6 +2335,7 @@ mod tests {
             .set_json(&CreateGodownPayload {
                 name: format!("{} Godown", org_name),
                 address: format!("1 {} Godown Road", org_name),
+                max_capacity: None,
             })
             .to_request();
         let body: ApiResponse<Godown> =
@@ -2303,6 +2349,7 @@ mod tests {
                 volume_in_size: 100,
                 quantity: 100,
                 description: "Dispatch Test Goods".to_string(),
+                reorder_threshold: None,
             })
             .to_request();
         test::call_service(app, req).await;
@@ -2369,6 +2416,7 @@ mod tests {
         let payload = CreateGodownPayload {
             name: "Ghost Godown".to_string(),
             address: "Nowhere".to_string(),
+            max_capacity: None,
         };
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/godowns", org_id))
@@ -2459,6 +2507,7 @@ mod tests {
         let payload = UpdateGodownPayload {
             name: "New Godown Name".to_string(),
             address: "New Godown Address".to_string(),
+            max_capacity: None,
         };
         let req = test::TestRequest::put()
             .uri(&format!("/api/godowns/{}", godown.id))
@@ -2498,6 +2547,7 @@ mod tests {
         let payload = UpdateGodownPayload {
             name: "Hacked Godown".to_string(),
             address: "Hacked Address".to_string(),
+            max_capacity: None,
         };
         let req = test::TestRequest::put()
             .uri(&format!("/api/godowns/{}", godown.id))
@@ -2615,6 +2665,7 @@ mod tests {
             volume_in_size: 50,
             quantity: 100,
             description: "Ghost Stock".to_string(),
+            reorder_threshold: None,
         };
         let req = test::TestRequest::post()
             .uri(&format!("/api/godowns/{}/stock", Uuid::new_v4()))
@@ -2636,6 +2687,7 @@ mod tests {
             volume_in_size: 50,
             quantity: 100,
             description: "Stolen Goods".to_string(),
+            reorder_threshold: None,
         };
         let req = test::TestRequest::post()
             .uri(&format!("/api/godowns/{}/stock", godown.id))
@@ -2659,6 +2711,7 @@ mod tests {
             volume_in_size: 200,
             quantity: 75,
             description: "Nonexistent Stock Description".to_string(),
+            reorder_threshold: None,
         };
         let req = test::TestRequest::put()
             .uri(&format!("/api/godowns/{}/stock", godown.id))
@@ -2697,6 +2750,7 @@ mod tests {
             volume_in_size: 999,
             quantity: 999,
             description: "Tampered Stock".to_string(),
+            reorder_threshold: None,
         };
         let req = test::TestRequest::put()
             .uri(&format!("/api/godowns/{}/stock", godown.id))
@@ -2926,6 +2980,7 @@ mod tests {
             volume_in_size: 100,
             quantity: 500,
             description: "Test Widget".to_string(),
+            reorder_threshold: None,
         };
         let req = test::TestRequest::post()
             .uri(&format!("/api/godowns/{}/stock", godown.id))
@@ -2939,6 +2994,126 @@ mod tests {
         let stock = body.data.unwrap();
         assert_eq!(stock.description, "Test Widget");
         assert_eq!(stock.quantity, 500);
+    }
+
+    #[actix_web::test]
+    async fn test_create_godown_persists_max_capacity() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+
+        let create_payload = CreateOrgPayload {
+            name: "Capacity Org".to_string(),
+            address: "1 Capacity Road".to_string(),
+            password: "pass".to_string(),
+        };
+        let req = test::TestRequest::post()
+            .uri("/api/orgs")
+            .set_json(&create_payload)
+            .to_request();
+        let org: ApiResponse<Organization> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let org = org.data.unwrap();
+        let auth = make_auth_header(org.id, &org.name);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/godowns", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&CreateGodownPayload {
+                name: "Capped".to_string(),
+                address: "Bay 1".to_string(),
+                max_capacity: Some(2_000),
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let body: ApiResponse<Godown> = test::read_body_json(resp).await;
+        assert_eq!(body.data.unwrap().max_capacity, Some(2_000));
+    }
+
+    #[actix_web::test]
+    async fn test_add_godown_stock_over_capacity_returns_409() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Overfill Org", "Small Godown").await;
+
+        // Give the godown a tight cap.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/godowns/{}", godown.id))
+            .insert_header(("Authorization", auth_header.clone()))
+            .set_json(&UpdateGodownPayload {
+                name: godown.name.clone(),
+                address: godown.address.clone(),
+                max_capacity: Some(1_000),
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        // 20 * 60 = 1200 > 1000 -> rejected.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth_header.clone()))
+            .set_json(&CreateStockPayload {
+                volume_in_size: 20,
+                quantity: 60,
+                description: "Bulky Crates".to_string(),
+                reorder_threshold: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 409);
+
+        // 20 * 40 = 800 <= 1000 -> accepted.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth_header))
+            .set_json(&CreateStockPayload {
+                volume_in_size: 20,
+                quantity: 40,
+                description: "Bulky Crates".to_string(),
+                reorder_threshold: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+    }
+
+    #[actix_web::test]
+    async fn test_add_godown_stock_reports_below_threshold() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Reorder Org", "Reorder Godown").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth_header.clone()))
+            .set_json(&CreateStockPayload {
+                volume_in_size: 1,
+                quantity: 8,
+                description: "Label Rolls".to_string(),
+                reorder_threshold: Some(25),
+            })
+            .to_request();
+        let body: ApiResponse<Stock> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let stock = body.data.unwrap();
+        assert_eq!(stock.reorder_threshold, Some(25));
+        assert!(stock.below_threshold);
+
+        // And it survives a reload of the godown.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/godowns/{}", godown.id))
+            .insert_header(("Authorization", auth_header))
+            .to_request();
+        let body: ApiResponse<Godown> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let reloaded = body.data.unwrap();
+        let item = reloaded
+            .stock
+            .iter()
+            .find(|s| s.description == "Label Rolls")
+            .unwrap();
+        assert!(item.below_threshold);
     }
 
     // ── Invalid-payload tests for routes missing them ─────────────────────────
@@ -3066,6 +3241,7 @@ mod tests {
         let payload = CreateGodownPayload {
             name: "Stolen Godown".to_string(),
             address: "Stolen Address".to_string(),
+            max_capacity: None,
         };
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/godowns", target_org_id))

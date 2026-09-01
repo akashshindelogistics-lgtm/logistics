@@ -547,7 +547,7 @@ mod tests {
         org.update_location(28.6139, 77.2090, Some("Delhi HQ")).expect("Failed to update org location");
 
         // Add a godown and stock it
-        let godown = Godown::create(org.id, "Delhi Godown", "Okhla Phase 1")
+        let godown = Godown::create(org.id, "Delhi Godown", "Okhla Phase 1", None)
             .expect("Failed to create godown");
         let stock = Stock::new(50, 100, "High-End Laptops");
         stock.add_to_godown(godown.id).expect("Failed to add stock");
