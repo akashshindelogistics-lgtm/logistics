@@ -69,6 +69,9 @@ jobs:
       - name: Start backend server
         run: ./target/release/logistics-system &
         env:
+          # Release builds require JWT_SECRET (>= 32 chars). Throwaway value for
+          # this ephemeral CI backend — not a real secret.
+          JWT_SECRET: ci-e2e-jwt-secret-not-a-real-secret-0123456789
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Wait for backend to be ready
