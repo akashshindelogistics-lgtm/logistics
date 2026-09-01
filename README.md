@@ -152,28 +152,30 @@ Key REST endpoints exposed by the server (see the
 [published Swagger UI](https://akashshindelogistics-lgtm.github.io/logistics/api-docs/)
 for the full spec, request/response schemas, and try-it-out support):
 
+All routes are served under the `/api` prefix.
+
 | Method | Path | Description |
 |---|---|---|
-| POST | `/auth/login` | Log in to an organization |
-| GET | `/auth/me` | Get the authenticated organization |
-| GET | `/auth/orgs` | List organizations available for login |
-| GET/POST | `/orgs` | List / create organizations |
-| GET/PUT/DELETE | `/orgs/{id}` | Get, update, or delete an organization |
-| PUT | `/orgs/{id}/location` | Update an organization's location |
-| GET/POST | `/orgs/{id}/godowns` | List / create an organization's godowns (warehouses) |
-| GET/PUT/DELETE | `/godowns/{gid}` | Get, rename/re-address, or delete a godown |
-| PUT | `/godowns/{gid}/location` | Update a godown's location |
-| POST/PUT/DELETE | `/godowns/{gid}/stock`, `/godowns/{gid}/stock/{desc}` | Add, update, or remove a godown's stock |
-| POST | `/orgs/{id}/vehicles` | Add a vehicle to an organization |
-| GET/DELETE | `/vehicles`, `/vehicles/{reg}` | List vehicles / remove one |
-| PUT | `/vehicles/{reg}/location` | Update a vehicle's location |
-| GET/POST | `/customers` | List / create customers |
-| PUT | `/customers/{id}/location` | Update a customer's location |
-| POST | `/orgs/{id}/dispatch` | Dispatch stock from an org to a customer |
-| GET | `/dispatches` | List dispatch orders |
-| PUT | `/dispatches/{id}/status` | Advance a dispatch's lifecycle status |
-| GET | `/dispatches/{id}/summary` | AI-generated summary of a dispatch |
-| GET | `/health` | Health check |
+| POST | `/api/auth/login` | Log in to an organization |
+| GET | `/api/auth/me` | Get the authenticated organization |
+| GET | `/api/auth/orgs` | List organizations available for login |
+| GET/POST | `/api/orgs` | List / create organizations |
+| GET/PUT/DELETE | `/api/orgs/{id}` | Get, update, or delete an organization |
+| PUT | `/api/orgs/{id}/location` | Update an organization's location |
+| GET/POST | `/api/orgs/{id}/godowns` | List / create an organization's godowns (warehouses) |
+| GET/PUT/DELETE | `/api/godowns/{gid}` | Get, rename/re-address, or delete a godown |
+| PUT | `/api/godowns/{gid}/location` | Update a godown's location |
+| POST/PUT/DELETE | `/api/godowns/{gid}/stock`, `/api/godowns/{gid}/stock/{desc}` | Add, update, or remove a godown's stock |
+| POST | `/api/orgs/{id}/vehicles` | Add a vehicle to an organization |
+| GET/DELETE | `/api/vehicles`, `/api/vehicles/{reg}` | List vehicles / remove one |
+| PUT | `/api/vehicles/{reg}/location` | Update a vehicle's location |
+| GET/POST | `/api/customers` | List / create customers |
+| PUT | `/api/customers/{id}/location` | Update a customer's location |
+| POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to a customer |
+| GET | `/api/dispatches` | List dispatch orders |
+| PUT | `/api/dispatches/{id}/status` | Advance a dispatch's lifecycle status |
+| GET | `/api/dispatches/{id}/summary` | AI-generated summary of a dispatch |
+| GET | `/api/health` | Health check |
 
 The published Swagger UI (see CI/CD below) has "Try it out" enabled and the
 server enables permissive CORS, so it can call the deployed API directly.

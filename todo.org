@@ -44,7 +44,14 @@
 ** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
 ** TODO Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
 * DONE Fix failing swagger ui doc generation github action - godown feature merge (PR #6) removed /api/orgs/{id}/stock* in favor of /api/orgs/{id}/godowns and /api/godowns/{gid}/..., but the workflow's expected-path list still checked for the old stock routes
-* TODO sync readme with updated apis
+* DONE sync readme with updated apis
+  The README "API overview" table listed every route without the `/api` prefix the
+  server actually mounts them under (`web::scope("/api")` in
+  src/logistics/server/routes.rs). Regenerated the OpenAPI spec (`cargo run --bin
+  gen_openapi`) and reconciled the table against it: all 30 operations were present
+  with the right methods and descriptions, only the paths were wrong. Prefixed every
+  path with `/api` and added a note that all routes are served under that prefix. The
+  pages.yml workflow's expected-path list was already correct.
 * DONE Add unit tests for all features implemented in the frontend
   Vitest + React Testing Library. Before this only dispatches (api client, lifecycle
   helpers, Dispatches page) had unit coverage. Added 16 new test files / 72 new tests
