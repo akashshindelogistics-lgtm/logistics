@@ -14,12 +14,18 @@ Orgs ──1:N──▶ Godowns ──1:N──▶ Stock
               optional location) volume_in_size)
 ```
 
-- `Godown { id, org_id, name, address, location? }` — `location` is the same
-  optional lat/long/timestamp/address shape used by orgs, vehicles and
-  customers, updated through `PUT /api/godowns/{id}/location`.
+- `Godown { id, org_id, name, address, max_capacity?, location? }` —
+  `location` is the same optional lat/long/timestamp/address shape used by
+  orgs, vehicles and customers, updated through
+  `PUT /api/godowns/{id}/location`. `max_capacity` is an optional cap on the
+  godown's total stored volume (Σ `volume_in_size × quantity`); adding or
+  updating stock that would push the total over it is rejected with `409`.
+  Set it on create or via `PUT /api/godowns/{id}`.
 - `Stock` rows now carry `godown_id` instead of `org_id`. A stock item is
   identified within a godown by its `description` (unchanged semantics, just
-  scoped to a godown rather than an org).
+  scoped to a godown rather than an org). An optional `reorder_threshold`
+  sets a restock point: reads expose a derived `below_threshold` flag that
+  is `true` once `quantity` drops under it.
 - `Organization` responses expose `godowns: Godown[]`, and each godown carries
   its own `stock: Stock[]`. The old flat `Organization.stock` field is gone.
 

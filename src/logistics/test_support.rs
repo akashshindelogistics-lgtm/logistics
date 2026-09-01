@@ -71,6 +71,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             org_id VARCHAR(36) NOT NULL,
             name VARCHAR(255) NOT NULL,
             address VARCHAR(255) NOT NULL,
+            max_capacity BIGINT DEFAULT NULL,
             latitude DOUBLE DEFAULT NULL,
             longitude DOUBLE DEFAULT NULL,
             last_updated_at BIGINT DEFAULT NULL,
@@ -102,6 +103,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             volume_in_size BIGINT NOT NULL,
             quantity BIGINT NOT NULL,
             description VARCHAR(255) NOT NULL,
+            reorder_threshold BIGINT DEFAULT NULL,
             godown_id VARCHAR(36) NOT NULL,
             CONSTRAINT fk_stock_godown FOREIGN KEY (godown_id) REFERENCES Godowns(id) ON DELETE CASCADE
         )",

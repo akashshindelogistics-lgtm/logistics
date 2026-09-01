@@ -7,22 +7,43 @@ use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+/// A unit of measure for cargo — used for a vehicle's rated capacity and,
+/// loosely, for talking about how much stock a shipment moves. `MetricTon`
+/// is the historical default and the fallback [`Unit::from_str`] returns for
+/// anything it doesn't recognize.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub enum Unit {
     MetricTon,
+    Kg,
+    Litre,
+    Box,
+    Pallet,
+    Piece,
 }
 
 impl Unit {
     pub fn as_str(&self) -> &'static str {
         match self {
             Unit::MetricTon => "MetricTon",
+            Unit::Kg => "Kg",
+            Unit::Litre => "Litre",
+            Unit::Box => "Box",
+            Unit::Pallet => "Pallet",
+            Unit::Piece => "Piece",
         }
     }
 
-    #[allow(dead_code)]
+    /// Parse a stored/incoming unit string. Accepts the canonical names
+    /// ([`Unit::as_str`]) case-insensitively; unknown input falls back to
+    /// `MetricTon` so a bad value never fails a request outright.
     pub fn from_str(s: &str) -> Self {
-        match s {
-            "MetricTon" => Unit::MetricTon,
+        match s.trim().to_ascii_lowercase().as_str() {
+            "kg" | "kilogram" | "kilograms" => Unit::Kg,
+            "litre" | "liter" | "l" => Unit::Litre,
+            "box" | "boxes" => Unit::Box,
+            "pallet" | "pallets" => Unit::Pallet,
+            "piece" | "pieces" | "pcs" => Unit::Piece,
+            "metricton" | "metric_ton" | "ton" | "tonne" | "mt" => Unit::MetricTon,
             _ => Unit::MetricTon,
         }
     }
@@ -394,5 +415,55 @@ mod tests {
             .expect("Failed to query database for removed vehicle");
 
         assert!(row.is_none(), "Vehicle record should be deleted from database");
+    }
+
+    #[test]
+    fn test_unit_as_str_round_trips_through_from_str() {
+        for unit in [
+            Unit::MetricTon,
+            Unit::Kg,
+            Unit::Litre,
+            Unit::Box,
+            Unit::Pallet,
+            Unit::Piece,
+        ] {
+            assert_eq!(Unit::from_str(unit.as_str()), unit);
+        }
+    }
+
+    #[test]
+    fn test_unit_from_str_is_case_insensitive_with_aliases() {
+        assert_eq!(Unit::from_str("KG"), Unit::Kg);
+        assert_eq!(Unit::from_str(" liter "), Unit::Litre);
+        assert_eq!(Unit::from_str("Pallets"), Unit::Pallet);
+        assert_eq!(Unit::from_str("pcs"), Unit::Piece);
+        assert_eq!(Unit::from_str("tonne"), Unit::MetricTon);
+    }
+
+    #[test]
+    fn test_unit_from_str_falls_back_to_metric_ton() {
+        assert_eq!(Unit::from_str("furlongs"), Unit::MetricTon);
+        assert_eq!(Unit::from_str(""), Unit::MetricTon);
+    }
+
+    #[test]
+    fn test_non_default_unit_persists_and_reloads() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Litre Fleet Org", "Tank Farm Rd")
+            .expect("create org");
+
+        let vehicle = Vehicle::new("GJ01 TT 4040", 12000, Unit::Litre);
+        vehicle.add_new_vehicle_to_org(&org).expect("add vehicle");
+
+        let reloaded = Organization::get_by_id(org.id)
+            .expect("get org")
+            .expect("org exists");
+        let v = reloaded
+            .vehicles
+            .iter()
+            .find(|v| v.registration_number == "GJ01 TT 4040")
+            .expect("vehicle present on org");
+        assert_eq!(v.unit, Unit::Litre);
+        assert_eq!(v.capacity, 12000);
     }
 }
