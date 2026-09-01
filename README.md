@@ -8,7 +8,8 @@
 
 [![Pages — Deploy Frontend + Swagger UI](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml)
 
-[![Deploy Backend](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/deploy-backend.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/deploy-backend.yml)
+[![Release](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml)
+&nbsp; [![Latest release](https://img.shields.io/github/v/release/akashshindelogistics-lgtm/logistics?sort=semver)](https://github.com/akashshindelogistics-lgtm/logistics/releases)
 
 A logistics management platform for tracking organizations, their vehicle
 fleets, stock, customers, and delivery dispatches. It ships as a Rust REST
@@ -102,9 +103,10 @@ operations, live location maps, and AI-generated dispatch summaries.
 
 ### Backend
 
-The server currently connects to a local MySQL instance with fixed
-credentials (`root` / `password` on `localhost:3306`), creating the
-`logistics` database automatically if it doesn't exist yet:
+By default the server connects to a local MySQL instance (`root` / `password`
+on `localhost:3306`), creating the `logistics` database automatically if it
+doesn't exist yet. Connection settings can be overridden with `DATABASE_URL`
+or the `MYSQL_*` variables (see `src/logistics/db/connection.rs`).
 
 ```bash
 # Start MySQL locally, e.g. via Docker
@@ -118,6 +120,11 @@ cargo run
 ```
 
 The API server starts at `http://127.0.0.1:8080`.
+
+> **Auth secret:** `debug` builds (`cargo run`, `cargo test`) use a built-in
+> development JWT secret. A **release build refuses to start** unless
+> `JWT_SECRET` is set to a random string of 32+ characters
+> (`openssl rand -base64 48`).
 
 To regenerate the OpenAPI spec used by Swagger UI:
 
@@ -190,32 +197,43 @@ instance instead.
 
 ## Deployment
 
-Free-tier hosting: the frontend + Swagger UI on **GitHub Pages**, the Rust
-API + MySQL on an **Oracle Cloud "Always Free"** VM (`docker compose` —
-Caddy for auto-HTTPS, plus a DuckDNS updater), both rolled out by GitHub
-Actions. Full runbook in [`deploy/README.md`](deploy/README.md).
+Free-tier hosting: the frontend + Swagger UI on **GitHub Pages** (the live
+demo, tracking `master`), the Rust API + MySQL on an **Oracle Cloud "Always
+Free"** VM (`docker compose` — Caddy for auto-HTTPS, plus a DuckDNS updater).
+Full runbook in [`deploy/README.md`](deploy/README.md).
+
+## Releases
+
+Backend and frontend are versioned together (SemVer). `release-please` keeps a
+rolling release PR from the conventional-commit history; merging it tags
+`vX.Y.Z`, which drives `release.yml` to publish the GHCR image
+(`logistics-api:X.Y.Z`), a `frontend-X.Y.Z.tar.gz` bundle, the OpenAPI spec,
+and a GitHub Release — optionally rolling the Oracle VM to that version. See
+[`docs/releasing.md`](docs/releasing.md) and the
+[Releases page](https://github.com/akashshindelogistics-lgtm/logistics/releases).
 
 ## CI/CD
 
 GitHub Actions workflows in `.github/workflows/`:
 
-- **pages.yml** — builds the React dashboard, validates the OpenAPI spec,
-  and deploys both to
+- **pages.yml** — builds the React dashboard, validates the OpenAPI spec, and
+  deploys both to
   [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/)
   (app at `/`, Swagger UI at `/api-docs/`) on push to `main`/`master`.
-- **deploy-backend.yml** — builds the API container, pushes it to GHCR, and
-  SSHes into the Oracle VM to roll it out with `docker compose`.
-- **swagger-pages.yml** — validates the OpenAPI spec and deploys the
-  Swagger UI to
-  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/) on
-  push to `main`/`master`.
-- **frontend-unit-tests.yml** — type-checks the frontend and runs its
-  Vitest unit suite. No backend or database needed, so it's the fastest
-  signal on a frontend change.
-- **frontend-integration.yml** — runs the Playwright end-to-end suite
-  against a MySQL service container.
-- **periodic-tests.yml** — runs the Cargo test suite on a schedule and on
-  every push/PR.
+- **release-please.yml** — maintains the release PR (version bump +
+  `CHANGELOG.md`) on push to `master`.
+- **release.yml** — on a `vX.Y.Z` tag: builds + pushes the API image, publishes
+  the frontend bundle + OpenAPI spec on a GitHub Release, optionally deploys the
+  VM.
+- **deploy-backend.yml** — manual (`workflow_dispatch`): pin the VM to any
+  existing GHCR image tag — redeploy or rollback.
+- **frontend-unit-tests.yml** — type-checks the frontend and runs its Vitest
+  unit suite. No backend or database needed, so it's the fastest signal on a
+  frontend change.
+- **frontend-integration.yml** — runs the Playwright end-to-end suite against a
+  MySQL service container.
+- **periodic-tests.yml** — runs the Cargo test suite on a schedule and on every
+  push/PR.
 
 ## Contributing
 

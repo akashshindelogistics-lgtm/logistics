@@ -1,0 +1,30 @@
+name: release-please
+
+# Maintains a rolling "release PR" off master: it bumps Cargo.toml +
+# frontend/package.json, updates CHANGELOG.md from the conventional-commit
+# history, and — when you merge it — creates the vX.Y.Z tag and GitHub Release.
+#
+# The version tag is what drives `release.yml` (image + artifacts + rollout).
+# GitHub does NOT run workflows for tags pushed with the default GITHUB_TOKEN,
+# so for the tag to trigger `release.yml` automatically, add a repo secret
+# RELEASE_PLEASE_TOKEN (a fine-grained PAT with contents:write + pull-requests:write).
+# Without it, everything still works — just run `release.yml` via "Run workflow"
+# (workflow_dispatch) after merging the release PR.
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

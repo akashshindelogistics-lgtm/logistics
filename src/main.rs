@@ -1,9 +1,14 @@
 use actix_cors::Cors;
 use actix_web::{App, HttpServer};
+use logistics_system::logistics::auth::auth::ensure_jwt_secret_configured;
 use logistics_system::logistics::server::routes::config_routes;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Fail fast on a release build that has no usable JWT_SECRET, instead of
+    // 500-ing on the first login.
+    ensure_jwt_secret_configured();
+
     // Bind host/port come from the environment so the same binary runs behind a
     // reverse proxy in a container (`0.0.0.0`, `PORT`) and directly on a
     // developer's machine (the `127.0.0.1:8080` defaults).

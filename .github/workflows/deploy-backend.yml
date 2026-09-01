@@ -1,83 +1,33 @@
-name: Deploy Backend — GHCR + Oracle VM
+name: Deploy Backend (manual)
 
-# Builds the API container, pushes it to GitHub Container Registry, then SSHes
-# into the Oracle Cloud "Always Free" VM and rolls out the new image with
-# docker compose.
+# Redeploy or roll back the API on the Oracle VM to an image tag that already
+# exists in GHCR (published by `release.yml` on a version tag). Building and the
+# normal release rollout both live in `release.yml`; this workflow is the
+# break-glass "pin the VM to <tag> now" button.
 #
-# Required repo secrets (Settings → Secrets and variables → Actions):
-#   SSH_HOST   public IP or hostname of the Oracle VM
-#   SSH_USER   login user (e.g. ubuntu / opc)
-#   SSH_KEY    private key (PEM) authorised on the VM
-#   SSH_PORT   optional, defaults to 22
+# Required repo secrets:  SSH_HOST, SSH_USER, SSH_KEY  (SSH_PORT optional)
 #
 # One-time on the VM:
-#   - install Docker + compose plugin, open ports 80/443 (and the OCI security list)
-#   - mkdir ~/logistics-deploy && put a filled-in .env there (see deploy/.env.example)
+#   - Docker + compose plugin installed, ports 80/443 open (host + OCI security list)
+#   - mkdir ~/logistics-deploy and put a filled-in .env there (deploy/.env.example)
 #   - if the GHCR package is private: `docker login ghcr.io` with a read:packages PAT
 
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'Dockerfile'
-      - '.dockerignore'
-      - 'deploy/**'
-      - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'GHCR image tag to deploy (e.g. 0.1.0, 0.1, latest)'
+        required: true
+        default: 'latest'
 
 concurrency:
-  group: deploy-backend-${{ github.ref }}
+  group: deploy-backend
   cancel-in-progress: false
 
 jobs:
-  build-push:
-    name: Build & push image
-    # Native arm64 runner (free for public repos). Oracle "Always Free" Ampere
-    # VMs are arm64, so we build a single-arch arm64 image here — no QEMU. An
-    # earlier multi-arch attempt failed because cross-compiling this crate for
-    # arm64 under QEMU emulation crashes rustc (exit 101).
-    runs-on: ubuntu-24.04-arm
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Lowercase image name
-        id: meta
-        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/logistics-api" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/arm64
-          tags: |
-            ${{ steps.meta.outputs.image }}:latest
-            ${{ steps.meta.outputs.image }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: false
-
   deploy:
     name: Roll out on Oracle VM
     runs-on: ubuntu-latest
-    needs: build-push
     steps:
       - uses: actions/checkout@v4
 
@@ -92,7 +42,7 @@ jobs:
           target: "logistics-deploy"
           strip_components: 1
 
-      - name: Pull and restart
+      - name: Pin image tag and roll out
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -103,6 +53,8 @@ jobs:
             set -euo pipefail
             cd ~/logistics-deploy
             test -f .env || { echo "Missing ~/logistics-deploy/.env"; exit 1; }
+            OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            sed -i "s#^API_IMAGE=.*#API_IMAGE=ghcr.io/${OWNER}/logistics-api:${{ github.event.inputs.image_tag }}#" .env
             docker compose --env-file .env pull
             docker compose --env-file .env up -d --remove-orphans
             docker image prune -f

@@ -1,0 +1,163 @@
+name: Release
+
+# Fires when a version tag is pushed (release-please creates these on merge of
+# its release PR; you can also tag by hand: `git tag v0.1.0 && git push --tags`).
+#
+# Produces, for tag vX.Y.Z:
+#   - GHCR image  ghcr.io/<owner>/logistics-api:X.Y.Z, :X.Y, :latest  (arm64)
+#   - frontend-X.Y.Z.tar.gz   (static build, root-relative)
+#   - openapi-X.Y.Z.json      (the generated OpenAPI spec)
+#   - a GitHub Release with auto-generated notes and those files attached
+#   - optionally, a rollout to the Oracle VM (set repo variable
+#     DEPLOY_ON_RELEASE=true and the SSH_* secrets)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to (re)release, e.g. v0.1.0'
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      minor: ${{ steps.v.outputs.minor }}
+    steps:
+      - id: v
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VER="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "minor=${VER%.*}" >> "$GITHUB_OUTPUT"
+
+  backend-image:
+    needs: version
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - id: meta
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/logistics-api" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/arm64
+          provenance: false
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ needs.version.outputs.version }}
+            ${{ steps.meta.outputs.image }}:${{ needs.version.outputs.minor }}
+            ${{ steps.meta.outputs.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  artifacts:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build frontend (root-relative)
+        working-directory: frontend
+        env:
+          VITE_BASE: /
+          VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: |
+          npm ci
+          npm run build
+          cp dist/index.html dist/404.html
+          tar -C dist -czf "../frontend-${{ needs.version.outputs.version }}.tar.gz" .
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Generate OpenAPI spec
+        run: cargo run --bin gen_openapi --release > "openapi-${{ needs.version.outputs.version }}.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            frontend-${{ needs.version.outputs.version }}.tar.gz
+            openapi-${{ needs.version.outputs.version }}.json
+          retention-days: 3
+
+  github-release:
+    needs: [version, backend-image, artifacts]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            frontend-${{ needs.version.outputs.version }}.tar.gz
+            openapi-${{ needs.version.outputs.version }}.json
+
+  deploy:
+    needs: [version, backend-image]
+    if: ${{ vars.DEPLOY_ON_RELEASE == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - name: Copy deploy files to the VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "deploy/docker-compose.yml,deploy/Caddyfile"
+          target: "logistics-deploy"
+          strip_components: 1
+      - name: Pin image tag and roll out
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd ~/logistics-deploy
+            test -f .env || { echo "Missing ~/logistics-deploy/.env"; exit 1; }
+            OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            sed -i "s#^API_IMAGE=.*#API_IMAGE=ghcr.io/${OWNER}/logistics-api:${{ needs.version.outputs.version }}#" .env
+            docker compose --env-file .env pull
+            docker compose --env-file .env up -d --remove-orphans
+            docker image prune -f
+            docker compose --env-file .env ps
