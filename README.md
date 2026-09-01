@@ -197,6 +197,10 @@ GitHub Actions workflows in `.github/workflows/`:
   (app at `/`, Swagger UI at `/api-docs/`) on push to `main`/`master`.
 - **deploy-backend.yml** — builds the API container, pushes it to GHCR, and
   SSHes into the Oracle VM to roll it out with `docker compose`.
+- **swagger-pages.yml** — validates the OpenAPI spec and deploys the
+  Swagger UI to
+  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/) on
+  push to `main`/`master`.
 - **frontend-unit-tests.yml** — type-checks the frontend and runs its
   Vitest unit suite. No backend or database needed, so it's the fastest
   signal on a frontend change.
