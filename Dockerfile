@@ -1,28 +1,25 @@
 # ---- Build stage ------------------------------------------------------------
-FROM rust:1-slim-bookworm AS builder
+# Full (not -slim) image: it already carries gcc, pkg-config, libssl-dev, git
+# and curl, which the `mysql` (native-tls / OpenSSL) and `utoipa-swagger-ui`
+# crates need to build.
+FROM rust:1-bookworm AS builder
 
-# `mysql` crate links native-tls (OpenSSL); utoipa-swagger-ui's build script
-# fetches the Swagger UI assets over HTTPS.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        pkg-config libssl-dev ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Be forgiving of flaky registry/CDN transfers in CI, and keep peak memory
+# down on the 4-core arm64 runners.
+ENV CARGO_NET_RETRY=10 \
+    CARGO_HTTP_TIMEOUT=300 \
+    CARGO_INCREMENTAL=0 \
+    CARGO_BUILD_JOBS=4
 
 WORKDIR /app
-
-# 1. Build just the dependencies against stub sources so this layer stays
-#    cached until Cargo.toml / Cargo.lock change.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir -p src src/bin \
-    && echo 'fn main() {}' > src/main.rs \
-    && echo '' > src/lib.rs \
-    && echo 'fn main() {}' > src/bin/gen_openapi.rs \
-    && cargo build --release --bin logistics-system \
-    && rm -rf src
-
-# 2. Build the real binary.
 COPY src ./src
-RUN touch src/main.rs src/lib.rs \
-    && cargo build --release --bin logistics-system \
+
+# Fetch first (network-only, retried) so a transient download failure is a
+# clear, isolated error rather than an opaque `cargo build` exit 101. Swagger
+# UI is vendored (Cargo.toml), so this is the only network the build needs.
+RUN cargo fetch --locked
+RUN cargo build --release --locked --bin logistics-system \
     && cp target/release/logistics-system /usr/local/bin/logistics-system
 
 # ---- Runtime stage ---------------------------------------------------------
