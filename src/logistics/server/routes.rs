@@ -2,7 +2,9 @@ use crate::logistics::auth::auth::{
     decode_token, generate_token, OrgCredentials, OrgSummary,
 };
 use crate::logistics::customer::customer::Customer;
-use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus, DispatchStatusEvent};
+use crate::logistics::dispatch::dispatch::{
+    DispatchOrder, DispatchStatus, DispatchStatusEvent, ProofOfDelivery, ProofOfDeliveryInput,
+};
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::stock::stock::Stock;
@@ -133,6 +135,16 @@ pub struct DispatchRequestPayload {
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct UpdateDispatchStatusPayload {
     pub status: DispatchStatus,
+    /// Required when `status` is `DELIVERED`; rejected with `400` if
+    /// missing. Ignored for every other status.
+    #[serde(default)]
+    pub proof_of_delivery: Option<ProofOfDeliveryPayload>,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct ProofOfDeliveryPayload {
+    pub receiver_name: String,
+    pub signature_or_photo_url: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -1394,7 +1406,15 @@ pub async fn update_dispatch_status(
         Err(resp) => return resp,
     };
 
-    match dispatch.transition_to(payload.status) {
+    let proof = payload
+        .proof_of_delivery
+        .as_ref()
+        .map(|p| ProofOfDeliveryInput {
+            receiver_name: p.receiver_name.clone(),
+            signature_or_photo_url: p.signature_or_photo_url.clone(),
+        });
+
+    match dispatch.transition_to(payload.status, proof) {
         Ok(()) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: format!("Dispatch status updated to {}", dispatch.status),
@@ -1529,9 +1549,10 @@ impl Modify for SecurityAddon {
             CreateOrgPayload, UpdateOrgPayload, LocationPayload,
             CreateVehiclePayload, CreateStockPayload, UpdateStockPayload,
             CreateGodownPayload, UpdateGodownPayload,
-            CreateCustomerPayload, DispatchRequestPayload, UpdateDispatchStatusPayload,
+            CreateCustomerPayload, DispatchRequestPayload,
+            UpdateDispatchStatusPayload, ProofOfDeliveryPayload,
             Organization, Vehicle, Unit, Location, Stock, Godown, Customer,
-            DispatchOrder, DispatchStatus, DispatchStatusEvent,
+            DispatchOrder, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             StockResponse, GodownResponse, GodownListResponse,
@@ -3116,6 +3137,7 @@ mod tests {
             .uri(&format!("/api/dispatches/{}/status", Uuid::new_v4()))
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Confirmed,
+                proof_of_delivery: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -3131,6 +3153,7 @@ mod tests {
             .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Confirmed,
+                proof_of_delivery: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -3165,6 +3188,7 @@ mod tests {
             ))
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Confirmed,
+                proof_of_delivery: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -3183,6 +3207,7 @@ mod tests {
             .insert_header(("Authorization", auth))
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Confirmed,
+                proof_of_delivery: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -3202,18 +3227,112 @@ mod tests {
         let app = test::init_service(App::new().configure(config_routes)).await;
         let (_org, dispatch, auth) = setup_dispatch(&app, "Status Illegal Org").await;
 
-        // PENDING -> DELIVERED skips CONFIRMED/LOADED/IN_TRANSIT — must be rejected.
+        // PENDING -> DELIVERED skips CONFIRMED/LOADED/IN_TRANSIT — must be rejected,
+        // even with proof of delivery attached (the state-machine check runs first).
         let req = test::TestRequest::put()
             .uri(&format!("/api/dispatches/{}/status", dispatch.id))
             .insert_header(("Authorization", auth))
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Delivered,
+                proof_of_delivery: Some(ProofOfDeliveryPayload {
+                    receiver_name: "Priya Sharma".to_string(),
+                    signature_or_photo_url: "https://example.com/sig.png".to_string(),
+                }),
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 400);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(!body.success);
+    }
+
+    /// Walk a fresh dispatch through PENDING -> CONFIRMED -> LOADED ->
+    /// IN_TRANSIT via the API, returning its auth header and id so a test
+    /// can attempt the final IN_TRANSIT -> DELIVERED move itself.
+    async fn advance_to_in_transit(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_name: &str,
+    ) -> (Uuid, String) {
+        let (_org, dispatch, auth) = setup_dispatch(app, org_name).await;
+        for status in [
+            DispatchStatus::Confirmed,
+            DispatchStatus::Loaded,
+            DispatchStatus::InTransit,
+        ] {
+            let req = test::TestRequest::put()
+                .uri(&format!("/api/dispatches/{}/status", dispatch.id))
+                .insert_header(("Authorization", auth.clone()))
+                .set_json(&UpdateDispatchStatusPayload {
+                    status,
+                    proof_of_delivery: None,
+                })
+                .to_request();
+            let resp = test::call_service(app, req).await;
+            assert_eq!(
+                resp.status().as_u16(),
+                200,
+                "advancing to {status} should succeed"
+            );
+        }
+        (dispatch.id, auth)
+    }
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_delivered_without_proof_returns_400() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (dispatch_id, auth) = advance_to_in_transit(&app, "POD Missing Org").await;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", dispatch_id))
+            .insert_header(("Authorization", auth))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Delivered,
+                proof_of_delivery: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+        assert!(body.message.contains("Proof of delivery"));
+    }
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_delivered_with_proof_succeeds() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (dispatch_id, auth) = advance_to_in_transit(&app, "POD Present Org").await;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", dispatch_id))
+            .insert_header(("Authorization", auth))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Delivered,
+                proof_of_delivery: Some(ProofOfDeliveryPayload {
+                    receiver_name: "Priya Sharma".to_string(),
+                    signature_or_photo_url: "https://example.com/sig.png".to_string(),
+                }),
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<DispatchOrder> = test::read_body_json(resp).await;
+        assert!(body.success);
+        let updated = body.data.unwrap();
+        assert_eq!(updated.status, DispatchStatus::Delivered);
+        let proof = updated.proof_of_delivery.expect("proof should be set");
+        assert_eq!(proof.receiver_name, "Priya Sharma");
+        assert_eq!(proof.signature_or_photo_url, "https://example.com/sig.png");
+        assert!(proof.delivered_at > 0);
+
+        // And it round-trips through a fresh fetch, not just the response.
+        let fetched = DispatchOrder::get_by_id(dispatch_id).unwrap().unwrap();
+        assert!(fetched.proof_of_delivery.is_some());
     }
 
     #[actix_web::test]

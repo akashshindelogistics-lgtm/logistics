@@ -24,7 +24,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Dispatches** — create dispatch orders that move stock from an
   organization to a customer, and advance each one through a lifecycle
   (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/`RETURNED`/
-  `CANCELLED`) with a full timestamped status history.
+  `CANCELLED`) with a full timestamped status history and proof of
+  delivery (receiver name plus a signature/photo) required to mark one
+  `DELIVERED`.
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
 - **Authentication** — org-level login secured with JWTs and bcrypt-hashed

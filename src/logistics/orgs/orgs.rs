@@ -299,6 +299,7 @@ impl Organization {
             status: DispatchStatus::Pending,
             dispatched_at: now,
             status_history: Vec::new(),
+            proof_of_delivery: None,
         };
 
         dispatch_order.save()?;

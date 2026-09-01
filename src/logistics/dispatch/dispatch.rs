@@ -48,6 +48,24 @@ fn ensure_status_history_table(conn: &mut mysql::PooledConn) -> Result<(), Box<d
     Ok(())
 }
 
+/// Kept in sync with `test_support::migrate`. One row per dispatch — a
+/// dispatch can only reach `DELIVERED` once (it's terminal), so this is
+/// never updated, only inserted.
+fn ensure_proof_of_delivery_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    conn.exec_drop(
+        "CREATE TABLE IF NOT EXISTS DispatchProofOfDelivery (
+            dispatch_id VARCHAR(36) PRIMARY KEY,
+            receiver_name VARCHAR(255) NOT NULL,
+            signature_or_photo_url TEXT NOT NULL,
+            delivered_at BIGINT NOT NULL,
+            CONSTRAINT fk_dispatch_pod_dispatch
+                FOREIGN KEY (dispatch_id) REFERENCES Dispatches(id) ON DELETE CASCADE
+        )",
+        (),
+    )?;
+    Ok(())
+}
+
 /// A dispatch's place in its lifecycle, from order creation to a final
 /// outcome. Modeled as a linear-with-branches state machine (see
 /// [`Self::can_transition_to`]) rather than a free-form string so an invalid
@@ -65,12 +83,12 @@ pub enum DispatchStatus {
     Loaded,
     /// The vehicle has left for the delivery address.
     InTransit,
-    /// Delivered to the customer. Terminal.
+    /// Delivered to the customer. Terminal. [`DispatchOrder::transition_to`]
+    /// requires a [`ProofOfDeliveryInput`] to reach this status.
     Delivered,
     /// Sent out but came back undelivered (e.g. customer refused, address
-    /// unreachable). Terminal. See todo.org for the planned proof-of-delivery
-    /// gate on `Delivered`; `Returned` has no such gate since nothing was
-    /// handed over.
+    /// unreachable). Terminal. No proof-of-delivery requirement — nothing
+    /// was handed over.
     Returned,
     /// Called off before it left the warehouse. Terminal.
     Cancelled,
@@ -177,6 +195,53 @@ impl DispatchStatusEvent {
     }
 }
 
+/// Evidence a dispatch was actually handed over, recorded when it's marked
+/// [`DispatchStatus::Delivered`]. Written once (a dispatch can only reach
+/// `DELIVERED` once) by [`DispatchOrder::transition_to`], never updated.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ProofOfDelivery {
+    pub receiver_name: String,
+    /// URL or data URI for a signature image or delivery photo. Free-form
+    /// text column — there is no file-upload/storage backing this yet, so
+    /// it's on the caller to host the image and pass a link, or inline a
+    /// small `data:` URI.
+    pub signature_or_photo_url: String,
+    /// Stamped by `transition_to` at the moment of the `DELIVERED`
+    /// transition (same instant as that status-history entry), not
+    /// supplied by the caller.
+    pub delivered_at: i64,
+}
+
+impl ProofOfDelivery {
+    fn get_by_dispatch(
+        conn: &mut mysql::PooledConn,
+        dispatch_id: Uuid,
+    ) -> Result<Option<Self>, Box<dyn Error>> {
+        let row: Option<(String, String, i64)> = conn.exec_first(
+            "SELECT receiver_name, signature_or_photo_url, delivered_at
+             FROM DispatchProofOfDelivery WHERE dispatch_id = :dispatch_id",
+            params! { "dispatch_id" => dispatch_id.to_string() },
+        )?;
+
+        Ok(row.map(
+            |(receiver_name, signature_or_photo_url, delivered_at)| ProofOfDelivery {
+                receiver_name,
+                signature_or_photo_url,
+                delivered_at,
+            },
+        ))
+    }
+}
+
+/// The receiver-supplied half of a [`ProofOfDelivery`] — everything a caller
+/// of [`DispatchOrder::transition_to`] provides; `delivered_at` is stamped
+/// by `transition_to` itself, not part of the input.
+#[derive(Debug, Clone)]
+pub struct ProofOfDeliveryInput {
+    pub receiver_name: String,
+    pub signature_or_photo_url: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DispatchOrder {
     pub id: Uuid,
@@ -192,6 +257,11 @@ pub struct DispatchOrder {
     /// [`Self::list_all`]; empty on a value that hasn't been saved yet.
     #[serde(default)]
     pub status_history: Vec<DispatchStatusEvent>,
+    /// Set once the dispatch is marked [`DispatchStatus::Delivered`] via
+    /// [`Self::transition_to`]. Populated by [`Self::get_by_id`] /
+    /// [`Self::list_by_org`] / [`Self::list_all`].
+    #[serde(default)]
+    pub proof_of_delivery: Option<ProofOfDelivery>,
 }
 
 impl DispatchOrder {
@@ -204,6 +274,7 @@ impl DispatchOrder {
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
         ensure_status_history_table(&mut conn)?;
+        ensure_proof_of_delivery_table(&mut conn)?;
 
         conn.exec_drop(
             "INSERT INTO Dispatches (id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at)
@@ -239,13 +310,22 @@ impl DispatchOrder {
     }
 
     /// Move this dispatch to `next`, validating against the lifecycle state
-    /// machine ([`DispatchStatus::can_transition_to`]). On success, updates
-    /// `status` on the `Dispatches` row, appends a `DispatchStatusHistory`
-    /// entry timestamped now, and updates `self.status` /
-    /// `self.status_history` in place so the caller doesn't need to re-fetch.
-    /// On an illegal transition, returns an `Err` describing why and leaves
-    /// `self` untouched.
-    pub fn transition_to(&mut self, next: DispatchStatus) -> Result<(), Box<dyn Error>> {
+    /// machine ([`DispatchStatus::can_transition_to`]). Moving to
+    /// [`DispatchStatus::Delivered`] additionally requires `proof_of_delivery`
+    /// — pass `None` for every other status.
+    ///
+    /// On success, updates `status` on the `Dispatches` row, appends a
+    /// `DispatchStatusHistory` entry timestamped now (and, for a delivery, a
+    /// `DispatchProofOfDelivery` row stamped with that same timestamp), and
+    /// updates `self.status` / `self.status_history` /
+    /// `self.proof_of_delivery` in place so the caller doesn't need to
+    /// re-fetch. On an illegal transition or a missing delivery proof,
+    /// returns an `Err` describing why and leaves `self` untouched.
+    pub fn transition_to(
+        &mut self,
+        next: DispatchStatus,
+        proof_of_delivery: Option<ProofOfDeliveryInput>,
+    ) -> Result<(), Box<dyn Error>> {
         if !self.status.can_transition_to(next) {
             return Err(format!(
                 "Cannot transition dispatch from {} to {}",
@@ -254,10 +334,18 @@ impl DispatchOrder {
             .into());
         }
 
+        if next == DispatchStatus::Delivered && proof_of_delivery.is_none() {
+            return Err(
+                "Proof of delivery (receiver name and a signature or photo) is required to mark a dispatch DELIVERED"
+                    .into(),
+            );
+        }
+
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
         ensure_status_history_table(&mut conn)?;
+        ensure_proof_of_delivery_table(&mut conn)?;
 
         let changed_at = now_unix();
 
@@ -279,6 +367,24 @@ impl DispatchOrder {
             },
         )?;
 
+        if let Some(proof) = proof_of_delivery {
+            conn.exec_drop(
+                "INSERT INTO DispatchProofOfDelivery (dispatch_id, receiver_name, signature_or_photo_url, delivered_at)
+                 VALUES (:dispatch_id, :receiver_name, :signature_or_photo_url, :delivered_at)",
+                params! {
+                    "dispatch_id" => self.id.to_string(),
+                    "receiver_name" => &proof.receiver_name,
+                    "signature_or_photo_url" => &proof.signature_or_photo_url,
+                    "delivered_at" => changed_at,
+                },
+            )?;
+            self.proof_of_delivery = Some(ProofOfDelivery {
+                receiver_name: proof.receiver_name,
+                signature_or_photo_url: proof.signature_or_photo_url,
+                delivered_at: changed_at,
+            });
+        }
+
         self.status = next;
         self.status_history.push(DispatchStatusEvent {
             status: next,
@@ -293,6 +399,7 @@ impl DispatchOrder {
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
         ensure_status_history_table(&mut conn)?;
+        ensure_proof_of_delivery_table(&mut conn)?;
 
         let row: Option<(String, String, String, String, String, i64, String, i64)> = conn
             .exec_first(
@@ -304,7 +411,8 @@ impl DispatchOrder {
             return Ok(None);
         };
         let history = DispatchStatusEvent::list_by_dispatch(&mut conn, id)?;
-        Ok(Some(Self::row_to_order(row, history)))
+        let proof = ProofOfDelivery::get_by_dispatch(&mut conn, id)?;
+        Ok(Some(Self::row_to_order(row, history, proof)))
     }
 
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
@@ -312,6 +420,7 @@ impl DispatchOrder {
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
         ensure_status_history_table(&mut conn)?;
+        ensure_proof_of_delivery_table(&mut conn)?;
 
         let rows: Vec<(String, String, String, String, String, i64, String, i64)> = conn.exec_map(
             "SELECT id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at FROM Dispatches",
@@ -329,6 +438,7 @@ impl DispatchOrder {
         let mut conn = db_connection.get_connection()?;
         ensure_dispatches_table(&mut conn)?;
         ensure_status_history_table(&mut conn)?;
+        ensure_proof_of_delivery_table(&mut conn)?;
 
         let rows: Vec<(String, String, String, String, String, i64, String, i64)> = conn.exec_map(
             "SELECT id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at FROM Dispatches WHERE org_id = :org_id",
@@ -344,6 +454,7 @@ impl DispatchOrder {
     fn row_to_order(
         row: (String, String, String, String, String, i64, String, i64),
         status_history: Vec<DispatchStatusEvent>,
+        proof_of_delivery: Option<ProofOfDelivery>,
     ) -> Self {
         let (id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at) = row;
         DispatchOrder {
@@ -356,12 +467,14 @@ impl DispatchOrder {
             status: status.parse().unwrap_or(DispatchStatus::Pending),
             dispatched_at,
             status_history,
+            proof_of_delivery,
         }
     }
 
-    /// Fetch each row's status history and assemble the full `DispatchOrder`
-    /// list. One history query per dispatch, matching the N+1-per-parent
-    /// pattern `Godown::list_by_org` already uses for its stock.
+    /// Fetch each row's status history and proof of delivery (if any) and
+    /// assemble the full `DispatchOrder` list. Two extra queries per
+    /// dispatch, matching the N+1-per-parent pattern `Godown::list_by_org`
+    /// already uses for its stock.
     fn rows_to_orders(
         conn: &mut mysql::PooledConn,
         rows: Vec<(String, String, String, String, String, i64, String, i64)>,
@@ -370,7 +483,8 @@ impl DispatchOrder {
             .map(|row| {
                 let id = Uuid::parse_str(&row.0).unwrap_or_else(|_| Uuid::new_v4());
                 let history = DispatchStatusEvent::list_by_dispatch(conn, id)?;
-                Ok(Self::row_to_order(row, history))
+                let proof = ProofOfDelivery::get_by_dispatch(conn, id)?;
+                Ok(Self::row_to_order(row, history, proof))
             })
             .collect()
     }
@@ -393,6 +507,14 @@ mod tests {
             status,
             dispatched_at: 1_700_000_000,
             status_history: Vec::new(),
+            proof_of_delivery: None,
+        }
+    }
+
+    fn sample_proof() -> ProofOfDeliveryInput {
+        ProofOfDeliveryInput {
+            receiver_name: "Priya Sharma".to_string(),
+            signature_or_photo_url: "https://example.com/pod/sig123.png".to_string(),
         }
     }
 
@@ -450,7 +572,7 @@ mod tests {
         order.save().expect("save");
 
         order
-            .transition_to(Confirmed)
+            .transition_to(Confirmed, None)
             .expect("PENDING -> CONFIRMED is legal");
         assert_eq!(order.status, Confirmed);
         assert_eq!(order.status_history.len(), 2);
@@ -469,7 +591,7 @@ mod tests {
         let mut order = sample_order(Pending);
         order.save().expect("save");
 
-        let result = order.transition_to(Delivered);
+        let result = order.transition_to(Delivered, Some(sample_proof()));
         assert!(result.is_err(), "PENDING -> DELIVERED should be rejected");
         assert_eq!(
             order.status, Pending,
@@ -492,8 +614,8 @@ mod tests {
         let mut order = sample_order(Cancelled);
         order.save().expect("save");
 
-        assert!(order.transition_to(Confirmed).is_err());
-        assert!(order.transition_to(Pending).is_err());
+        assert!(order.transition_to(Confirmed, None).is_err());
+        assert!(order.transition_to(Pending, None).is_err());
         assert_eq!(order.status, Cancelled);
     }
 
@@ -504,13 +626,19 @@ mod tests {
         order.save().expect("save");
 
         for next in [Confirmed, Loaded, InTransit, Delivered] {
+            let proof = (next == Delivered).then(sample_proof);
             order
-                .transition_to(next)
+                .transition_to(next, proof)
                 .unwrap_or_else(|e| panic!("{} should be legal: {e}", next));
         }
         assert_eq!(order.status, Delivered);
         assert!(order.status.is_terminal());
         assert_eq!(order.status_history.len(), 5); // PENDING + 4 transitions
+        let proof = order
+            .proof_of_delivery
+            .as_ref()
+            .expect("proof should be set");
+        assert_eq!(proof.receiver_name, "Priya Sharma");
     }
 
     #[test]
