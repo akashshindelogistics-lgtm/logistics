@@ -1,0 +1,15 @@
+# Caddy terminates TLS (auto Let's Encrypt, HTTP-01 challenge on port 80) and
+# proxies everything to the API container. The API already sends permissive
+# CORS headers, so the GitHub Pages origin can call it directly.
+
+{$DOMAIN} {
+	encode zstd gzip
+	tls {$ACME_EMAIL}
+
+	reverse_proxy api:8080
+
+	log {
+		output stdout
+		format console
+	}
+}

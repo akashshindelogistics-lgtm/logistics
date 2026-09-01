@@ -2,8 +2,11 @@ import axios from 'axios';
 
 const TOKEN_KEY = 'logi_token';
 
+// In dev the Vite proxy forwards `/api` to the local backend. In a deployed
+// build (e.g. the static site on GitHub Pages) the API lives on another origin,
+// so point VITE_API_BASE_URL at it — e.g. https://logi-api.duckdns.org/api
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   headers: { 'Content-Type': 'application/json' },
 });
 

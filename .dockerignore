@@ -1,0 +1,9 @@
+target/
+frontend/
+docs/
+.git/
+.github/
+.claude/
+deploy/
+*.md
+todo.org
