@@ -2,7 +2,7 @@ use crate::logistics::auth::auth::{
     decode_token, generate_token, OrgCredentials, OrgSummary,
 };
 use crate::logistics::customer::customer::Customer;
-use crate::logistics::dispatch::dispatch::DispatchOrder;
+use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus, DispatchStatusEvent};
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::stock::stock::Stock;
@@ -128,6 +128,11 @@ pub struct DispatchRequestPayload {
     pub customer_id: Uuid,
     pub stock_description: String,
     pub requested_quantity: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct UpdateDispatchStatusPayload {
+    pub status: DispatchStatus,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -1236,6 +1241,34 @@ pub async fn update_customer_location(
 
 // ── Dispatch handlers (protected) ─────────────────────────────────────────────
 
+/// Load a dispatch by id and verify it belongs to `auth_org_id`, or build the
+/// 403/404/500 response a handler should return early with.
+fn load_owned_dispatch(
+    dispatch_id: Uuid,
+    auth_org_id: Uuid,
+) -> Result<DispatchOrder, HttpResponse> {
+    match DispatchOrder::get_by_id(dispatch_id) {
+        Ok(Some(dispatch)) if dispatch.org_id == auth_org_id => Ok(dispatch),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: dispatch belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Dispatch order not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch dispatch: {}", err),
+                data: None,
+            }),
+        ),
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/api/dispatches",
@@ -1335,6 +1368,46 @@ pub async fn dispatch_stock(
     }
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/dispatches/{id}/status",
+    tag = "Dispatch",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Dispatch order UUID")),
+    request_body = UpdateDispatchStatusPayload,
+    responses(
+        (status = 200, description = "Dispatch status updated", body = DispatchOrderResponse),
+        (status = 400, description = "Illegal transition for the dispatch's current status", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Dispatch not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/dispatches/{id}/status")]
+pub async fn update_dispatch_status(
+    path: web::Path<Uuid>,
+    payload: web::Json<UpdateDispatchStatusPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+
+    match dispatch.transition_to(payload.status) {
+        Ok(()) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Dispatch status updated to {}", dispatch.status),
+            data: Some(dispatch),
+        }),
+        Err(err) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Status update failed: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── AI dispatch summary (protected) ──────────────────────────────────────────
 
 #[utoipa::path(
@@ -1355,33 +1428,10 @@ pub async fn get_dispatch_summary(
     path: web::Path<Uuid>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
-    let dispatch_id = path.into_inner();
-
-    let dispatch = match DispatchOrder::get_by_id(dispatch_id) {
-        Ok(Some(d)) => d,
-        Ok(None) => {
-            return HttpResponse::NotFound().json(ApiResponse::<String> {
-                success: false,
-                message: "Dispatch order not found".to_string(),
-                data: None,
-            })
-        }
-        Err(err) => {
-            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
-                success: false,
-                message: format!("Failed to fetch dispatch: {}", err),
-                data: None,
-            })
-        }
+    let dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
     };
-
-    if dispatch.org_id != auth.org_id {
-        return HttpResponse::Forbidden().json(ApiResponse::<String> {
-            success: false,
-            message: "Access denied: dispatch belongs to a different organization".to_string(),
-            data: None,
-        });
-    }
 
     let customer = match Customer::get_by_id(dispatch.customer_id) {
         Ok(Some(c)) => c,
@@ -1470,6 +1520,7 @@ impl Modify for SecurityAddon {
         update_customer_location,
         list_dispatches,
         dispatch_stock,
+        update_dispatch_status,
         get_dispatch_summary,
     ),
     components(
@@ -1478,8 +1529,9 @@ impl Modify for SecurityAddon {
             CreateOrgPayload, UpdateOrgPayload, LocationPayload,
             CreateVehiclePayload, CreateStockPayload, UpdateStockPayload,
             CreateGodownPayload, UpdateGodownPayload,
-            CreateCustomerPayload, DispatchRequestPayload,
-            Organization, Vehicle, Unit, Location, Stock, Godown, Customer, DispatchOrder,
+            CreateCustomerPayload, DispatchRequestPayload, UpdateDispatchStatusPayload,
+            Organization, Vehicle, Unit, Location, Stock, Godown, Customer,
+            DispatchOrder, DispatchStatus, DispatchStatusEvent,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             StockResponse, GodownResponse, GodownListResponse,
@@ -1531,6 +1583,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(update_customer_location)
             .service(list_dispatches)
             .service(dispatch_stock)
+            .service(update_dispatch_status)
             .service(get_dispatch_summary),
     )
     .service(
@@ -2171,6 +2224,105 @@ mod tests {
         let godown = body.data.unwrap();
 
         (org, godown, auth_header)
+    }
+
+    /// Create an org with a vehicle, a godown with stock, and a customer
+    /// with a location, then dispatch stock to that customer, returning
+    /// `(org, dispatch, auth_header)`. Shared by the dispatch status and
+    /// summary route tests below.
+    async fn setup_dispatch(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_name: &str,
+    ) -> (Organization, DispatchOrder, String) {
+        let create_payload = CreateOrgPayload {
+            name: org_name.to_string(),
+            address: format!("1 {} Road", org_name),
+            password: "dispatch_test_pass".to_string(),
+        };
+        let req = test::TestRequest::post()
+            .uri("/api/orgs")
+            .set_json(&create_payload)
+            .to_request();
+        let body: ApiResponse<Organization> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        let org = body.data.unwrap();
+        let auth = make_auth_header(org.id, &org.name);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vehicles", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateVehiclePayload {
+                registration_number: "DISP-VH-001".to_string(),
+                capacity: 20,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        test::call_service(app, req).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/godowns", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateGodownPayload {
+                name: format!("{} Godown", org_name),
+                address: format!("1 {} Godown Road", org_name),
+            })
+            .to_request();
+        let body: ApiResponse<Godown> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        let godown = body.data.unwrap();
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateStockPayload {
+                volume_in_size: 100,
+                quantity: 100,
+                description: "Dispatch Test Goods".to_string(),
+            })
+            .to_request();
+        test::call_service(app, req).await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/customers")
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateCustomerPayload {
+                name: format!("{} Customer", org_name),
+                address: "2 Test Lane".to_string(),
+            })
+            .to_request();
+        let body: ApiResponse<Customer> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        let customer = body.data.unwrap();
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/customers/{}/location", customer.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&LocationPayload {
+                latitude: 19.0760,
+                longitude: 72.8777,
+                address: Some("Mumbai".to_string()),
+            })
+            .to_request();
+        test::call_service(app, req).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&DispatchRequestPayload {
+                customer_id: customer.id,
+                stock_description: "Dispatch Test Goods".to_string(),
+                requested_quantity: 10,
+            })
+            .to_request();
+        let body: ApiResponse<DispatchOrder> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        let dispatch = body.data.unwrap();
+
+        (org, dispatch, auth)
     }
 
     #[actix_web::test]
@@ -2938,101 +3090,128 @@ mod tests {
     async fn test_get_dispatch_summary_different_org_returns_403() {
         let _db = TestDb::create();
         let app = test::init_service(App::new().configure(config_routes)).await;
-
-        // Set up an org with a vehicle, stock, and customer, then create a dispatch
-        let create_payload = CreateOrgPayload {
-            name: "Summary Source Org".to_string(),
-            address: "1 Summary Road".to_string(),
-            password: "sum_pass".to_string(),
-        };
-        let req = test::TestRequest::post()
-            .uri("/api/orgs")
-            .set_json(&create_payload)
-            .to_request();
-        let body: ApiResponse<Organization> =
-            test::read_body_json(test::call_service(&app, req).await).await;
-        let org = body.data.unwrap();
-        let auth = make_auth_header(org.id, &org.name);
-
-        let req = test::TestRequest::post()
-            .uri(&format!("/api/orgs/{}/vehicles", org.id))
-            .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateVehiclePayload {
-                registration_number: "SUM-VH-001".to_string(),
-                capacity: 20,
-                unit: "MetricTon".to_string(),
-            })
-            .to_request();
-        test::call_service(&app, req).await;
-
-        let req = test::TestRequest::post()
-            .uri(&format!("/api/orgs/{}/godowns", org.id))
-            .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateGodownPayload {
-                name: "Summary Godown".to_string(),
-                address: "1 Summary Godown Road".to_string(),
-            })
-            .to_request();
-        let body: ApiResponse<Godown> =
-            test::read_body_json(test::call_service(&app, req).await).await;
-        let godown = body.data.unwrap();
-
-        let req = test::TestRequest::post()
-            .uri(&format!("/api/godowns/{}/stock", godown.id))
-            .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateStockPayload {
-                volume_in_size: 100,
-                quantity: 100,
-                description: "Summary Goods".to_string(),
-            })
-            .to_request();
-        test::call_service(&app, req).await;
-
-        let req = test::TestRequest::post()
-            .uri("/api/customers")
-            .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateCustomerPayload {
-                name: "Summary Customer".to_string(),
-                address: "2 Summary Lane".to_string(),
-            })
-            .to_request();
-        let body: ApiResponse<Customer> =
-            test::read_body_json(test::call_service(&app, req).await).await;
-        let customer = body.data.unwrap();
-
-        // Set customer location (required for dispatch)
-        let req = test::TestRequest::put()
-            .uri(&format!("/api/customers/{}/location", customer.id))
-            .insert_header(("Authorization", auth.clone()))
-            .set_json(&LocationPayload {
-                latitude: 19.0760,
-                longitude: 72.8777,
-                address: Some("Mumbai".to_string()),
-            })
-            .to_request();
-        test::call_service(&app, req).await;
-
-        // Create a dispatch
-        let req = test::TestRequest::post()
-            .uri(&format!("/api/orgs/{}/dispatch", org.id))
-            .insert_header(("Authorization", auth.clone()))
-            .set_json(&DispatchRequestPayload {
-                customer_id: customer.id,
-                stock_description: "Summary Goods".to_string(),
-                requested_quantity: 10,
-            })
-            .to_request();
-        let body: ApiResponse<DispatchOrder> =
-            test::read_body_json(test::call_service(&app, req).await).await;
-        let dispatch = body.data.unwrap();
+        let (_org, dispatch, _auth) = setup_dispatch(&app, "Summary Source Org").await;
 
         // Request summary with a different org's token — must be 403
         let req = test::TestRequest::get()
             .uri(&format!("/api/dispatches/{}/summary", dispatch.id))
-            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .insert_header((
+                "Authorization",
+                make_auth_header(Uuid::new_v4(), "Attacker"),
+            ))
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 403);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(!body.success);
+    }
+
+    // ── PUT /api/dispatches/{id}/status ───────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_without_token_returns_401() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", Uuid::new_v4()))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Confirmed,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_nonexistent_dispatch_returns_404() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", Uuid::new_v4()))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Confirmed,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_invalid_payload() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", Uuid::new_v4()))
+            .insert_header(("Content-Type", "application/json"))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
+            .set_payload("{bad json}")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_returns_403_for_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, dispatch, _auth) = setup_dispatch(&app, "Status Owner Org").await;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", dispatch.id))
+            .insert_header((
+                "Authorization",
+                make_auth_header(Uuid::new_v4(), "Attacker"),
+            ))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Confirmed,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_valid_transition_succeeds() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, dispatch, auth) = setup_dispatch(&app, "Status Transition Org").await;
+        assert_eq!(dispatch.status, DispatchStatus::Pending);
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", dispatch.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Confirmed,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<DispatchOrder> = test::read_body_json(resp).await;
+        assert!(body.success);
+        let updated = body.data.unwrap();
+        assert_eq!(updated.status, DispatchStatus::Confirmed);
+        assert_eq!(updated.status_history.len(), 2);
+        assert_eq!(updated.status_history[0].status, DispatchStatus::Pending);
+        assert_eq!(updated.status_history[1].status, DispatchStatus::Confirmed);
+    }
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_rejects_illegal_transition() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, dispatch, auth) = setup_dispatch(&app, "Status Illegal Org").await;
+
+        // PENDING -> DELIVERED skips CONFIRMED/LOADED/IN_TRANSIT — must be rejected.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", dispatch.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Delivered,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(!body.success);
     }

@@ -136,6 +136,18 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create Dispatches");
 
     conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS DispatchStatusHistory (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            dispatch_id VARCHAR(36) NOT NULL,
+            status VARCHAR(50) NOT NULL,
+            changed_at BIGINT NOT NULL,
+            CONSTRAINT fk_dispatch_status_history_dispatch
+                FOREIGN KEY (dispatch_id) REFERENCES Dispatches(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create DispatchStatusHistory");
+
+    conn.query_drop(
         "CREATE TABLE IF NOT EXISTS OrgCredentials (
             org_id VARCHAR(36) PRIMARY KEY,
             org_name VARCHAR(255) NOT NULL,
