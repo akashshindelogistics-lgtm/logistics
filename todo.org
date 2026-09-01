@@ -45,6 +45,7 @@
 ** TODO Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
 * DONE Fix failing swagger ui doc generation github action - godown feature merge (PR #6) removed /api/orgs/{id}/stock* in favor of /api/orgs/{id}/godowns and /api/godowns/{gid}/..., but the workflow's expected-path list still checked for the old stock routes
 * TODO sync readme with updated apis
+* TODO remove main branch, make master the default branch on GitHub - origin/HEAD still points at main, but every PR targets master
 * DONE Add unit tests for all features implemented in the frontend
   Vitest + React Testing Library. Before this only dispatches (api client, lifecycle
   helpers, Dispatches page) had unit coverage. Added 16 new test files / 72 new tests
