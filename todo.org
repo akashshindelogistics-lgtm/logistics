@@ -39,3 +39,4 @@
 ** TODO Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
 ** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
 ** TODO Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
+* DONE Fix failing swagger ui doc generation github action - godown feature merge (PR #6) removed /api/orgs/{id}/stock* in favor of /api/orgs/{id}/godowns and /api/godowns/{gid}/..., but the workflow's expected-path list still checked for the old stock routes
