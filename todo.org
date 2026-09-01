@@ -36,7 +36,13 @@
    dispatch_stock_to_customer now only considers vehicles JOINed to an
    is_active driver; with none it returns a 400 telling the caller to
    assign one. Deleting a driver clears the assignment. UI not updated.
-** TODO [#B] Check the requested stock's volume/quantity against the selected vehicle's capacity before dispatch, and mark a vehicle unavailable while it has an active trip so `dispatch_stock_to_customer` can't double-book the same truck onto two orders at once
+** DONE [#B] Check the requested stock's volume/quantity against the selected vehicle's capacity before dispatch, and mark a vehicle unavailable while it has an active trip so `dispatch_stock_to_customer` can't double-book the same truck onto two orders at once
+   Vehicle selection in dispatch_stock_to_customer now also filters on
+   v.capacity >= (stock.volume_in_size * requested_quantity) and excludes
+   any vehicle with a Dispatches row in a non-terminal status. A tiered
+   error distinguishes "no vehicles" / "none with an active driver" /
+   "none free and large enough". Freeing a trip (DELIVERED/RETURNED/
+   CANCELLED) returns its vehicle to the pool.
 ** TODO Allow one dispatch to carry multiple stock line items - today `dispatch_stock_to_customer` takes a single `stock_description`, but a real shipment usually mixes several SKUs in one trip
 ** TODO Support stock transfer between two godowns of the same org (distinct from dispatch-to-customer), with an audit trail of the move
 ** DONE Add a low-stock / reorder threshold per stock item so a godown can be flagged when quantity drops below it

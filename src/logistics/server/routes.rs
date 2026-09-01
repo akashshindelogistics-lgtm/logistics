@@ -2623,7 +2623,7 @@ mod tests {
             .insert_header(("Authorization", auth.clone()))
             .set_json(&CreateVehiclePayload {
                 registration_number: "DISP-VH-001".to_string(),
-                capacity: 20,
+                capacity: 100_000,
                 unit: "MetricTon".to_string(),
             })
             .to_request();
