@@ -46,3 +46,4 @@
 * DONE Fix failing swagger ui doc generation github action - godown feature merge (PR #6) removed /api/orgs/{id}/stock* in favor of /api/orgs/{id}/godowns and /api/godowns/{gid}/..., but the workflow's expected-path list still checked for the old stock routes
 * TODO sync readme with updated apis
 * TODO Add unit tests for all features implemented in the frontend
+* TODO remove main branch, make master the default branch on GitHub - origin/HEAD still points at main, but every PR targets master
