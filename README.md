@@ -1,6 +1,6 @@
 # Logistics System
 
-[![Frontend Integration Tests (Playwright)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml)
+[![Frontend Tests (Unit + Playwright)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml)
 
 [![Periodic Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml)
 
@@ -131,8 +131,12 @@ at `http://127.0.0.1:8080`.
 # Rust unit tests
 cargo test
 
-# Frontend end-to-end tests (Playwright)
 cd frontend
+
+# Frontend unit tests (Vitest)
+npm run test:unit
+
+# Frontend end-to-end tests (Playwright)
 npm run test:e2e
 ```
 
@@ -180,8 +184,8 @@ GitHub Actions workflows in `.github/workflows/`:
   Swagger UI to
   [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/) on
   push to `main`/`master`.
-- **frontend-integration.yml** — runs the Playwright end-to-end suite
-  against a MySQL service container.
+- **frontend-integration.yml** — runs the frontend Vitest unit suite, then
+  the Playwright end-to-end suite against a MySQL service container.
 - **periodic-tests.yml** — runs the Cargo test suite on a schedule and on
   every push/PR.
 

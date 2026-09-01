@@ -146,7 +146,9 @@ test.describe('Dispatches', () => {
     await page.goto('/dispatches');
     await expect(page.getByText(stockDesc)).toBeVisible({ timeout: 8000 });
     await expect(page.getByText(reg)).toBeVisible();
-    await expect(page.getByText('DISPATCHED', { exact: true })).toBeVisible();
+    // A freshly dispatched order starts its lifecycle at PENDING (stock and a
+    // vehicle are reserved, but nothing has physically moved yet).
+    await expect(page.getByText('PENDING', { exact: true })).toBeVisible();
     const rows = page.locator('tbody tr');
     await expect(rows).toHaveCount(1, { timeout: 8000 });
   });
@@ -164,5 +166,64 @@ test.describe('Dispatches', () => {
     // HTML5 required on select prevents submission; stays on same page
     await expect(page).toHaveURL(`/orgs/${org.id}`);
     await expect(page.getByText(/dispatch successful/i)).not.toBeVisible();
+  });
+
+  test('advance a dispatch through its lifecycle to DELIVERED, requiring proof of delivery', async ({ page }) => {
+    const org = await registerOrg(page, `Dispatch Lifecycle ${uid()}`);
+    const custName = `Lifecycle Customer ${uid()}`;
+    const stockDesc = `Pipes ${uid()}`;
+    const token = await page.evaluate(() => localStorage.getItem('logi_token'));
+
+    await page.request.post(`/api/orgs/${org.id}/vehicles`, {
+      data: { registration_number: `LC${uid().toUpperCase().slice(0, 6)}`, capacity: 20, unit: 'MetricTon' },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    await addStockViaApi(page, org.id, stockDesc, 50);
+    const custId = await createCustomerWithLocation(page, custName);
+
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Customer').selectOption({ value: custId });
+    await page.getByLabel('Stock Description').fill(stockDesc);
+    await page.getByLabel('Quantity', { exact: true }).fill('10');
+    await page.getByRole('button', { name: /dispatch stock/i }).click();
+    await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
+
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').filter({ hasText: stockDesc });
+    await expect(row).toBeVisible({ timeout: 8000 });
+    await expect(row.getByText('PENDING', { exact: true })).toBeVisible();
+
+    // PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT, each a plain click with
+    // no extra input required.
+    await row.getByRole('button', { name: 'Confirm' }).click();
+    await expect(row.getByText('CONFIRMED', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    await row.getByRole('button', { name: 'Mark Loaded' }).click();
+    await expect(row.getByText('LOADED', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    await row.getByRole('button', { name: 'Mark In Transit' }).click();
+    await expect(row.getByText('IN TRANSIT', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    // IN_TRANSIT -> DELIVERED requires proof of delivery — the inline form
+    // must appear, and the confirm button must stay disabled until both
+    // fields are filled.
+    await row.getByRole('button', { name: 'Mark Delivered' }).click();
+    const confirmDeliveryBtn = page.getByRole('button', { name: /confirm delivery/i });
+    await expect(confirmDeliveryBtn).toBeDisabled();
+
+    await page.getByLabel(/receiver name/i).fill('Priya Sharma');
+    await page.getByLabel(/signature.*photo url/i).fill('https://example.com/pod/sig.png');
+    await expect(confirmDeliveryBtn).toBeEnabled();
+    await confirmDeliveryBtn.click();
+
+    await expect(row.getByText('DELIVERED', { exact: true })).toBeVisible({ timeout: 8000 });
+    // Terminal status — no further action buttons on this row.
+    await expect(row.getByRole('button', { name: /confirm|cancel|mark/i })).toHaveCount(0);
+
+    // The details panel surfaces the full status history and the proof of
+    // delivery that was just captured.
+    await row.getByRole('button', { name: /ai status/i }).click();
+    await expect(page.getByText(/received by/i)).toBeVisible();
+    await expect(page.getByText('Priya Sharma').last()).toBeVisible();
   });
 });
