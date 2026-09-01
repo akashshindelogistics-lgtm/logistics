@@ -19,11 +19,40 @@ async function addStockViaApi(page: import('@playwright/test').Page, orgId: stri
   const godownBody = await godownResp.json() as { data: { id: string } };
 
   const resp = await page.request.post(`/api/godowns/${godownBody.data.id}/stock`, {
-    data: { description, quantity, volume_in_size: 100 },
+    // volume_in_size 1 so a modest vehicle capacity comfortably covers the shipment.
+    data: { description, quantity, volume_in_size: 1 },
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!resp.ok()) {
     throw new Error(`addStockViaApi failed: ${resp.status()} ${await resp.text()}`);
+  }
+}
+
+/**
+ * Create a driver and assign them to a vehicle via the API. A vehicle needs
+ * an active assigned driver before it can be selected for a dispatch.
+ */
+async function assignActiveDriver(
+  page: import('@playwright/test').Page,
+  orgId: string,
+  vehicleReg: string,
+) {
+  const token = await page.evaluate(() => localStorage.getItem('logi_token'));
+  const driverResp = await page.request.post(`/api/orgs/${orgId}/drivers`, {
+    data: { name: 'E2E Driver', license_number: 'E2E-LIC-001', phone: '+91 90000 00000' },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!driverResp.ok()) {
+    throw new Error(`assignActiveDriver: create driver failed: ${driverResp.status()} ${await driverResp.text()}`);
+  }
+  const driver = (await driverResp.json()) as { data: { id: string } };
+
+  const assignResp = await page.request.put(`/api/vehicles/${encodeURIComponent(vehicleReg)}/driver`, {
+    data: { driver_id: driver.data.id },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!assignResp.ok()) {
+    throw new Error(`assignActiveDriver: assign failed: ${assignResp.status()} ${await assignResp.text()}`);
   }
 }
 
@@ -75,11 +104,14 @@ test.describe('Dispatches', () => {
     const stockDesc = `Cement ${uid()}`;
     const token = await page.evaluate(() => localStorage.getItem('logi_token'));
 
-    // Setup: vehicle (required by dispatch), stock and customer with location
+    // Setup: vehicle + active driver (both required by dispatch), stock and
+    // customer with location
+    const vehReg = `DF${uid().toUpperCase().slice(0, 6)}`;
     await page.request.post(`/api/orgs/${org.id}/vehicles`, {
-      data: { registration_number: `DF${uid().toUpperCase().slice(0,6)}`, capacity: 20, unit: 'MetricTon' },
+      data: { registration_number: vehReg, capacity: 20, unit: 'MetricTon' },
       headers: { Authorization: `Bearer ${token}` },
     });
+    await assignActiveDriver(page, org.id, vehReg);
     await addStockViaApi(page, org.id, stockDesc, 50);
     const custId = await createCustomerWithLocation(page, custName);
 
@@ -130,7 +162,8 @@ test.describe('Dispatches', () => {
     await page.getByRole('button', { name: /add vehicle/i }).click();
     await expect(page.getByText(reg)).toBeVisible({ timeout: 8000 });
 
-    // Add stock and customer with location (required for dispatch)
+    // Assign an active driver, add stock and a located customer (all required for dispatch)
+    await assignActiveDriver(page, org.id, reg);
     await addStockViaApi(page, org.id, stockDesc, 80);
     const custId = await createCustomerWithLocation(page, custName);
 
@@ -174,10 +207,12 @@ test.describe('Dispatches', () => {
     const stockDesc = `Pipes ${uid()}`;
     const token = await page.evaluate(() => localStorage.getItem('logi_token'));
 
+    const vehReg = `LC${uid().toUpperCase().slice(0, 6)}`;
     await page.request.post(`/api/orgs/${org.id}/vehicles`, {
-      data: { registration_number: `LC${uid().toUpperCase().slice(0, 6)}`, capacity: 20, unit: 'MetricTon' },
+      data: { registration_number: vehReg, capacity: 20, unit: 'MetricTon' },
       headers: { Authorization: `Bearer ${token}` },
     });
+    await assignActiveDriver(page, org.id, vehReg);
     await addStockViaApi(page, org.id, stockDesc, 50);
     const custId = await createCustomerWithLocation(page, custName);
 

@@ -25,8 +25,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Vehicles** — register vehicles per organization and track their live
   location.
 - **Drivers** — keep driver records (name, licence number, phone) per
-  organization and assign one to a vehicle. A vehicle needs an **active**
-  assigned driver before it can be selected for a dispatch.
+  organization and assign one to a vehicle from the dashboard. A vehicle
+  needs an **active** assigned driver, spare capacity, and no trip already
+  in progress before it can be selected for a dispatch.
 - **Stock** — add, update, and remove stock items held by an organization.
 - **Customers** — manage customer records and their delivery locations.
 - **Dispatches** — create dispatch orders that move stock from an

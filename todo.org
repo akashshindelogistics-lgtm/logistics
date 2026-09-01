@@ -35,7 +35,9 @@
    PUT /api/vehicles/{reg}/driver (rejects a driver from another org).
    dispatch_stock_to_customer now only considers vehicles JOINed to an
    is_active driver; with none it returns a 400 telling the caller to
-   assign one. Deleting a driver clears the assignment. UI not updated.
+   assign one. Deleting a driver clears the assignment. Dashboard: a Drivers
+   section on the org detail page (add / delete / toggle active) plus a
+   driver dropdown per vehicle row in the fleet table.
 ** DONE [#B] Check the requested stock's volume/quantity against the selected vehicle's capacity before dispatch, and mark a vehicle unavailable while it has an active trip so `dispatch_stock_to_customer` can't double-book the same truck onto two orders at once
    Vehicle selection in dispatch_stock_to_customer now also filters on
    v.capacity >= (stock.volume_in_size * requested_quantity) and excludes

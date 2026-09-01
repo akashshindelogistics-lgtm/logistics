@@ -4,9 +4,10 @@ import { getOrg, dispatchStock } from '../api/orgs';
 import { addVehicle, deleteVehicle } from '../api/vehicles';
 import { listCustomers } from '../api/customers';
 import { createGodown, deleteGodown, addGodownStock } from '../api/godowns';
-import type { Organization, Customer } from '../types';
+import { listDrivers, addDriver, deleteDriver, updateDriver, assignVehicleDriver } from '../api/drivers';
+import type { Organization, Customer, Driver } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
-import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck } from '../components/Icons';
+import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck, IconUsers } from '../components/Icons';
 import './page.css';
 
 interface StockFormState {
@@ -21,11 +22,17 @@ export default function OrganizationDetail() {
   const { id } = useParams<{ id: string }>();
   const [org, setOrg] = useState<Organization | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [vReg, setVReg] = useState('');
   const [vCap, setVCap] = useState('');
   const [vSubmitting, setVSubmitting] = useState(false);
+
+  const [drvName, setDrvName] = useState('');
+  const [drvLicense, setDrvLicense] = useState('');
+  const [drvPhone, setDrvPhone] = useState('');
+  const [drvSubmitting, setDrvSubmitting] = useState(false);
 
   const [gName, setGName] = useState('');
   const [gAddress, setGAddress] = useState('');
@@ -40,10 +47,11 @@ export default function OrganizationDetail() {
   const [dSubmitting, setDSubmitting] = useState(false);
 
   const load = () =>
-    Promise.all([getOrg(id!), listCustomers()])
-      .then(([orgRes, custRes]) => {
+    Promise.all([getOrg(id!), listCustomers(), listDrivers()])
+      .then(([orgRes, custRes, drvRes]) => {
         setOrg(orgRes.data ?? null);
         setCustomers(custRes.data ?? []);
+        setDrivers(drvRes.data ?? []);
       })
       .finally(() => setLoading(false));
 
@@ -59,6 +67,32 @@ export default function OrganizationDetail() {
   const handleDeleteVehicle = async (reg: string) => {
     if (!confirm(`Remove vehicle ${reg}?`)) return;
     await deleteVehicle(reg);
+    load();
+  };
+
+  const handleAddDriver = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDrvSubmitting(true);
+    try {
+      await addDriver(id!, drvName, drvLicense, drvPhone);
+      setDrvName(''); setDrvLicense(''); setDrvPhone('');
+      load();
+    } finally { setDrvSubmitting(false); }
+  };
+
+  const handleDeleteDriver = async (driverId: string, name: string) => {
+    if (!confirm(`Remove driver "${name}"? Any vehicle they're assigned to will be unassigned.`)) return;
+    await deleteDriver(driverId);
+    load();
+  };
+
+  const handleToggleDriverActive = async (d: Driver) => {
+    await updateDriver(d.id, d.name, d.license_number, d.phone, !d.is_active);
+    load();
+  };
+
+  const handleAssignVehicleDriver = async (reg: string, driverId: string) => {
+    await assignVehicleDriver(reg, driverId || null);
     load();
   };
 
@@ -102,8 +136,14 @@ export default function OrganizationDetail() {
       setDMsg({ text: 'Dispatch successful! Stock is on its way.', ok: true });
       setDStock(''); setDQty('');
       load();
-    } catch {
-      setDMsg({ text: 'Dispatch failed. Check stock quantity and customer location.', ok: false });
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setDMsg({
+        text: apiMsg
+          ? `Dispatch failed: ${apiMsg}`
+          : 'Dispatch failed. Check stock quantity, customer location, and that a vehicle with an active driver and enough capacity is free.',
+        ok: false,
+      });
     } finally { setDSubmitting(false); }
   };
 
@@ -206,7 +246,7 @@ export default function OrganizationDetail() {
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr><th>Registration</th><th>Capacity</th><th>Coordinates</th><th>Last Seen</th><th></th></tr>
+                  <tr><th>Registration</th><th>Capacity</th><th>Driver</th><th>Coordinates</th><th>Last Seen</th><th></th></tr>
                 </thead>
                 <tbody>
                   {org.vehicles.map(v => (
@@ -220,6 +260,20 @@ export default function OrganizationDetail() {
                         </div>
                       </td>
                       <td><span className="badge tag-blue">{v.capacity} MT</span></td>
+                      <td>
+                        <select
+                          aria-label={`Driver for ${v.registration_number}`}
+                          value={v.assigned_driver_id ?? ''}
+                          onChange={e => handleAssignVehicleDriver(v.registration_number, e.target.value)}
+                        >
+                          <option value="">Unassigned</option>
+                          {drivers.map(d => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}{d.is_active ? '' : ' (inactive)'}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="coord-cell">
                         {v.location
                           ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><IconPin size={11} />{v.location.latitude.toFixed(4)}, {v.location.longitude.toFixed(4)}</span>
@@ -252,6 +306,82 @@ export default function OrganizationDetail() {
               </div>
               <button className="btn btn-primary" type="submit" disabled={vSubmitting} style={{ alignSelf: 'flex-end' }}>
                 <IconPlus size={14} />{vSubmitting ? 'Adding…' : 'Add Vehicle'}
+              </button>
+            </form>
+          </div>
+        </div>
+
+        {/* Drivers */}
+        <div className="section-card" style={{ gridColumn: '1 / -1' }}>
+          <div className="section-card-header">
+            <span className="section-card-title"><IconUsers size={15} />Drivers</span>
+            <span className="badge">{drivers.length}</span>
+          </div>
+
+          {drivers.length === 0 ? (
+            <div className="empty-state" style={{ padding: '28px 20px' }}>
+              <div className="empty-state-icon"><IconUsers size={22} /></div>
+              <h3>No drivers</h3>
+              <p>Add a driver below, then assign one to a vehicle. A vehicle needs an active driver before it can be dispatched.</p>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Name</th><th>Licence</th><th>Phone</th><th>Status</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {drivers.map(d => (
+                    <tr key={d.id}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--blue-bg)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <IconUsers size={13} />
+                          </div>
+                          <span className="entity-name">{d.name}</span>
+                        </div>
+                      </td>
+                      <td className="muted">{d.license_number}</td>
+                      <td className="muted">{d.phone}</td>
+                      <td>
+                        <button
+                          className={`badge ${d.is_active ? 'tag-green' : ''}`}
+                          onClick={() => handleToggleDriverActive(d)}
+                          title="Toggle active status"
+                          style={{ cursor: 'pointer', border: 'none' }}
+                        >
+                          {d.is_active ? 'Active' : 'Inactive'}
+                        </button>
+                      </td>
+                      <td>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleDeleteDriver(d.id, d.name)}>
+                          <IconTrash size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Add Driver</p>
+            <form onSubmit={handleAddDriver} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+                <label htmlFor="drv-name">Driver Name</label>
+                <input id="drv-name" placeholder="e.g. Ravi Kumar" value={drvName} onChange={e => setDrvName(e.target.value)} required />
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+                <label htmlFor="drv-license">Licence Number</label>
+                <input id="drv-license" placeholder="e.g. DL-1420110012345" value={drvLicense} onChange={e => setDrvLicense(e.target.value)} required />
+              </div>
+              <div className="field" style={{ flex: '0 0 160px', marginBottom: 0 }}>
+                <label htmlFor="drv-phone">Phone</label>
+                <input id="drv-phone" placeholder="e.g. +91 98100 00000" value={drvPhone} onChange={e => setDrvPhone(e.target.value)} required />
+              </div>
+              <button className="btn btn-primary" type="submit" disabled={drvSubmitting} style={{ alignSelf: 'flex-end' }}>
+                <IconPlus size={14} />{drvSubmitting ? 'Adding…' : 'Add Driver'}
               </button>
             </form>
           </div>
