@@ -4,6 +4,97 @@ use std::sync::OnceLock;
 
 static DB_POOL: OnceLock<Pool> = OnceLock::new();
 
+/// Connection settings resolved from the environment.
+///
+/// Precedence:
+/// 1. `DATABASE_URL` — a full `mysql://user:pass@host:port/db` connection
+///    string, parsed as one piece.
+/// 2. Otherwise `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD`
+///    / `MYSQL_DATABASE`, each read independently and falling back to the
+///    project's long-standing local defaults (`localhost:3306`,
+///    `root`/`password`, database `logistics`) when unset.
+///
+/// Under `cfg(test)` the database-name default is `logistics_test` instead
+/// of `logistics`, so `cargo test` never reads or truncates a developer's
+/// dev database when no env vars are set. CI (`periodic-tests.yml`) sets
+/// `MYSQL_DATABASE=logistics_test` explicitly for the same reason. See
+/// `docs/testing-database.md` (Phase 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DbConfig {
+    pub host: String,
+    pub port: u16,
+    pub db_name: String,
+    pub username: String,
+    pub password: String,
+}
+
+impl DbConfig {
+    pub fn from_env() -> Self {
+        if let Ok(url) = std::env::var("DATABASE_URL") {
+            match Self::parse_database_url(&url) {
+                Some(cfg) => return cfg,
+                None => eprintln!(
+                    "DATABASE_URL is set but is not a valid mysql://user:pass@host:port/db \
+                     URL; falling back to MYSQL_* environment variables / defaults"
+                ),
+            }
+        }
+
+        let default_db_name = if cfg!(test) {
+            "logistics_test"
+        } else {
+            "logistics"
+        };
+
+        Self {
+            host: std::env::var("MYSQL_HOST").unwrap_or_else(|_| "localhost".to_string()),
+            port: std::env::var("MYSQL_PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(3306),
+            db_name: std::env::var("MYSQL_DATABASE")
+                .unwrap_or_else(|_| default_db_name.to_string()),
+            username: std::env::var("MYSQL_USER").unwrap_or_else(|_| "root".to_string()),
+            password: std::env::var("MYSQL_PASSWORD").unwrap_or_else(|_| "password".to_string()),
+        }
+    }
+
+    /// Parse `mysql://[user[:password]@]host[:port]/db_name`. Returns `None`
+    /// on anything that doesn't fit that shape (missing scheme, missing
+    /// db name, unparsable port, ...) rather than panicking, so a malformed
+    /// `DATABASE_URL` degrades to the `MYSQL_*` / hardcoded fallback in
+    /// [`Self::from_env`].
+    fn parse_database_url(url: &str) -> Option<Self> {
+        let rest = url.strip_prefix("mysql://")?;
+        let (userinfo, hostinfo) = rest.split_once('@')?;
+        let (username, password) = userinfo.split_once(':').unwrap_or((userinfo, ""));
+        let (hostport, db_name) = hostinfo.split_once('/')?;
+        if hostport.is_empty() || db_name.is_empty() {
+            return None;
+        }
+        let (host, port_str) = hostport.split_once(':').unwrap_or((hostport, "3306"));
+        let port: u16 = port_str.parse().ok()?;
+        Some(Self {
+            host: host.to_string(),
+            port,
+            db_name: db_name.to_string(),
+            username: username.to_string(),
+            password: password.to_string(),
+        })
+    }
+
+    /// Build the [`DbConnection`] these settings describe.
+    pub fn connection(&self) -> DbConnection {
+        DbConnection::new(
+            self.host.clone(),
+            self.port,
+            self.db_name.clone(),
+            self.username.clone(),
+            self.password.clone(),
+        )
+    }
+}
+
 pub struct DbConnection {
     pub host: String,
     pub port: u16,
@@ -29,31 +120,30 @@ impl DbConnection {
         }
     }
 
+    /// Build a connection from [`DbConfig::from_env`]. This is what every
+    /// call site in the crate should use; call [`Self::new`] directly only
+    /// when a caller genuinely needs to target a specific, non-default
+    /// database (as [`DbConfig::connection`] itself does internally).
+    pub fn from_env() -> Self {
+        DbConfig::from_env().connection()
+    }
+
     pub fn get_connection(&self) -> Result<PooledConn, Box<dyn std::error::Error>> {
         let pool = DB_POOL.get_or_init(|| {
-            // When the crate is built for tests, transparently target a separate
-            // `<db>_test` database so `cargo test` never reads or truncates the
-            // data a developer's `cargo run` writes. See the `test_support`
-            // module and docs/testing-database.md.
-            let db_name = if cfg!(test) {
-                format!("{}_test", self.db_name)
-            } else {
-                self.db_name.clone()
-            };
-
             let root_url = format!(
                 "mysql://{}:{}@{}:{}",
                 self.username, self.password, self.host, self.port
             );
             if let Ok(p) = Pool::new(root_url.as_str()) {
                 if let Ok(mut conn) = p.get_conn() {
-                    let _ = conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS `{}`", db_name));
+                    let _ = conn
+                        .query_drop(format!("CREATE DATABASE IF NOT EXISTS `{}`", self.db_name));
                 }
             }
 
             let url = format!(
                 "mysql://{}:{}@{}:{}/{}",
-                self.username, self.password, self.host, self.port, db_name
+                self.username, self.password, self.host, self.port, self.db_name
             );
             Pool::new(url.as_str()).expect("Failed to initialize MySQL pool")
         });
@@ -69,14 +159,57 @@ mod tests {
 
     #[test]
     fn test_get_connection() {
-        let db_connection = DbConnection {
-            host: "localhost".to_string(),
-            port: 3306,
-            db_name: "logistics".to_string(),
-            username: "root".to_string(),
-            password: "password".to_string(),
-        };
+        let db_connection = DbConnection::from_env();
         let res = db_connection.get_connection();
         assert!(res.is_ok() || res.is_err());
+    }
+
+    #[test]
+    fn from_env_defaults_to_test_database_under_cfg_test() {
+        // No env vars mutated here (mutating process env races other tests
+        // running in parallel) — this just checks the invariant that a test
+        // binary never silently defaults onto the production `logistics`
+        // database, whatever MYSQL_DATABASE / DATABASE_URL happen to be set
+        // to for this run (CI sets MYSQL_DATABASE=logistics_test explicitly).
+        let cfg = DbConfig::from_env();
+        assert_ne!(cfg.db_name, "logistics");
+    }
+
+    #[test]
+    fn parse_database_url_full() {
+        let cfg = DbConfig::parse_database_url("mysql://alice:secret@db.example.com:3307/mydb")
+            .expect("should parse");
+        assert_eq!(cfg.host, "db.example.com");
+        assert_eq!(cfg.port, 3307);
+        assert_eq!(cfg.db_name, "mydb");
+        assert_eq!(cfg.username, "alice");
+        assert_eq!(cfg.password, "secret");
+    }
+
+    #[test]
+    fn parse_database_url_defaults_port_and_allows_empty_password() {
+        let cfg = DbConfig::parse_database_url("mysql://root:@localhost/logistics_test")
+            .expect("should parse");
+        assert_eq!(cfg.host, "localhost");
+        assert_eq!(cfg.port, 3306);
+        assert_eq!(cfg.db_name, "logistics_test");
+        assert_eq!(cfg.username, "root");
+        assert_eq!(cfg.password, "");
+    }
+
+    #[test]
+    fn parse_database_url_rejects_missing_scheme() {
+        assert!(DbConfig::parse_database_url("postgres://root:pw@localhost:5432/db").is_none());
+    }
+
+    #[test]
+    fn parse_database_url_rejects_missing_db_name() {
+        assert!(DbConfig::parse_database_url("mysql://root:pw@localhost:3306/").is_none());
+        assert!(DbConfig::parse_database_url("mysql://root:pw@localhost:3306").is_none());
+    }
+
+    #[test]
+    fn parse_database_url_rejects_bad_port() {
+        assert!(DbConfig::parse_database_url("mysql://root:pw@localhost:notaport/db").is_none());
     }
 }

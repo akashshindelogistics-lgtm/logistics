@@ -97,19 +97,32 @@ Cost: ~77 test functions get a `#[serial(db)]` attribute and a
 `reset_database();` first line. Mechanical, reviewable in one pass. Test wall
 time goes up (serial), acceptable at this suite size.
 
-### Phase 2 — make the connection configurable
+### Phase 2 — make the connection configurable — **DONE**
 
-Replace the hardcoded `DbConnection::new("localhost", 3306, "logistics", …)`
-call sites with a single constructor that reads configuration once:
+Implemented in `src/logistics/db/connection.rs`. `DbConfig::from_env()` reads
+`DATABASE_URL` (a full `mysql://user:pass@host:port/db` string) if set,
+otherwise `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` /
+`MYSQL_DATABASE` individually, each falling back to the original hardcoded
+defaults (`localhost:3306`, `root`/`password`, `logistics`) when unset. Under
+`cfg(test)` the database-name default is `logistics_test` instead of
+`logistics`, so `cargo test` still never touches a developer's dev database
+when no env vars are set — replacing the old `cfg!(test)`-suffix trick that
+lived inside `DbConnection::get_connection()`.
 
-- `DATABASE_URL` if set, else `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` /
-  `MYSQL_PASSWORD` / `MYSQL_DATABASE`, else today's hardcoded defaults.
-- Tests set `MYSQL_DATABASE=logistics_test` (or a per-test name — Phase 3).
-- This also removes the latent CI footgun where the exported `MYSQL_*` vars do
-  nothing.
+All 47 call sites across the domain modules and `test_support.rs` that used
+to hardcode `DbConnection::new("localhost", 3306, "logistics", "root",
+"password")` now call `DbConnection::from_env()`. `DbConnection` itself stays
+the thin pool wrapper the plan called for; `DbConnection::new(...)` remains
+available for a caller that genuinely needs a specific, non-default
+database (as `DbConfig::connection()` uses internally).
 
-Introduce `DbConfig::from_env()` and have `main.rs` and every module get its
-connection through it. Keep `DbConnection` as the thin pool wrapper.
+This also fixed the latent CI footgun: `periodic-tests.yml` had exported
+`MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` /
+`MYSQL_DATABASE` since Phase 1 landed, but nothing in the code read them —
+CI passed only because the service container happened to match the
+hardcoded defaults. Verified locally by pointing `MYSQL_DATABASE` and,
+separately, `DATABASE_URL` at scratch databases and confirming
+`cargo test` connects to and migrates each one.
 
 ### Phase 3 — database-per-test, restore parallelism *(optional, larger)*
 

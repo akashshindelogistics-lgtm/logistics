@@ -13,7 +13,7 @@
   Phased approach:
 ** DONE Phase 1: test_support module (migrate + reset_database), dedicated logistics_test DB, serialize DB tests with serial_test
    Also fixed src/main.rs re-declaring mod logistics (caused cargo test to run twice, defeating #[serial])
-** TODO Phase 2: DbConfig::from_env() - honour DATABASE_URL / MYSQL_* instead of hardcoded connection args
+** DONE Phase 2: DbConfig::from_env() - honour DATABASE_URL / MYSQL_* instead of hardcoded connection args. All 47 hardcoded `DbConnection::new(...)` call sites now use `DbConnection::from_env()`; verified against a live MySQL with both DATABASE_URL and MYSQL_* pointed at scratch databases.
 ** TODO Phase 3: database-per-test (logistics_test_<uuid> + Drop guard), replace global OnceLock pool, restore parallelism.
 * DONE Organisation can have multiple godowns where they store their inventory. Implemented in backend (Godown/Stock model, REST routes) and in the UI (Godowns section on org detail: create godown, add stock), with Rust route unit tests and Playwright UI tests covering the flow.
 * TODO Rust unit tests on the github action should run once in 2 HR instead of 30 mins.
@@ -40,3 +40,4 @@
 ** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
 ** TODO Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
 * DONE Fix failing swagger ui doc generation github action - godown feature merge (PR #6) removed /api/orgs/{id}/stock* in favor of /api/orgs/{id}/godowns and /api/godowns/{gid}/..., but the workflow's expected-path list still checked for the old stock routes
+* TODO sync readme with updated apis

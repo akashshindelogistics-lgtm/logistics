@@ -74,8 +74,8 @@ jobs:
       - name: Run all tests
         run: cargo test --all --verbose
         env:
-          # NOTE: the connection args are still hardcoded in source (localhost,
-          # root/password). These env vars become live in Phase 2 (DbConfig).
+          # DbConfig::from_env() (src/logistics/db/connection.rs) reads these
+          # directly — see docs/testing-database.md (Phase 2).
           MYSQL_HOST: 127.0.0.1
           MYSQL_PORT: 3306
           MYSQL_USER: root
