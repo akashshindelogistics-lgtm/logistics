@@ -1,0 +1,175 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import OrganizationDetail from './OrganizationDetail';
+import * as orgsApi from '../api/orgs';
+import * as vehiclesApi from '../api/vehicles';
+import * as customersApi from '../api/customers';
+import * as godownsApi from '../api/godowns';
+import type { Customer, Organization } from '../types';
+
+vi.mock('react-router-dom', async importOriginal => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return { ...actual, useParams: () => ({ id: 'o1' }) };
+});
+vi.mock('../api/orgs');
+vi.mock('../api/vehicles');
+vi.mock('../api/customers');
+vi.mock('../api/godowns');
+vi.mock('../components/LocationMap', () => ({
+  default: ({ pins }: { pins: unknown[] }) => <div data-testid="map">{pins.length} pins</div>,
+}));
+
+const ok = <T,>(data: T) => ({ success: true, message: '', data });
+
+function org(overrides: Partial<Organization> = {}): Organization {
+  return {
+    id: 'o1',
+    name: 'Express Freight',
+    address: '1 Dock Rd',
+    vehicles: [],
+    godowns: [],
+    ...overrides,
+  };
+}
+
+const customer: Customer = { id: 'c1', name: 'TechHub Stores', address: '5 Market St' };
+
+function mockLoad(orgValue: Organization | null, customers: Customer[] = [customer]) {
+  vi.mocked(orgsApi.getOrg).mockResolvedValue(ok(orgValue ?? undefined));
+  vi.mocked(customersApi.listCustomers).mockResolvedValue(ok(customers));
+}
+
+function renderPage() {
+  return render(<OrganizationDetail />, { wrapper: MemoryRouter });
+}
+
+describe('OrganizationDetail page', () => {
+  beforeEach(() => vi.resetAllMocks());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('shows a not-found state when the org cannot be loaded', async () => {
+    mockLoad(null);
+    renderPage();
+    expect(await screen.findByText(/organization not found/i)).toBeInTheDocument();
+  });
+
+  it('renders the org header with its vehicle and godown counts', async () => {
+    mockLoad(
+      org({
+        vehicles: [{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }],
+        godowns: [
+          { id: 'g1', org_id: 'o1', name: 'North Godown', address: 'Plot 5', stock: [] },
+        ],
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Express Freight' })).toBeInTheDocument();
+    expect(screen.getByText('1 Dock Rd')).toBeInTheDocument();
+    expect(screen.getByText('MH01AB1234')).toBeInTheDocument();
+    expect(screen.getByText('10 MT')).toBeInTheDocument();
+    expect(screen.getByText('North Godown')).toBeInTheDocument();
+    expect(screen.getByText('Plot 5')).toBeInTheDocument();
+  });
+
+  it('shows the "no vehicles" / "no godowns" empty states for a bare org', async () => {
+    mockLoad(org());
+    renderPage();
+    expect(await screen.findByText(/no vehicles$/i)).toBeInTheDocument();
+    expect(screen.getByText(/no godowns$/i)).toBeInTheDocument();
+  });
+
+  it('adds a vehicle with a numeric capacity and reloads the org', async () => {
+    const user = userEvent.setup();
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([customer]));
+    vi.mocked(orgsApi.getOrg)
+      .mockResolvedValueOnce(ok(org()))
+      .mockResolvedValue(
+        ok(org({ vehicles: [{ registration_number: 'MH09XY9999', capacity: 15, unit: 'MetricTon' }] })),
+      );
+    vi.mocked(vehiclesApi.addVehicle).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByText(/no vehicles$/i);
+
+    await user.type(screen.getByLabelText(/registration number/i), 'MH09XY9999');
+    await user.type(screen.getByLabelText(/capacity/i), '15');
+    await user.click(screen.getByRole('button', { name: /add vehicle/i }));
+
+    expect(vehiclesApi.addVehicle).toHaveBeenCalledWith('o1', 'MH09XY9999', 15);
+    await waitFor(() => expect(screen.getByText('MH09XY9999')).toBeInTheDocument());
+  });
+
+  it('confirms a successful dispatch and clears the stock/qty fields', async () => {
+    const user = userEvent.setup();
+    mockLoad(org());
+    vi.mocked(orgsApi.dispatchStock).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Express Freight' });
+
+    await user.selectOptions(screen.getByLabelText(/customer/i), 'c1');
+    await user.type(screen.getByLabelText(/stock description/i), 'Cement');
+    await user.type(screen.getByLabelText(/quantity/i), '30');
+    await user.click(screen.getByRole('button', { name: /dispatch stock/i }));
+
+    expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', 'Cement', 30);
+    expect(await screen.findByText(/dispatch successful/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/stock description/i)).toHaveValue('');
+  });
+
+  it('shows a failure message when the dispatch call rejects', async () => {
+    const user = userEvent.setup();
+    mockLoad(org());
+    vi.mocked(orgsApi.dispatchStock).mockRejectedValue(new Error('insufficient stock'));
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Express Freight' });
+
+    await user.selectOptions(screen.getByLabelText(/customer/i), 'c1');
+    await user.type(screen.getByLabelText(/stock description/i), 'Cement');
+    await user.type(screen.getByLabelText(/quantity/i), '30');
+    await user.click(screen.getByRole('button', { name: /dispatch stock/i }));
+
+    expect(await screen.findByText(/dispatch failed/i)).toBeInTheDocument();
+  });
+
+  it('adds stock to a specific godown via that godown\'s inline form', async () => {
+    const user = userEvent.setup();
+    const godown = { id: 'g1', org_id: 'o1', name: 'North Godown', address: 'Plot 5', stock: [] };
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([customer]));
+    vi.mocked(orgsApi.getOrg).mockResolvedValue(ok(org({ godowns: [godown] })));
+    vi.mocked(godownsApi.addGodownStock).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByText('North Godown');
+
+    await user.type(screen.getByLabelText(/stock item/i), 'Cement Bags');
+    await user.type(screen.getByLabelText(/stock quantity/i), '100');
+    await user.type(screen.getByLabelText(/volume/i), '3');
+    await user.click(screen.getByRole('button', { name: /add stock/i }));
+
+    expect(godownsApi.addGodownStock).toHaveBeenCalledWith('g1', 'Cement Bags', 100, 3);
+  });
+
+  it('deletes a vehicle only after the confirm prompt is accepted', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([customer]));
+    vi.mocked(orgsApi.getOrg)
+      .mockResolvedValueOnce(
+        ok(org({ vehicles: [{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }] })),
+      )
+      .mockResolvedValue(ok(org()));
+    vi.mocked(vehiclesApi.deleteVehicle).mockResolvedValue(ok(null));
+
+    renderPage();
+    const row = (await screen.findByText('MH01AB1234')).closest('tr')!;
+    await user.click(within(row).getByRole('button'));
+
+    expect(vehiclesApi.deleteVehicle).toHaveBeenCalledWith('MH01AB1234');
+    await waitFor(() => expect(screen.queryByText('MH01AB1234')).not.toBeInTheDocument());
+  });
+});
