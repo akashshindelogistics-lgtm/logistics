@@ -22,8 +22,12 @@
   events a shipment goes through between "customer asked for stock" and "customer signed for it" -
   and the operational data (drivers, vehicle paperwork, billing) that a real dispatch depends on but
   this system does not yet record. Kept as a checklist, roughly in the order they'd get built.
-** TODO [#B] Model dispatch as a lifecycle (PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED / RETURNED / CANCELLED) with a timestamped status history, instead of writing a single "DISPATCHED" status once at creation and never updating it
-** TODO [#B] Require proof of delivery (receiver name, signature or photo, delivery timestamp) before a dispatch can be marked DELIVERED
+** DONE Model dispatch as a lifecycle (PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED / RETURNED / CANCELLED) with a timestamped status history, instead of writing a single "DISPATCHED" status once at creation and never updating it
+   Plan written: [[file:docs/dispatch-lifecycle.md]]
+   DispatchStatus enum + state machine, DispatchStatusHistory table, DispatchOrder::transition_to, and PUT /api/dispatches/{id}/status. dispatch_stock_to_customer now starts a dispatch at PENDING instead of the old fixed "DISPATCHED" string. 15 new tests (9 in dispatch.rs, 6 route-level). UI still treats status as an opaque string - not updated here.
+** DONE Require proof of delivery (receiver name, signature or photo, delivery timestamp) before a dispatch can be marked DELIVERED
+   Plan written: [[file:docs/dispatch-lifecycle.md]]
+   DispatchOrder::transition_to now rejects a DELIVERED move without a ProofOfDeliveryInput (receiver_name + signature_or_photo_url); RETURNED has no such gate. Stored insert-only in a new DispatchProofOfDelivery table (dispatch_id PK), delivered_at stamped server-side same as the status-history entry, not caller-supplied. Exposed via PUT /api/dispatches/{id}/status's optional proof_of_delivery payload field and DispatchOrder.proof_of_delivery on responses. 8 new tests (4 in dispatch.rs, 4 route-level covering the missing-proof 400, the happy path, and that an illegal jump is still rejected even with proof attached).
 ** TODO [#B] Add a Driver entity (name, license number, phone) and require an active driver to be assigned to a vehicle before that vehicle can be selected for dispatch
 ** TODO [#B] Check the requested stock's volume/quantity against the selected vehicle's capacity before dispatch, and mark a vehicle unavailable while it has an active trip so `dispatch_stock_to_customer` can't double-book the same truck onto two orders at once
 ** TODO Allow one dispatch to carry multiple stock line items - today `dispatch_stock_to_customer` takes a single `stock_description`, but a real shipment usually mixes several SKUs in one trip

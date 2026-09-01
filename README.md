@@ -1,6 +1,6 @@
 # Logistics System
 
-[![Frontend Integration Tests (Playwright)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml)
+[![Frontend Tests (Unit + Playwright)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml)
 
 [![Periodic Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml)
 
@@ -22,7 +22,11 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Stock** — add, update, and remove stock items held by an organization.
 - **Customers** — manage customer records and their delivery locations.
 - **Dispatches** — create dispatch orders that move stock from an
-  organization to a customer, with full dispatch history.
+  organization to a customer, and advance each one through a lifecycle
+  (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/`RETURNED`/
+  `CANCELLED`) with a full timestamped status history and proof of
+  delivery (receiver name plus a signature/photo) required to mark one
+  `DELIVERED`.
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
 - **Authentication** — org-level login secured with JWTs and bcrypt-hashed
@@ -127,8 +131,12 @@ at `http://127.0.0.1:8080`.
 # Rust unit tests
 cargo test
 
-# Frontend end-to-end tests (Playwright)
 cd frontend
+
+# Frontend unit tests (Vitest)
+npm run test:unit
+
+# Frontend end-to-end tests (Playwright)
 npm run test:e2e
 ```
 
@@ -146,12 +154,18 @@ for the full spec, request/response schemas, and try-it-out support):
 | GET/POST | `/orgs` | List / create organizations |
 | GET/PUT/DELETE | `/orgs/{id}` | Get, update, or delete an organization |
 | PUT | `/orgs/{id}/location` | Update an organization's location |
-| POST/PUT/DELETE | `/orgs/{id}/stock` | Manage an organization's stock |
-| POST/DELETE | `/orgs/{id}/vehicles` | Manage an organization's vehicles |
-| GET/PUT/DELETE | `/vehicles`, `/vehicles/{reg}` | Manage vehicles |
+| GET/POST | `/orgs/{id}/godowns` | List / create an organization's godowns (warehouses) |
+| GET/PUT/DELETE | `/godowns/{gid}` | Get, rename/re-address, or delete a godown |
+| PUT | `/godowns/{gid}/location` | Update a godown's location |
+| POST/PUT/DELETE | `/godowns/{gid}/stock`, `/godowns/{gid}/stock/{desc}` | Add, update, or remove a godown's stock |
+| POST | `/orgs/{id}/vehicles` | Add a vehicle to an organization |
+| GET/DELETE | `/vehicles`, `/vehicles/{reg}` | List vehicles / remove one |
+| PUT | `/vehicles/{reg}/location` | Update a vehicle's location |
 | GET/POST | `/customers` | List / create customers |
 | PUT | `/customers/{id}/location` | Update a customer's location |
-| GET/POST | `/dispatches` | List / create dispatch orders |
+| POST | `/orgs/{id}/dispatch` | Dispatch stock from an org to a customer |
+| GET | `/dispatches` | List dispatch orders |
+| PUT | `/dispatches/{id}/status` | Advance a dispatch's lifecycle status |
 | GET | `/dispatches/{id}/summary` | AI-generated summary of a dispatch |
 | GET | `/health` | Health check |
 
@@ -170,8 +184,8 @@ GitHub Actions workflows in `.github/workflows/`:
   Swagger UI to
   [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/) on
   push to `main`/`master`.
-- **frontend-integration.yml** — runs the Playwright end-to-end suite
-  against a MySQL service container.
+- **frontend-integration.yml** — runs the frontend Vitest unit suite, then
+  the Playwright end-to-end suite against a MySQL service container.
 - **periodic-tests.yml** — runs the Cargo test suite on a schedule and on
   every push/PR.
 

@@ -43,6 +43,28 @@ export interface Customer {
   location?: Location;
 }
 
+// Mirrors DispatchStatus in src/logistics/dispatch/dispatch.rs. Keep in sync
+// if the backend state machine changes.
+export type DispatchStatus =
+  | 'PENDING'
+  | 'CONFIRMED'
+  | 'LOADED'
+  | 'IN_TRANSIT'
+  | 'DELIVERED'
+  | 'RETURNED'
+  | 'CANCELLED';
+
+export interface DispatchStatusEvent {
+  status: DispatchStatus;
+  changed_at: number;
+}
+
+export interface ProofOfDelivery {
+  receiver_name: string;
+  signature_or_photo_url: string;
+  delivered_at: number;
+}
+
 export interface DispatchOrder {
   id: string;
   org_id: string;
@@ -50,8 +72,10 @@ export interface DispatchOrder {
   vehicle_registration_number: string;
   stock_description: string;
   quantity: number;
-  status: string;
+  status: DispatchStatus;
   dispatched_at: number;
+  status_history: DispatchStatusEvent[];
+  proof_of_delivery: ProofOfDelivery | null;
 }
 
 export interface ApiResponse<T> {

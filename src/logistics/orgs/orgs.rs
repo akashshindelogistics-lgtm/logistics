@@ -1,6 +1,6 @@
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
-use crate::logistics::dispatch::dispatch::DispatchOrder;
+use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus};
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
@@ -284,15 +284,22 @@ impl Organization {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
-        let dispatch_order = DispatchOrder {
+        // Stock is reserved and a vehicle is already picked at this point,
+        // but nothing has physically moved — the dispatch starts its
+        // lifecycle at PENDING and advances via DispatchOrder::transition_to
+        // (PUT /api/dispatches/{id}/status). See DispatchStatus's docs for
+        // the full state machine.
+        let mut dispatch_order = DispatchOrder {
             id: Uuid::new_v4(),
             org_id: self.id,
             customer_id: customer.id,
             vehicle_registration_number: selected_vehicle_reg,
             stock_description: stock_description.to_string(),
             quantity: requested_quantity,
-            status: "DISPATCHED".to_string(),
+            status: DispatchStatus::Pending,
             dispatched_at: now,
+            status_history: Vec::new(),
+            proof_of_delivery: None,
         };
 
         dispatch_order.save()?;
@@ -568,7 +575,12 @@ mod tests {
         // Vehicle 2 (UP16 BZ 2222) in Noida is closest to Delhi customer vs Vehicle 1 in Mumbai
         assert_eq!(dispatch_order.vehicle_registration_number, "UP16 BZ 2222");
         assert_eq!(dispatch_order.quantity, 15);
-        assert_eq!(dispatch_order.status, "DISPATCHED");
+        assert_eq!(dispatch_order.status, DispatchStatus::Pending);
+        assert_eq!(dispatch_order.status_history.len(), 1);
+        assert_eq!(
+            dispatch_order.status_history[0].status,
+            DispatchStatus::Pending
+        );
 
         // Verify stock quantity decremented in MySQL database (100 - 15 = 85)
         let db_connection = DbConnection::from_env();
