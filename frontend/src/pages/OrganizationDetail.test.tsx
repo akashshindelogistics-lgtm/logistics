@@ -36,7 +36,7 @@ function org(overrides: Partial<Organization> = {}): Organization {
   };
 }
 
-const customer: Customer = { id: 'c1', name: 'TechHub Stores', address: '5 Market St' };
+const customer: Customer = { id: 'c1', org_id: 'o1', name: 'TechHub Stores', address: '5 Market St' };
 
 function mockLoad(
   orgValue: Organization | null,

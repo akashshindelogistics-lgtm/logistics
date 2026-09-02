@@ -61,6 +61,7 @@ export interface Organization {
 
 export interface Customer {
   id: string;
+  org_id: string;
   name: string;
   address: string;
   location?: Location;

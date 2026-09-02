@@ -139,15 +139,42 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     )
     .expect("migrate: create StockTransfers");
 
+    // Transitional: customers used to be a flat, org-less table. Databases
+    // created before customers were scoped to an org still have that column
+    // set; dev/test customers are disposable, so drop and recreate rather than
+    // carry a real data migration. See docs/customers.md.
+    let legacy_customers: Option<i64> = conn
+        .exec_first(
+            "SELECT 1 FROM information_schema.tables
+             WHERE table_schema = DATABASE() AND table_name = 'Customers'",
+            (),
+        )
+        .expect("migrate: probe Customers table");
+    if legacy_customers.is_some() {
+        let has_org_id: Option<i64> = conn
+            .exec_first(
+                "SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = DATABASE() AND table_name = 'Customers' AND column_name = 'org_id'",
+                (),
+            )
+            .expect("migrate: probe legacy Customers schema");
+        if has_org_id.is_none() {
+            conn.query_drop("DROP TABLE Customers")
+                .expect("migrate: drop legacy Customers");
+        }
+    }
+
     conn.query_drop(
         "CREATE TABLE IF NOT EXISTS Customers (
             id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
             name VARCHAR(255) NOT NULL,
             address VARCHAR(255) NOT NULL,
             latitude DOUBLE DEFAULT NULL,
             longitude DOUBLE DEFAULT NULL,
             last_updated_at BIGINT DEFAULT NULL,
-            location_address VARCHAR(255) DEFAULT NULL
+            location_address VARCHAR(255) DEFAULT NULL,
+            CONSTRAINT fk_customer_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
         )",
     )
     .expect("migrate: create Customers");

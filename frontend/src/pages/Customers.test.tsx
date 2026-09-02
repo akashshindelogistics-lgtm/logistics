@@ -6,6 +6,7 @@ import * as customersApi from '../api/customers';
 import type { Customer } from '../types';
 
 vi.mock('../api/customers');
+vi.mock('../api/auth', () => ({ getOrgId: () => 'org1' }));
 vi.mock('../components/LocationMap', () => ({
   default: ({ pins }: { pins: unknown[] }) => <div data-testid="map">{pins.length} pins</div>,
 }));
@@ -13,7 +14,7 @@ vi.mock('../components/LocationMap', () => ({
 const ok = <T,>(data: T) => ({ success: true, message: '', data });
 
 function customer(overrides: Partial<Customer> = {}): Customer {
-  return { id: 'c1', name: 'TechHub Stores', address: '5 Market St', ...overrides };
+  return { id: 'c1', org_id: 'org1', name: 'TechHub Stores', address: '5 Market St', ...overrides };
 }
 
 describe('Customers page', () => {
@@ -62,8 +63,25 @@ describe('Customers page', () => {
     await user.type(screen.getByLabelText(/address/i), '1 New Rd');
     await user.click(screen.getByRole('button', { name: /^create customer$/i }));
 
-    expect(customersApi.createCustomer).toHaveBeenCalledWith('Fresh Co', '1 New Rd');
+    expect(customersApi.createCustomer).toHaveBeenCalledWith('org1', 'Fresh Co', '1 New Rd');
     await waitFor(() => expect(screen.getByText('Fresh Co')).toBeInTheDocument());
+  });
+
+  it('deletes a customer after confirmation and reloads the list', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(customersApi.listCustomers)
+      .mockResolvedValueOnce(ok([customer({ name: 'Doomed Co' })]))
+      .mockResolvedValueOnce(ok([]));
+    vi.mocked(customersApi.deleteCustomer).mockResolvedValue(ok(null));
+
+    render(<Customers />);
+    await screen.findByText('Doomed Co');
+
+    await user.click(screen.getByRole('button', { name: /delete doomed co/i }));
+
+    expect(customersApi.deleteCustomer).toHaveBeenCalledWith('c1');
+    await waitFor(() => expect(screen.queryByText('Doomed Co')).not.toBeInTheDocument());
   });
 
   it('toggles the create form closed again from the header button', async () => {

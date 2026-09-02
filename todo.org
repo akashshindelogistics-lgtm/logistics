@@ -82,6 +82,20 @@
   the server mounts them under (`web::scope("/api")`). Reconciled the table
   against a freshly generated OpenAPI spec: prefixed every path with `/api`,
   added a note, and added rows for the new godown stock-transfer routes.
+* DONE Customer should be linked to particular ORG and should be not shared
+  Customers were a single flat, org-less table shared by every org. Now
+  `Customer` carries a `NOT NULL org_id` foreign key (ON DELETE CASCADE from
+  Orgs), the same way drivers and godowns are scoped. `GET /api/customers`
+  returns only the authenticated org's customers; create moved to
+  `POST /api/orgs/{id}/customers` (403 for another org); `PUT
+  /api/customers/{id}/location` and a new `DELETE /api/customers/{id}` go
+  through a `load_owned_customer` ownership check; and `POST
+  /api/orgs/{id}/dispatch` rejects a customer_id belonging to another org.
+  Frontend: the Customers page lists/creates under the logged-in org and
+  gained a delete button. Legacy org-less `Customers` tables are dropped and
+  recreated on migrate (same as the Stock/godown change). 8 new Rust tests,
+  3 new frontend unit tests, 2 new Playwright flows.
+  Plan/context: [[file:docs/customers.md]]
 * TODO remove main branch, make master the default branch on GitHub - origin/HEAD still points at main, but every PR targets master
 * DONE Add unit tests for all features implemented in the frontend
   Vitest + React Testing Library. Before this only dispatches (api client, lifecycle

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerOrg, uid } from './helpers';
+import { registerOrg, loginOrg, uid } from './helpers';
 
 test.describe('Customers', () => {
   test('customers page loads for authenticated user', async ({ page }) => {
@@ -68,6 +68,45 @@ test.describe('Customers', () => {
 
     await page.locator('form').getByRole('button', { name: /cancel/i }).click();
     await expect(page.getByLabel('Customer Name')).not.toBeVisible();
+  });
+
+  test('a customer is not visible to another organization', async ({ page }) => {
+    // Org A creates a customer.
+    const orgA = await registerOrg(page, `Cust Isolation A ${uid()}`);
+    const custName = `Private Customer ${uid()}`;
+    await page.goto('/customers');
+    await page.getByRole('button', { name: /new customer/i }).click();
+    await page.getByLabel('Customer Name').fill(custName);
+    await page.getByLabel('Address').fill('1 Private Rd, Mumbai');
+    await page.getByRole('button', { name: /^create customer$/i }).click();
+    await expect(page.getByText(custName)).toBeVisible({ timeout: 8000 });
+
+    // Org B logs in fresh and must not see org A's customer.
+    await registerOrg(page, `Cust Isolation B ${uid()}`);
+    await page.goto('/customers');
+    await expect(page.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
+    await expect(page.getByText(custName)).toHaveCount(0);
+
+    // And back as org A, it is still there.
+    await loginOrg(page, orgA);
+    await page.goto('/customers');
+    await expect(page.getByText(custName)).toBeVisible({ timeout: 8000 });
+  });
+
+  test('delete a customer removes it from the table', async ({ page }) => {
+    await registerOrg(page, `Customer Delete ${uid()}`);
+    await page.goto('/customers');
+
+    const custName = `Deletable Customer ${uid()}`;
+    await page.getByRole('button', { name: /new customer/i }).click();
+    await page.getByLabel('Customer Name').fill(custName);
+    await page.getByLabel('Address').fill('9 Gone St, Pune');
+    await page.getByRole('button', { name: /^create customer$/i }).click();
+    await expect(page.getByText(custName)).toBeVisible({ timeout: 8000 });
+
+    page.on('dialog', d => d.accept());
+    await page.getByRole('button', { name: new RegExp(`delete ${custName}`, 'i') }).click();
+    await expect(page.getByText(custName)).toHaveCount(0, { timeout: 8000 });
   });
 
   test('customer name appears in dispatch customer dropdown', async ({ page }) => {

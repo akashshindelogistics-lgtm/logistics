@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { listCustomers, createCustomer } from '../api/customers';
-import { IconUsers, IconPlus, IconX, IconPin } from '../components/Icons';
+import { listCustomers, createCustomer, deleteCustomer } from '../api/customers';
+import { getOrgId } from '../api/auth';
+import { IconUsers, IconPlus, IconX, IconPin, IconTrash } from '../components/Icons';
 import type { Customer } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import './page.css';
@@ -18,9 +19,17 @@ export default function Customers() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    const orgId = getOrgId();
+    if (!orgId) return;
     setSubmitting(true);
-    try { await createCustomer(name, address); setName(''); setAddress(''); setShowForm(false); load(); }
+    try { await createCustomer(orgId, name, address); setName(''); setAddress(''); setShowForm(false); load(); }
     finally { setSubmitting(false); }
+  };
+
+  const handleDelete = async (customer: Customer) => {
+    if (!window.confirm(`Delete customer "${customer.name}"?`)) return;
+    await deleteCustomer(customer.id);
+    load();
   };
 
   const pins: MapPin[] = customers.filter(c => c.location).map(c => ({
@@ -33,7 +42,7 @@ export default function Customers() {
       <div className="page-header">
         <div className="page-title-group">
           <h1>Customers</h1>
-          <p>Manage delivery recipients and their locations</p>
+          <p>Delivery recipients for your organization &mdash; not shared with other orgs</p>
         </div>
         <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
           {showForm ? <><IconX size={14} />Cancel</> : <><IconPlus size={14} />New Customer</>}
@@ -95,7 +104,7 @@ export default function Customers() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Customer</th><th>Address</th><th>Location</th></tr>
+                <tr><th>Customer</th><th>Address</th><th>Location</th><th></th></tr>
               </thead>
               <tbody>
                 {customers.map(c => (
@@ -113,6 +122,11 @@ export default function Customers() {
                       {c.location
                         ? <span className="coord-cell" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><IconPin size={12} />{c.location.latitude.toFixed(4)}, {c.location.longitude.toFixed(4)}</span>
                         : <span className="muted">Not set</span>}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(c)} aria-label={`Delete ${c.name}`}>
+                        <IconTrash size={12} />
+                      </button>
                     </td>
                   </tr>
                 ))}
