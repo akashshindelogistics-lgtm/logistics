@@ -618,7 +618,7 @@ mod tests {
         v2.assign_driver(Some(d2.id)).expect("assign d2");
 
         // Create Customer (Located in Delhi / NCR: 28.6200, 77.2100)
-        let mut customer = Customer::create_customer("Tech Store India", "Connaught Place, New Delhi")
+        let mut customer = Customer::create_customer(org.id, "Tech Store India", "Connaught Place, New Delhi")
             .expect("Failed to create customer");
         customer.update_location(28.6200, 77.2100, Some("Connaught Place")).expect("Failed to update customer location");
 
@@ -670,7 +670,7 @@ mod tests {
         vehicle.add_new_vehicle_to_org(&org).expect("add vehicle");
         vehicle.update_location(18.53, 73.85, Some("Pune")).expect("vehicle location");
 
-        let mut customer = Customer::create_customer("Tile Mart", "FC Road, Pune").expect("customer");
+        let mut customer = Customer::create_customer(org.id, "Tile Mart", "FC Road, Pune").expect("customer");
         customer.update_location(18.52, 73.84, Some("FC Road")).expect("customer location");
 
         // No driver assigned yet -> rejected.
@@ -711,7 +711,7 @@ mod tests {
         // 20 units at volume 10 each -> a 5-unit shipment needs volume 50.
         Stock::new(10, 20, "Marble Slabs").add_to_godown(godown.id).expect("stock");
 
-        let mut customer = Customer::create_customer("Stone Co", "Civil Lines").expect("customer");
+        let mut customer = Customer::create_customer(org.id, "Stone Co", "Civil Lines").expect("customer");
         customer.update_location(21.15, 79.09, Some("Civil Lines")).expect("cust loc");
 
         let driver = Driver::create(org.id, "Cap Driver", "LIC-C", "000").expect("driver");
@@ -749,7 +749,7 @@ mod tests {
         let godown = Godown::create(org.id, "Surat Godown", "Sachin GIDC", None).expect("godown");
         Stock::new(1, 100, "Fabric Rolls").add_to_godown(godown.id).expect("stock");
 
-        let mut customer = Customer::create_customer("Textile Buyer", "Ring Road").expect("customer");
+        let mut customer = Customer::create_customer(org.id, "Textile Buyer", "Ring Road").expect("customer");
         customer.update_location(21.18, 72.83, Some("Ring Road")).expect("cust loc");
 
         // Two eligible vehicles, both near the customer.

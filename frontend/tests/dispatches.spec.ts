@@ -57,17 +57,23 @@ async function assignActiveDriver(
 }
 
 /**
- * Create a customer via the UI and set their location via API (required for dispatch).
- * Returns the customer id extracted from the network response.
+ * Create a customer under the org via API and set their location (required for
+ * dispatch). Returns the customer id extracted from the network response.
  */
-async function createCustomerWithLocation(page: import('@playwright/test').Page, name: string): Promise<string> {
+async function createCustomerWithLocation(
+  page: import('@playwright/test').Page,
+  orgId: string,
+  name: string,
+): Promise<string> {
   const token = await page.evaluate(() => localStorage.getItem('logi_token'));
 
-  // Create via API directly (faster and gives us the id)
-  const resp = await page.request.post('/api/customers', {
+  const resp = await page.request.post(`/api/orgs/${orgId}/customers`, {
     data: { name, address: '10 Dispatch Lane, Bangalore' },
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (!resp.ok()) {
+    throw new Error(`createCustomerWithLocation: ${resp.status()} ${await resp.text()}`);
+  }
   const body = await resp.json() as { data: { id: string } };
   const customerId = body.data.id;
 
@@ -113,7 +119,7 @@ test.describe('Dispatches', () => {
     });
     await assignActiveDriver(page, org.id, vehReg);
     await addStockViaApi(page, org.id, stockDesc, 50);
-    const custId = await createCustomerWithLocation(page, custName);
+    const custId = await createCustomerWithLocation(page, org.id, custName);
 
     // Go to org detail and dispatch
     await page.goto(`/orgs/${org.id}`);
@@ -138,7 +144,7 @@ test.describe('Dispatches', () => {
 
     // Add stock with only 5 units and customer with location
     await addStockViaApi(page, org.id, 'Steel Rods', 5);
-    const custId = await createCustomerWithLocation(page, custName);
+    const custId = await createCustomerWithLocation(page, org.id, custName);
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Customer').selectOption({ value: custId });
@@ -165,7 +171,7 @@ test.describe('Dispatches', () => {
     // Assign an active driver, add stock and a located customer (all required for dispatch)
     await assignActiveDriver(page, org.id, reg);
     await addStockViaApi(page, org.id, stockDesc, 80);
-    const custId = await createCustomerWithLocation(page, custName);
+    const custId = await createCustomerWithLocation(page, org.id, custName);
 
     // Dispatch
     await page.goto(`/orgs/${org.id}`);
@@ -214,7 +220,7 @@ test.describe('Dispatches', () => {
     });
     await assignActiveDriver(page, org.id, vehReg);
     await addStockViaApi(page, org.id, stockDesc, 50);
-    const custId = await createCustomerWithLocation(page, custName);
+    const custId = await createCustomerWithLocation(page, org.id, custName);
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Customer').selectOption({ value: custId });

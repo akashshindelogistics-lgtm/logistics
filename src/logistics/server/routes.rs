@@ -1611,19 +1611,43 @@ pub async fn list_stock_transfers(path: web::Path<Uuid>, auth: AuthenticatedOrg)
 
 // ── Customer handlers (protected) ─────────────────────────────────────────────
 
+/// Load a customer by id and verify it belongs to `auth_org_id`, or build the
+/// 403/404/500 response a handler should return early with. Mirrors
+/// `load_owned_driver`.
+fn load_owned_customer(customer_id: Uuid, auth_org_id: Uuid) -> Result<Customer, HttpResponse> {
+    match Customer::get_by_id(customer_id) {
+        Ok(Some(customer)) if customer.org_id == auth_org_id => Ok(customer),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: customer belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Customer not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch customer: {}", err),
+            data: None,
+        })),
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/api/customers",
     tag = "Customers",
     security(("bearer_auth" = [])),
     responses(
-        (status = 200, description = "List of all customers", body = CustomerListResponse),
+        (status = 200, description = "Customers for the authenticated organization", body = CustomerListResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
     )
 )]
 #[get("/customers")]
-pub async fn list_customers(_auth: AuthenticatedOrg) -> impl Responder {
-    match Customer::list_all() {
+pub async fn list_customers(auth: AuthenticatedOrg) -> impl Responder {
+    match Customer::list_by_org(auth.org_id) {
         Ok(customers) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: format!("Retrieved {} customers", customers.len()),
@@ -1639,21 +1663,33 @@ pub async fn list_customers(_auth: AuthenticatedOrg) -> impl Responder {
 
 #[utoipa::path(
     post,
-    path = "/api/customers",
+    path = "/api/orgs/{id}/customers",
     tag = "Customers",
     security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
     request_body = CreateCustomerPayload,
     responses(
         (status = 201, description = "Customer created successfully", body = CustomerResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
     )
 )]
-#[post("/customers")]
-pub async fn create_customer(
+#[post("/orgs/{id}/customers")]
+pub async fn add_customer(
+    path: web::Path<Uuid>,
     payload: web::Json<CreateCustomerPayload>,
-    _auth: AuthenticatedOrg,
+    auth: AuthenticatedOrg,
 ) -> impl Responder {
-    match Customer::create_customer(&payload.name, &payload.address) {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only add customers to your own organization"
+                .to_string(),
+            data: None,
+        });
+    }
+    match Customer::create_customer(org_id, &payload.name, &payload.address) {
         Ok(customer) => HttpResponse::Created().json(ApiResponse {
             success: true,
             message: "Customer created successfully".to_string(),
@@ -1676,6 +1712,8 @@ pub async fn create_customer(
     request_body = LocationPayload,
     responses(
         (status = 200, description = "Customer location updated successfully", body = LocationResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Customer not found", body = EmptyResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
     )
 )]
@@ -1683,14 +1721,11 @@ pub async fn create_customer(
 pub async fn update_customer_location(
     path: web::Path<Uuid>,
     payload: web::Json<LocationPayload>,
-    _auth: AuthenticatedOrg,
+    auth: AuthenticatedOrg,
 ) -> impl Responder {
-    let customer_id = path.into_inner();
-    let mut customer = Customer {
-        id: customer_id,
-        name: String::new(),
-        address: String::new(),
-        location: None,
+    let mut customer = match load_owned_customer(path.into_inner(), auth.org_id) {
+        Ok(c) => c,
+        Err(resp) => return resp,
     };
 
     match customer.update_location(payload.latitude, payload.longitude, payload.address.clone()) {
@@ -1702,6 +1737,39 @@ pub async fn update_customer_location(
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to update customer location: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/customers/{id}",
+    tag = "Customers",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Customer UUID")),
+    responses(
+        (status = 200, description = "Customer deleted successfully", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Customer not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[delete("/customers/{id}")]
+pub async fn delete_customer(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let customer = match load_owned_customer(path.into_inner(), auth.org_id) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
+    match customer.delete() {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::<String> {
+            success: true,
+            message: "Customer deleted successfully".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to delete customer: {}", err),
             data: None,
         }),
     }
@@ -1801,7 +1869,14 @@ pub async fn dispatch_stock(
     };
 
     let customer = match Customer::get_by_id(payload.customer_id) {
-        Ok(Some(c)) => c,
+        Ok(Some(c)) if c.org_id == auth.org_id => c,
+        Ok(Some(_)) => {
+            return HttpResponse::BadRequest().json(ApiResponse::<String> {
+                success: false,
+                message: "Customer belongs to a different organization".to_string(),
+                data: None,
+            })
+        }
         Ok(None) => {
             return HttpResponse::BadRequest().json(ApiResponse::<String> {
                 success: false,
@@ -1999,8 +2074,9 @@ impl Modify for SecurityAddon {
         transfer_godown_stock,
         list_stock_transfers,
         list_customers,
-        create_customer,
+        add_customer,
         update_customer_location,
+        delete_customer,
         list_dispatches,
         dispatch_stock,
         update_dispatch_status,
@@ -2075,8 +2151,9 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(transfer_godown_stock)
             .service(list_stock_transfers)
             .service(list_customers)
-            .service(create_customer)
+            .service(add_customer)
             .service(update_customer_location)
+            .service(delete_customer)
             .service(list_dispatches)
             .service(dispatch_stock)
             .service(update_dispatch_status)
@@ -2809,7 +2886,7 @@ mod tests {
         test::call_service(app, req).await;
 
         let req = test::TestRequest::post()
-            .uri("/api/customers")
+            .uri(&format!("/api/orgs/{}/customers", org.id))
             .insert_header(("Authorization", auth.clone()))
             .set_json(&CreateCustomerPayload {
                 name: format!("{} Customer", org_name),
@@ -3424,36 +3501,69 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 403);
     }
 
+    async fn create_customer_via_api(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth: &str,
+        name: &str,
+    ) -> Customer {
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{org_id}/customers"))
+            .insert_header(("Authorization", auth.to_string()))
+            .set_json(&CreateCustomerPayload {
+                name: name.to_string(),
+                address: format!("1 {name} Lane"),
+            })
+            .to_request();
+        let resp = test::call_service(app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        test::read_body_json::<ApiResponse<Customer>, _>(resp)
+            .await
+            .data
+            .unwrap()
+    }
+
     #[actix_web::test]
     async fn test_create_customer_endpoint() {
         let _db = TestDb::create();
         let app = test::init_service(App::new().configure(config_routes)).await;
-        let org_id = Uuid::new_v4();
-        let payload = CreateCustomerPayload {
-            name: "API Test Customer".to_string(),
-            address: "100 Test Lane, Mumbai".to_string(),
-        };
-        let req = test::TestRequest::post()
-            .uri("/api/customers")
-            .insert_header(("Authorization", make_auth_header(org_id, "Test")))
-            .set_json(&payload)
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status().as_u16(), 201);
-        let body: ApiResponse<Customer> = test::read_body_json(resp).await;
-        assert!(body.success);
-        let customer = body.data.unwrap();
+        let (org, auth) = setup_org(&app, "Customer API Org").await;
+
+        let customer = create_customer_via_api(&app, org.id, &auth, "API Test Customer").await;
         assert_eq!(customer.name, "API Test Customer");
+        assert_eq!(customer.org_id, org.id);
+    }
+
+    #[actix_web::test]
+    async fn test_create_customer_returns_403_for_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _auth) = setup_org(&app, "Owner Cust Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/customers", org.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .set_json(&CreateCustomerPayload {
+                name: "Poached".to_string(),
+                address: "x".to_string(),
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
 
     #[actix_web::test]
     async fn test_create_customer_invalid_payload() {
         let _db = TestDb::create();
         let app = test::init_service(App::new().configure(config_routes)).await;
+        let org_id = Uuid::new_v4();
         let req = test::TestRequest::post()
-            .uri("/api/customers")
+            .uri(&format!("/api/orgs/{}/customers", org_id))
             .insert_header(("Content-Type", "application/json"))
-            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Test")))
+            .insert_header(("Authorization", make_auth_header(org_id, "Test")))
             .set_payload("{bad json}")
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -3461,28 +3571,121 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn test_list_customers_is_org_scoped() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, auth_a) = setup_org(&app, "Cust Scope A").await;
+        let (org_b, auth_b) = setup_org(&app, "Cust Scope B").await;
+
+        create_customer_via_api(&app, org_a.id, &auth_a, "A One").await;
+        create_customer_via_api(&app, org_a.id, &auth_a, "A Two").await;
+        create_customer_via_api(&app, org_b.id, &auth_b, "B One").await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/customers")
+            .insert_header(("Authorization", auth_a))
+            .to_request();
+        let body: ApiResponse<Vec<Customer>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let customers = body.data.unwrap();
+        assert_eq!(customers.len(), 2);
+        assert!(customers.iter().all(|c| c.org_id == org_a.id));
+    }
+
+    #[actix_web::test]
     async fn test_update_customer_location_endpoint() {
         let _db = TestDb::create();
         let app = test::init_service(App::new().configure(config_routes)).await;
-        let customer_id = Uuid::new_v4();
-        let org_id = Uuid::new_v4();
-        let payload = LocationPayload {
-            latitude: 19.0760,
-            longitude: 72.8777,
-            address: Some("Bandra West, Mumbai".to_string()),
-        };
+        let (org, auth) = setup_org(&app, "Cust Loc Org").await;
+        let customer = create_customer_via_api(&app, org.id, &auth, "Located Co").await;
+
         let req = test::TestRequest::put()
-            .uri(&format!("/api/customers/{}/location", customer_id))
-            .insert_header(("Authorization", make_auth_header(org_id, "Test")))
-            .set_json(&payload)
+            .uri(&format!("/api/customers/{}/location", customer.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&LocationPayload {
+                latitude: 19.0760,
+                longitude: 72.8777,
+                address: Some("Bandra West, Mumbai".to_string()),
+            })
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 200);
         let body: ApiResponse<Location> = test::read_body_json(resp).await;
-        assert!(body.success);
         let loc = body.data.unwrap();
         assert_eq!(loc.latitude, 19.0760);
         assert_eq!(loc.longitude, 72.8777);
+    }
+
+    #[actix_web::test]
+    async fn test_update_customer_location_returns_403_for_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Cust Loc Owner").await;
+        let customer = create_customer_via_api(&app, org.id, &auth, "Owned Co").await;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/customers/{}/location", customer.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .set_json(&LocationPayload {
+                latitude: 1.0,
+                longitude: 1.0,
+                address: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_delete_customer_and_cross_org_guard() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Cust Del Org").await;
+        let customer = create_customer_via_api(&app, org.id, &auth, "Deletable Co").await;
+
+        // A different org cannot delete it.
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/customers/{}", customer.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        // The owner can.
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/customers/{}", customer.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let req = test::TestRequest::get()
+            .uri("/api/customers")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let body: ApiResponse<Vec<Customer>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert!(body.data.unwrap().is_empty());
+    }
+
+    #[actix_web::test]
+    async fn test_dispatch_rejects_customer_from_another_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, auth_a) = setup_org(&app, "Dispatch Cust A").await;
+        let (org_b, auth_b) = setup_org(&app, "Dispatch Cust B").await;
+        let foreign_customer = create_customer_via_api(&app, org_b.id, &auth_b, "B's Customer").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org_a.id))
+            .insert_header(("Authorization", auth_a))
+            .set_json(&DispatchRequestPayload {
+                customer_id: foreign_customer.id,
+                stock_description: "Anything".to_string(),
+                requested_quantity: 1,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(body.message.contains("different organization"), "{}", body.message);
     }
 
     #[actix_web::test]
@@ -4375,7 +4578,7 @@ mod tests {
         test::call_service(&app, req).await;
 
         let req = test::TestRequest::post()
-            .uri("/api/customers")
+            .uri(&format!("/api/orgs/{}/customers", org.id))
             .insert_header(("Authorization", auth.clone()))
             .set_json(&CreateCustomerPayload {
                 name: "ND Customer".to_string(),

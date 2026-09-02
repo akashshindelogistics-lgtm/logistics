@@ -32,7 +32,8 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Stock** — add, update, and remove stock items held in an organization's
   godowns, and transfer a stock item between two godowns with a recorded
   audit trail of every move.
-- **Customers** — manage customer records and their delivery locations.
+- **Customers** — manage customer records and their delivery locations. Each
+  customer belongs to one organization and is never shared between orgs.
 - **Dispatches** — create dispatch orders that move stock from an
   organization to a customer, and advance each one through a lifecycle
   (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/`RETURNED`/
@@ -191,9 +192,9 @@ All routes are served under the `/api` prefix.
 | PUT | `/api/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
 | GET/POST | `/api/drivers`, `/api/orgs/{id}/drivers` | List / add drivers |
 | PUT/DELETE | `/api/drivers/{id}` | Update (incl. active flag) or remove a driver |
-| GET/POST | `/api/customers` | List / create customers |
-| PUT | `/api/customers/{id}/location` | Update a customer's location |
-| POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to a customer |
+| GET/POST | `/api/customers`, `/api/orgs/{id}/customers` | List the org's customers / add one |
+| PUT/DELETE | `/api/customers/{id}/location`, `/api/customers/{id}` | Update a customer's location / delete the customer |
+| POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to one of its customers |
 | GET | `/api/dispatches` | List dispatch orders |
 | PUT | `/api/dispatches/{id}/status` | Advance a dispatch's lifecycle status |
 | GET | `/api/dispatches/{id}/summary` | AI-generated summary of a dispatch |
