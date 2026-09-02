@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerOrg, loginOrg, uid } from './helpers';
+import { registerOrg, loginOrg, clearAuth, uid } from './helpers';
 
 test.describe('Customers', () => {
   test('customers page loads for authenticated user', async ({ page }) => {
@@ -88,6 +88,7 @@ test.describe('Customers', () => {
     await expect(page.getByText(custName)).toHaveCount(0);
 
     // And back as org A, it is still there.
+    await clearAuth(page);
     await loginOrg(page, orgA);
     await page.goto('/customers');
     await expect(page.getByText(custName)).toBeVisible({ timeout: 8000 });
