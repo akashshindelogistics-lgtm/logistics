@@ -117,6 +117,9 @@ docker run -d --name logistics-mysql -p 3306:3306 \
 
 # Optional: enables AI-generated dispatch summaries
 export ANTHROPIC_API_KEY="sk-ant-..."
+# Only needed if the key above is identity-linked (not workspace-scoped):
+# the workspace to bill the request to, e.g. wrkspc_01ABC...
+export ANTHROPIC_WORKSPACE_ID="wrkspc_..."
 
 cargo run
 ```

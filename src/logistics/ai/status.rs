@@ -64,10 +64,22 @@ pub async fn generate_dispatch_summary(
     );
 
     let client = reqwest::Client::new();
-    let resp = client
+    let mut request = client
         .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-version", "2023-06-01");
+
+    // Identity-linked API keys (issued against a user rather than a single
+    // workspace) must name the target workspace explicitly, or the API rejects
+    // the call with `workspace_id_required`. Workspace-scoped keys don't need
+    // this, so the header is only sent when `ANTHROPIC_WORKSPACE_ID` is set.
+    if let Ok(workspace_id) = std::env::var("ANTHROPIC_WORKSPACE_ID") {
+        if !workspace_id.trim().is_empty() {
+            request = request.header("anthropic-workspace-id", workspace_id);
+        }
+    }
+
+    let resp = request
         .json(&serde_json::json!({
             "model": "claude-haiku-4-5-20251001",
             "max_tokens": 256,
