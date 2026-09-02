@@ -42,10 +42,38 @@ Orgs ──1:N──▶ Godowns ──1:N──▶ Stock
 | POST | `/api/godowns/{gid}/stock` | Add a stock item to the godown |
 | PUT | `/api/godowns/{gid}/stock` | Update a stock item's quantity/volume |
 | DELETE | `/api/godowns/{gid}/stock/{desc}` | Remove a stock item |
+| POST | `/api/godowns/{gid}/transfer` | Move a stock item to another godown of the same org |
+| GET | `/api/orgs/{id}/stock-transfers` | Transfer history for the org, newest first |
 
 Every `/api/godowns/{gid}...` route loads the godown, checks
 `godown.org_id == authenticated org`, and returns `403` otherwise. The old
 `/api/orgs/{id}/stock*` routes are **removed**.
+
+## Godown-to-godown transfers
+
+Tracked by the `todo.org` item *"Support stock transfer between two godowns of
+the same org (distinct from dispatch-to-customer), with an audit trail of the
+move."*
+
+`POST /api/godowns/{gid}/transfer` (where `{gid}` is the **source** godown)
+takes `{ to_godown_id, description, quantity }` and, in
+`StockTransfer::execute`:
+
+1. rejects a same-godown, cross-org, or non-positive-quantity request (`400`),
+2. checks the source godown actually holds `quantity` units of `description`
+   (`400` if not),
+3. checks the destination has room under its `max_capacity` (`409` if not),
+4. inside one MySQL transaction: draws the units down from the source (deleting
+   the row if it hits zero), adds them to the destination (a new stock row, or
+   a bump to the existing one — the destination keeps its own `volume_in_size`
+   if the item is already there, otherwise it arrives at the source's), and
+   inserts one **insert-only** `StockTransfers` audit row
+   (`id, org_id, from_godown_id, to_godown_id, description, quantity,
+   volume_in_size, transferred_at`).
+
+A transfer conserves the org's total stock; a dispatch does not. The
+`StockTransfers` table is `ON DELETE CASCADE` from `Orgs` and is never updated
+or deleted otherwise.
 
 ## Dispatch
 

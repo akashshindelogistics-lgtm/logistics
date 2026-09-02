@@ -7,6 +7,7 @@ use crate::logistics::dispatch::dispatch::{
 };
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
+use crate::logistics::godown::transfer::{StockTransfer, TransferError};
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
@@ -137,6 +138,18 @@ pub struct UpdateGodownPayload {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct TransferStockPayload {
+    /// Godown to move the stock into. Must belong to the same organization as
+    /// the source godown in the path and be a different godown.
+    pub to_godown_id: Uuid,
+    /// Description of the stock item to move, as held in the source godown.
+    pub description: String,
+    /// Number of units to move. Must be positive and not exceed what the
+    /// source godown holds.
+    pub quantity: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateCustomerPayload {
     pub name: String,
     pub address: String,
@@ -243,6 +256,20 @@ pub struct GodownListResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Vec<Godown>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StockTransferResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<StockTransfer>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct StockTransferListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<StockTransfer>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1484,6 +1511,104 @@ pub async fn delete_godown_stock(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/godowns/{gid}/transfer",
+    tag = "Godowns",
+    security(("bearer_auth" = [])),
+    params(("gid" = Uuid, Path, description = "Source godown UUID")),
+    request_body = TransferStockPayload,
+    responses(
+        (status = 201, description = "Stock transferred and recorded", body = StockTransferResponse),
+        (status = 400, description = "Same godown, missing item, or not enough stock", body = EmptyResponse),
+        (status = 409, description = "Would exceed the destination godown's max_capacity", body = EmptyResponse),
+        (status = 403, description = "A godown belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "A godown was not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/godowns/{gid}/transfer")]
+pub async fn transfer_godown_stock(
+    path: web::Path<Uuid>,
+    payload: web::Json<TransferStockPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let from = match load_owned_godown(path.into_inner(), auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
+    };
+    let to = match load_owned_godown(payload.to_godown_id, auth.org_id) {
+        Ok(g) => g,
+        Err(resp) => return resp,
+    };
+
+    match StockTransfer::execute(&from, &to, &payload.description, payload.quantity) {
+        Ok(transfer) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: format!(
+                "Moved {} units of {} from {} to {}",
+                transfer.quantity, transfer.description, from.name, to.name
+            ),
+            data: Some(transfer),
+        }),
+        Err(TransferError::DestinationCapacity(msg)) => {
+            HttpResponse::Conflict().json(ApiResponse::<String> {
+                success: false,
+                message: msg,
+                data: None,
+            })
+        }
+        Err(err @ TransferError::Db(_)) => {
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to transfer stock: {}", err),
+                data: None,
+            })
+        }
+        Err(err) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: err.to_string(),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/stock-transfers",
+    tag = "Godowns",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "Godown-to-godown transfer history, most recent first", body = StockTransferListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/stock-transfers")]
+pub async fn list_stock_transfers(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match StockTransfer::list_by_org(org_id) {
+        Ok(transfers) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} stock transfers", transfers.len()),
+            data: Some(transfers),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list stock transfers: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── Customer handlers (protected) ─────────────────────────────────────────────
 
 #[utoipa::path(
@@ -1871,6 +1996,8 @@ impl Modify for SecurityAddon {
         add_godown_stock,
         update_godown_stock,
         delete_godown_stock,
+        transfer_godown_stock,
+        list_stock_transfers,
         list_customers,
         create_customer,
         update_customer_location,
@@ -1887,12 +2014,14 @@ impl Modify for SecurityAddon {
             CreateGodownPayload, UpdateGodownPayload,
             CreateCustomerPayload, DispatchRequestPayload,
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
+            TransferStockPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload,
-            Organization, Vehicle, Unit, Location, Stock, Godown, Customer, Driver,
+            Organization, Vehicle, Unit, Location, Stock, Godown, StockTransfer, Customer, Driver,
             DispatchOrder, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             StockResponse, GodownResponse, GodownListResponse,
+            StockTransferResponse, StockTransferListResponse,
             CustomerResponse, CustomerListResponse,
             DriverResponse, DriverListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
@@ -1943,6 +2072,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(add_godown_stock)
             .service(update_godown_stock)
             .service(delete_godown_stock)
+            .service(transfer_godown_stock)
+            .service(list_stock_transfers)
             .service(list_customers)
             .service(create_customer)
             .service(update_customer_location)
@@ -3119,6 +3250,178 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 403);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(!body.success);
+    }
+
+    /// Add a second godown to an org that already has `auth_header`, returning
+    /// the new godown. Used by the stock-transfer route tests.
+    async fn add_godown(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth_header: &str,
+        name: &str,
+        max_capacity: Option<i64>,
+    ) -> Godown {
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/godowns", org_id))
+            .insert_header(("Authorization", auth_header.to_string()))
+            .set_json(&CreateGodownPayload {
+                name: name.to_string(),
+                address: format!("Plot 2, {}", name),
+                max_capacity,
+            })
+            .to_request();
+        let body: ApiResponse<Godown> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        body.data.unwrap()
+    }
+
+    async fn seed_stock(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        godown_id: Uuid,
+        auth_header: &str,
+        description: &str,
+        volume_in_size: i64,
+        quantity: i64,
+    ) {
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown_id))
+            .insert_header(("Authorization", auth_header.to_string()))
+            .set_json(&CreateStockPayload {
+                volume_in_size,
+                quantity,
+                description: description.to_string(),
+                reorder_threshold: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(app, req).await.status().as_u16(), 201);
+    }
+
+    #[actix_web::test]
+    async fn test_transfer_godown_stock_moves_units_and_records_the_move() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, from, auth_header) =
+            setup_org_with_godown(&app, "Transfer Org", "Source Godown").await;
+        let to = add_godown(&app, org.id, &auth_header, "Dest Godown", None).await;
+        seed_stock(&app, from.id, &auth_header, "Cement", 5, 100).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/transfer", from.id))
+            .insert_header(("Authorization", auth_header.clone()))
+            .set_json(&TransferStockPayload {
+                to_godown_id: to.id,
+                description: "Cement".to_string(),
+                quantity: 40,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let body: ApiResponse<StockTransfer> = test::read_body_json(resp).await;
+        assert!(body.success);
+        assert_eq!(body.data.unwrap().quantity, 40);
+
+        // The audit trail now lists the one transfer.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/stock-transfers", org.id))
+            .insert_header(("Authorization", auth_header))
+            .to_request();
+        let body: ApiResponse<Vec<StockTransfer>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let transfers = body.data.unwrap();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].from_godown_id, from.id);
+        assert_eq!(transfers[0].to_godown_id, to.id);
+        assert_eq!(transfers[0].description, "Cement");
+    }
+
+    #[actix_web::test]
+    async fn test_transfer_godown_stock_rejects_insufficient_quantity_with_400() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, from, auth_header) =
+            setup_org_with_godown(&app, "Short Transfer Org", "Source").await;
+        let to = add_godown(&app, org.id, &auth_header, "Dest", None).await;
+        seed_stock(&app, from.id, &auth_header, "Bricks", 2, 10).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/transfer", from.id))
+            .insert_header(("Authorization", auth_header))
+            .set_json(&TransferStockPayload {
+                to_godown_id: to.id,
+                description: "Bricks".to_string(),
+                quantity: 50,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_transfer_godown_stock_over_destination_capacity_returns_409() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, from, auth_header) =
+            setup_org_with_godown(&app, "Cap Transfer Org", "Source").await;
+        let to = add_godown(&app, org.id, &auth_header, "Tiny Dest", Some(100)).await;
+        seed_stock(&app, from.id, &auth_header, "Tiles", 10, 50).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/transfer", from.id))
+            .insert_header(("Authorization", auth_header))
+            .set_json(&TransferStockPayload {
+                to_godown_id: to.id,
+                description: "Tiles".to_string(),
+                quantity: 11, // 11 * 10 = 110 > 100
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 409);
+    }
+
+    #[actix_web::test]
+    async fn test_transfer_godown_stock_returns_403_for_a_foreign_destination() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org_a, from, auth_a) =
+            setup_org_with_godown(&app, "Owner Org", "Owner Source").await;
+        let (_org_b, foreign, _auth_b) =
+            setup_org_with_godown(&app, "Other Org", "Other Godown").await;
+        seed_stock(&app, from.id, &auth_a, "Sacks", 1, 20).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/transfer", from.id))
+            .insert_header(("Authorization", auth_a))
+            .set_json(&TransferStockPayload {
+                to_godown_id: foreign.id,
+                description: "Sacks".to_string(),
+                quantity: 5,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_list_stock_transfers_returns_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _from, _auth) =
+            setup_org_with_godown(&app, "Transfers Owner Org", "G").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/stock-transfers", org.id))
+            .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 403);
     }
 
     #[actix_web::test]

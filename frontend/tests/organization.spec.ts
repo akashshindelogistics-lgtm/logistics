@@ -87,6 +87,47 @@ test.describe('Organization', () => {
     await expect(page.getByText('250')).toBeVisible();
   });
 
+  test('transfer stock from one godown to another and see it in the history', async ({ page }) => {
+    const org = await registerOrg(page, `Transfer Flow Org ${uid()}`);
+    const source = `Source WH ${uid()}`;
+    const dest = `Dest WH ${uid()}`;
+    const stockDesc = `Cartons ${uid()}`;
+    await page.goto(`/orgs/${org.id}`);
+
+    // Two godowns.
+    await page.getByLabel('Godown Name').fill(source);
+    await page.getByLabel('Address').fill('Plot 1, Industrial Area');
+    await page.getByRole('button', { name: /add godown/i }).click();
+    await expect(page.getByText(source)).toBeVisible({ timeout: 8000 });
+
+    await page.getByLabel('Godown Name').fill(dest);
+    await page.getByLabel('Address').fill('Plot 2, Industrial Area');
+    await page.getByRole('button', { name: /add godown/i }).click();
+    await expect(page.getByText(dest)).toBeVisible({ timeout: 8000 });
+
+    // Stock into the source godown.
+    const sourceCard = page.getByTestId('godown-card').filter({ hasText: source });
+    await sourceCard.getByLabel('Stock Item').fill(stockDesc);
+    await sourceCard.getByLabel('Stock Quantity').fill('100');
+    await sourceCard.getByLabel('Volume').fill('2');
+    await sourceCard.getByRole('button', { name: /add stock/i }).click();
+    await expect(page.getByText(stockDesc).first()).toBeVisible({ timeout: 8000 });
+
+    // Transfer 30 units to the destination godown.
+    await sourceCard.getByLabel('Transfer Item').selectOption({ label: stockDesc });
+    await sourceCard.getByLabel('To Godown').selectOption({ label: dest });
+    await sourceCard.getByLabel('Transfer Quantity').fill('30');
+    await sourceCard.getByRole('button', { name: /^transfer$/i }).click();
+
+    await expect(page.getByText(/stock transferred between godowns/i)).toBeVisible({ timeout: 8000 });
+
+    // The transfer shows up in the Stock Transfers history table.
+    await expect(page.getByText('Stock Transfers')).toBeVisible();
+    const historyRow = page.locator('tr', { has: page.getByText(stockDesc) }).last();
+    await expect(historyRow.getByText(source)).toBeVisible();
+    await expect(historyRow.getByText(dest)).toBeVisible();
+  });
+
   test('org detail shows Dispatch Stock form', async ({ page }) => {
     const org = await registerOrg(page, `Dispatch Form Org ${uid()}`);
     await page.goto(`/orgs/${org.id}`);

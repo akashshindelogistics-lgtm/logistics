@@ -37,6 +37,19 @@ export interface Godown {
   stock: Stock[];
 }
 
+// Mirrors StockTransfer in src/logistics/godown/transfer.rs — one recorded
+// move of a stock item between two godowns of the same organization.
+export interface StockTransfer {
+  id: string;
+  org_id: string;
+  from_godown_id: string;
+  to_godown_id: string;
+  description: string;
+  quantity: number;
+  volume_in_size: number;
+  transferred_at: number;
+}
+
 export interface Organization {
   id: string;
   name: string;

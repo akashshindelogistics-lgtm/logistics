@@ -61,7 +61,8 @@ jobs:
               '/api/health', '/api/orgs', '/api/orgs/{id}', '/api/orgs/{id}/location',
               '/api/orgs/{id}/vehicles', '/api/orgs/{id}/godowns', '/api/godowns/{gid}',
               '/api/godowns/{gid}/location', '/api/godowns/{gid}/stock',
-              '/api/godowns/{gid}/stock/{desc}', '/api/orgs/{id}/dispatch',
+              '/api/godowns/{gid}/stock/{desc}', '/api/godowns/{gid}/transfer',
+              '/api/orgs/{id}/stock-transfers', '/api/orgs/{id}/dispatch',
               '/api/dispatches/{id}/status', '/api/vehicles/{reg}/location',
               '/api/vehicles/{reg}', '/api/customers', '/api/customers/{id}/location',
           ]

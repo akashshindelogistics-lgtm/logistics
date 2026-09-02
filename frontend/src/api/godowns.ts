@@ -1,5 +1,5 @@
 import api from './client';
-import type { ApiResponse, Godown, Location, Stock } from '../types';
+import type { ApiResponse, Godown, Location, Stock, StockTransfer } from '../types';
 
 export const listGodowns = (orgId: string) =>
   api.get<ApiResponse<Godown[]>>(`/orgs/${orgId}/godowns`).then(r => r.data);
@@ -40,4 +40,26 @@ export const addGodownStock = (
 export const deleteGodownStock = (godownId: string, description: string) =>
   api
     .delete<ApiResponse<null>>(`/godowns/${godownId}/stock/${encodeURIComponent(description)}`)
+    .then(r => r.data);
+
+/** Move `quantity` units of a stock item from one godown to another godown of
+ * the same org. The move and its audit row are created server-side. */
+export const transferGodownStock = (
+  fromGodownId: string,
+  toGodownId: string,
+  description: string,
+  quantity: number,
+) =>
+  api
+    .post<ApiResponse<StockTransfer>>(`/godowns/${fromGodownId}/transfer`, {
+      to_godown_id: toGodownId,
+      description,
+      quantity,
+    })
+    .then(r => r.data);
+
+/** The org's godown-to-godown transfer history, most recent first. */
+export const listStockTransfers = (orgId: string) =>
+  api
+    .get<ApiResponse<StockTransfer[]>>(`/orgs/${orgId}/stock-transfers`)
     .then(r => r.data);

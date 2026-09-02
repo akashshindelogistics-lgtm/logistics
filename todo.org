@@ -46,7 +46,18 @@
    "none free and large enough". Freeing a trip (DELIVERED/RETURNED/
    CANCELLED) returns its vehicle to the pool.
 ** TODO Allow one dispatch to carry multiple stock line items - today `dispatch_stock_to_customer` takes a single `stock_description`, but a real shipment usually mixes several SKUs in one trip
-** TODO Support stock transfer between two godowns of the same org (distinct from dispatch-to-customer), with an audit trail of the move
+** DONE Support stock transfer between two godowns of the same org (distinct from dispatch-to-customer), with an audit trail of the move
+   New StockTransfer model (src/logistics/godown/transfer.rs) + insert-only
+   StockTransfers audit table. POST /api/godowns/{gid}/transfer takes
+   {to_godown_id, description, quantity}: validates same-org / different-godown /
+   sufficient source quantity / destination max_capacity, then in one MySQL
+   transaction draws down the source, tops up the destination, and records the
+   move. GET /api/orgs/{id}/stock-transfers returns the history newest-first.
+   Frontend: a per-godown "Transfer" form (item + destination + quantity) plus a
+   "Stock Transfers" history table on the org detail page. 12 new Rust tests
+   (7 model, 5 route), 2 new godowns api-client tests, 2 new OrganizationDetail
+   tests, 1 new Playwright flow. docs/godowns.md updated.
+   Plan/context: [[file:docs/godowns.md]]
 ** DONE Add a low-stock / reorder threshold per stock item so a godown can be flagged when quantity drops below it
    Stock.reorder_threshold (Option<i64>) plus a server-computed below_threshold
    bool exposed on every read. Settable via POST/PUT /api/godowns/{gid}/stock.
@@ -66,7 +77,11 @@
 ** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
 ** TODO Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
 * DONE Fix failing swagger ui doc generation github action - godown feature merge (PR #6) removed /api/orgs/{id}/stock* in favor of /api/orgs/{id}/godowns and /api/godowns/{gid}/..., but the workflow's expected-path list still checked for the old stock routes
-* TODO sync readme with updated apis
+* DONE sync readme with updated apis
+  The README "API overview" table listed every route without the `/api` prefix
+  the server mounts them under (`web::scope("/api")`). Reconciled the table
+  against a freshly generated OpenAPI spec: prefixed every path with `/api`,
+  added a note, and added rows for the new godown stock-transfer routes.
 * TODO remove main branch, make master the default branch on GitHub - origin/HEAD still points at main, but every PR targets master
 * DONE Add unit tests for all features implemented in the frontend
   Vitest + React Testing Library. Before this only dispatches (api client, lifecycle

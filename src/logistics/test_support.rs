@@ -125,6 +125,21 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create Stock");
 
     conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS StockTransfers (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            from_godown_id VARCHAR(36) NOT NULL,
+            to_godown_id VARCHAR(36) NOT NULL,
+            description VARCHAR(255) NOT NULL,
+            quantity BIGINT NOT NULL,
+            volume_in_size BIGINT NOT NULL,
+            transferred_at BIGINT NOT NULL,
+            CONSTRAINT fk_stock_transfer_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create StockTransfers");
+
+    conn.query_drop(
         "CREATE TABLE IF NOT EXISTS Customers (
             id VARCHAR(36) PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
