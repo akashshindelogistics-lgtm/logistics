@@ -8,6 +8,8 @@ import {
   updateGodownLocation,
   addGodownStock,
   deleteGodownStock,
+  transferGodownStock,
+  listStockTransfers,
 } from './godowns';
 
 vi.mock('./client', () => ({
@@ -83,5 +85,23 @@ describe('godowns api client', () => {
     expect(api.delete).toHaveBeenCalledWith(
       '/godowns/g1/stock/Steel%20Rods%2012mm%20%2F%20bundle',
     );
+  });
+
+  it('transferGodownStock POSTs the snake_cased payload to /godowns/{from}/transfer', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({ id: 't1' }));
+    const res = await transferGodownStock('g1', 'g2', 'Cement Bags', 40);
+    expect(api.post).toHaveBeenCalledWith('/godowns/g1/transfer', {
+      to_godown_id: 'g2',
+      description: 'Cement Bags',
+      quantity: 40,
+    });
+    expect(res.data).toEqual({ id: 't1' });
+  });
+
+  it('listStockTransfers GETs /orgs/{id}/stock-transfers and unwraps', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope([{ id: 't1' }]));
+    const res = await listStockTransfers('o1');
+    expect(api.get).toHaveBeenCalledWith('/orgs/o1/stock-transfers');
+    expect(res.data).toEqual([{ id: 't1' }]);
   });
 });

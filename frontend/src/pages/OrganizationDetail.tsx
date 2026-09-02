@@ -3,9 +3,9 @@ import { Link, useParams } from 'react-router-dom';
 import { getOrg, dispatchStock } from '../api/orgs';
 import { addVehicle, deleteVehicle } from '../api/vehicles';
 import { listCustomers } from '../api/customers';
-import { createGodown, deleteGodown, addGodownStock } from '../api/godowns';
+import { createGodown, deleteGodown, addGodownStock, transferGodownStock, listStockTransfers } from '../api/godowns';
 import { listDrivers, addDriver, deleteDriver, updateDriver, assignVehicleDriver } from '../api/drivers';
-import type { Organization, Customer, Driver } from '../types';
+import type { Organization, Customer, Driver, StockTransfer } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck, IconUsers } from '../components/Icons';
 import './page.css';
@@ -17,6 +17,14 @@ interface StockFormState {
 }
 
 const emptyStockForm: StockFormState = { description: '', quantity: '', volumeInSize: '' };
+
+interface TransferFormState {
+  description: string;
+  toGodownId: string;
+  quantity: string;
+}
+
+const emptyTransferForm: TransferFormState = { description: '', toGodownId: '', quantity: '' };
 
 export default function OrganizationDetail() {
   const { id } = useParams<{ id: string }>();
@@ -39,6 +47,10 @@ export default function OrganizationDetail() {
   const [gSubmitting, setGSubmitting] = useState(false);
   const [stockForms, setStockForms] = useState<Record<string, StockFormState>>({});
   const [stockSubmitting, setStockSubmitting] = useState<Record<string, boolean>>({});
+  const [transferForms, setTransferForms] = useState<Record<string, TransferFormState>>({});
+  const [transferSubmitting, setTransferSubmitting] = useState<Record<string, boolean>>({});
+  const [transferMsg, setTransferMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
 
   const [dCustomerId, setDCustomerId] = useState('');
   const [dStock, setDStock] = useState('');
@@ -47,11 +59,12 @@ export default function OrganizationDetail() {
   const [dSubmitting, setDSubmitting] = useState(false);
 
   const load = () =>
-    Promise.all([getOrg(id!), listCustomers(), listDrivers()])
-      .then(([orgRes, custRes, drvRes]) => {
+    Promise.all([getOrg(id!), listCustomers(), listDrivers(), listStockTransfers(id!)])
+      .then(([orgRes, custRes, drvRes, transferRes]) => {
         setOrg(orgRes.data ?? null);
         setCustomers(custRes.data ?? []);
         setDrivers(drvRes.data ?? []);
+        setTransfers(transferRes.data ?? []);
       })
       .finally(() => setLoading(false));
 
@@ -128,6 +141,30 @@ export default function OrganizationDetail() {
     }
   };
 
+  const transferFormFor = (godownId: string) => transferForms[godownId] ?? emptyTransferForm;
+
+  const updateTransferForm = (godownId: string, field: keyof TransferFormState, value: string) => {
+    setTransferForms(prev => ({ ...prev, [godownId]: { ...transferFormFor(godownId), [field]: value } }));
+  };
+
+  const handleTransfer = async (e: React.FormEvent, fromGodownId: string) => {
+    e.preventDefault();
+    const form = transferFormFor(fromGodownId);
+    setTransferSubmitting(prev => ({ ...prev, [fromGodownId]: true }));
+    setTransferMsg(null);
+    try {
+      await transferGodownStock(fromGodownId, form.toGodownId, form.description, Number(form.quantity));
+      setTransferForms(prev => ({ ...prev, [fromGodownId]: emptyTransferForm }));
+      setTransferMsg({ text: 'Stock transferred between godowns.', ok: true });
+      load();
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setTransferMsg({ text: apiMsg ? `Transfer failed: ${apiMsg}` : 'Transfer failed.', ok: false });
+    } finally {
+      setTransferSubmitting(prev => ({ ...prev, [fromGodownId]: false }));
+    }
+  };
+
   const handleDispatch = async (e: React.FormEvent) => {
     e.preventDefault();
     setDSubmitting(true); setDMsg(null);
@@ -169,6 +206,9 @@ export default function OrganizationDetail() {
       </div>
     );
   }
+
+  const godownName = (godownId: string) =>
+    org.godowns.find(g => g.id === godownId)?.name ?? 'a removed godown';
 
   const mapPins: MapPin[] = [];
   if (org.location)
@@ -394,6 +434,13 @@ export default function OrganizationDetail() {
             <span className="badge">{org.godowns.length}</span>
           </div>
 
+          {transferMsg && (
+            <div style={{ margin: '12px 20px 0', padding: '10px 14px', borderRadius: 8, fontSize: 13, background: transferMsg.ok ? 'var(--green-bg)' : 'var(--red-bg)', color: transferMsg.ok ? 'var(--green)' : 'var(--red)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {transferMsg.ok && <IconCheck size={14} />}
+              {transferMsg.text}
+            </div>
+          )}
+
           {org.godowns.length === 0 ? (
             <div className="empty-state" style={{ padding: '28px 20px' }}>
               <div className="empty-state-icon"><IconBuilding size={22} /></div>
@@ -406,7 +453,7 @@ export default function OrganizationDetail() {
                 const form = stockFormFor(g.id);
                 const submitting = !!stockSubmitting[g.id];
                 return (
-                  <div key={g.id} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                  <div key={g.id} data-testid="godown-card" style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
                       <div>
                         <div style={{ fontWeight: 700 }}>{g.name}</div>
@@ -485,6 +532,55 @@ export default function OrganizationDetail() {
                         <IconPlus size={12} />{submitting ? 'Adding…' : 'Add Stock'}
                       </button>
                     </form>
+
+                    {org.godowns.length > 1 && g.stock.length > 0 && (
+                      <form
+                        onSubmit={e => handleTransfer(e, g.id)}
+                        style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', padding: '12px 14px', borderTop: '1px dashed var(--border)', background: 'var(--bg)' }}
+                      >
+                        <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+                          <label htmlFor={`transfer-item-${g.id}`}>Transfer Item</label>
+                          <select
+                            id={`transfer-item-${g.id}`}
+                            value={transferFormFor(g.id).description}
+                            onChange={e => updateTransferForm(g.id, 'description', e.target.value)}
+                            required
+                          >
+                            <option value="">Select an item…</option>
+                            {g.stock.map(s => (
+                              <option key={s.description} value={s.description}>{s.description}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+                          <label htmlFor={`transfer-dest-${g.id}`}>To Godown</label>
+                          <select
+                            id={`transfer-dest-${g.id}`}
+                            value={transferFormFor(g.id).toGodownId}
+                            onChange={e => updateTransferForm(g.id, 'toGodownId', e.target.value)}
+                            required
+                          >
+                            <option value="">Select a godown…</option>
+                            {org.godowns.filter(other => other.id !== g.id).map(other => (
+                              <option key={other.id} value={other.id}>{other.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="field" style={{ flex: '0 0 110px', marginBottom: 0 }}>
+                          <label htmlFor={`transfer-qty-${g.id}`}>Transfer Quantity</label>
+                          <input
+                            id={`transfer-qty-${g.id}`}
+                            type="number"
+                            value={transferFormFor(g.id).quantity}
+                            onChange={e => updateTransferForm(g.id, 'quantity', e.target.value)}
+                            required
+                          />
+                        </div>
+                        <button className="btn btn-sm" type="submit" disabled={!!transferSubmitting[g.id]}>
+                          <IconDispatch size={12} />{transferSubmitting[g.id] ? 'Moving…' : 'Transfer'}
+                        </button>
+                      </form>
+                    )}
                   </div>
                 );
               })}
@@ -509,6 +605,34 @@ export default function OrganizationDetail() {
             </form>
           </div>
         </div>
+
+        {/* Godown-to-godown transfer history */}
+        {transfers.length > 0 && (
+          <div className="section-card" style={{ gridColumn: '1 / -1' }}>
+            <div className="section-card-header">
+              <span className="section-card-title"><IconDispatch size={15} />Stock Transfers</span>
+              <span className="badge">{transfers.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Item</th><th>From</th><th>To</th><th>Quantity</th><th>When</th></tr>
+                </thead>
+                <tbody>
+                  {transfers.map(t => (
+                    <tr key={t.id}>
+                      <td><span className="entity-name">{t.description}</span></td>
+                      <td className="muted">{godownName(t.from_godown_id)}</td>
+                      <td className="muted">{godownName(t.to_godown_id)}</td>
+                      <td><span style={{ fontWeight: 700 }}>{t.quantity}</span> <span className="muted">units</span></td>
+                      <td className="muted">{new Date(t.transferred_at * 1000).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Dispatch form */}
         <div className="section-card">

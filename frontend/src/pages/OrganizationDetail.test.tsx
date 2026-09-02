@@ -46,6 +46,7 @@ function mockLoad(
   vi.mocked(orgsApi.getOrg).mockResolvedValue(ok(orgValue ?? undefined));
   vi.mocked(customersApi.listCustomers).mockResolvedValue(ok(customers));
   vi.mocked(driversApi.listDrivers).mockResolvedValue(ok(drivers));
+  vi.mocked(godownsApi.listStockTransfers).mockResolvedValue(ok([]));
 }
 
 function renderPage() {
@@ -55,9 +56,10 @@ function renderPage() {
 describe('OrganizationDetail page', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Every render calls listDrivers(); default it so tests that don't care
-    // about drivers don't have to mock it.
+    // Every render calls listDrivers() and listStockTransfers(); default them
+    // so tests that don't care about drivers/transfers don't have to mock them.
     vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
+    vi.mocked(godownsApi.listStockTransfers).mockResolvedValue(ok([]));
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -164,6 +166,58 @@ describe('OrganizationDetail page', () => {
     await user.click(screen.getByRole('button', { name: /add stock/i }));
 
     expect(godownsApi.addGodownStock).toHaveBeenCalledWith('g1', 'Cement Bags', 100, 3);
+  });
+
+  it('transfers stock from one godown to another via the inline form', async () => {
+    const user = userEvent.setup();
+    const godowns = [
+      {
+        id: 'g1', org_id: 'o1', name: 'North Godown', address: 'Plot 5',
+        stock: [{ description: 'Cement', quantity: 100, volume_in_size: 5 }],
+      },
+      { id: 'g2', org_id: 'o1', name: 'South Godown', address: 'Plot 9', stock: [] },
+    ];
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([customer]));
+    vi.mocked(orgsApi.getOrg).mockResolvedValue(ok(org({ godowns })));
+    vi.mocked(godownsApi.transferGodownStock).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByText('North Godown');
+
+    await user.selectOptions(screen.getByLabelText(/transfer item/i), 'Cement');
+    await user.selectOptions(screen.getByLabelText(/to godown/i), 'g2');
+    await user.type(screen.getByLabelText(/transfer quantity/i), '30');
+    await user.click(screen.getByRole('button', { name: /^transfer$/i }));
+
+    expect(godownsApi.transferGodownStock).toHaveBeenCalledWith('g1', 'g2', 'Cement', 30);
+    expect(await screen.findByText(/stock transferred between godowns/i)).toBeInTheDocument();
+  });
+
+  it('lists the godown-to-godown transfer history', async () => {
+    mockLoad(
+      org({
+        godowns: [
+          { id: 'g1', org_id: 'o1', name: 'North Godown', address: 'Plot 5', stock: [] },
+          { id: 'g2', org_id: 'o1', name: 'South Godown', address: 'Plot 9', stock: [] },
+        ],
+      }),
+    );
+    vi.mocked(godownsApi.listStockTransfers).mockResolvedValue(
+      ok([
+        {
+          id: 't1', org_id: 'o1', from_godown_id: 'g1', to_godown_id: 'g2',
+          description: 'Cement', quantity: 40, volume_in_size: 5, transferred_at: 1_700_000_000,
+        },
+      ]),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('Stock Transfers')).toBeInTheDocument();
+    const row = screen.getByText('Cement').closest('tr')!;
+    expect(within(row).getByText('North Godown')).toBeInTheDocument();
+    expect(within(row).getByText('South Godown')).toBeInTheDocument();
+    expect(within(row).getByText('40')).toBeInTheDocument();
   });
 
   it('deletes a vehicle only after the confirm prompt is accepted', async () => {
