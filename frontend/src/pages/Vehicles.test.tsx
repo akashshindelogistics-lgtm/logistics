@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import Vehicles from './Vehicles';
 import * as vehiclesApi from '../api/vehicles';
@@ -22,7 +23,7 @@ describe('Vehicles page', () => {
 
   it('shows the empty state when the fleet is empty', async () => {
     vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(ok([]));
-    render(<Vehicles />);
+    render(<Vehicles />, { wrapper: MemoryRouter });
     expect(await screen.findByText(/no vehicles registered/i)).toBeInTheDocument();
   });
 
@@ -33,7 +34,7 @@ describe('Vehicles page', () => {
         vehicle({ registration_number: 'MH02CD5678' }),
       ]),
     );
-    render(<Vehicles />);
+    render(<Vehicles />, { wrapper: MemoryRouter });
 
     expect(await screen.findByText('MH01AB1234')).toBeInTheDocument();
     expect(screen.getByText('MH02CD5678')).toBeInTheDocument();
@@ -48,7 +49,7 @@ describe('Vehicles page', () => {
     vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(ok([vehicle()]));
     vi.mocked(vehiclesApi.deleteVehicle).mockResolvedValue(ok(null));
 
-    render(<Vehicles />);
+    render(<Vehicles />, { wrapper: MemoryRouter });
     await screen.findByText('MH01AB1234');
     await user.click(screen.getByRole('button', { name: /remove/i }));
 
@@ -61,7 +62,7 @@ describe('Vehicles page', () => {
     vi.stubGlobal('confirm', vi.fn(() => false));
     vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(ok([vehicle()]));
 
-    render(<Vehicles />);
+    render(<Vehicles />, { wrapper: MemoryRouter });
     await screen.findByText('MH01AB1234');
     await user.click(screen.getByRole('button', { name: /remove/i }));
 

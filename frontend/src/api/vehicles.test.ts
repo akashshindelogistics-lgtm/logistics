@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
-import { listVehicles, addVehicle, deleteVehicle } from './vehicles';
+import { listVehicles, addVehicle, updateVehicle, deleteVehicle } from './vehicles';
 
 vi.mock('./client', () => ({
-  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }));
 
 const envelope = <T,>(data: T) => ({ data: { success: true, message: '', data } });
@@ -26,6 +26,13 @@ describe('vehicles api client', () => {
       capacity: 12,
       unit: 'MetricTon',
     });
+  });
+
+  it('updateVehicle PUTs capacity/unit to /vehicles/{reg} (URL-encoded) and unwraps', async () => {
+    vi.mocked(api.put).mockResolvedValue(envelope({ registration_number: 'MH 01', capacity: 30, unit: 'Box' }));
+    const res = await updateVehicle('MH 01', 30, 'Box');
+    expect(api.put).toHaveBeenCalledWith('/vehicles/MH%2001', { capacity: 30, unit: 'Box' });
+    expect(res.data).toEqual({ registration_number: 'MH 01', capacity: 30, unit: 'Box' });
   });
 
   it('deleteVehicle URL-encodes the registration number', async () => {

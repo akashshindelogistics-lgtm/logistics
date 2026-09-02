@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
 import {
   listGodowns,
+  getGodown,
   createGodown,
   updateGodown,
   deleteGodown,
@@ -37,10 +38,21 @@ describe('godowns api client', () => {
     });
   });
 
-  it('updateGodown PUTs name/address to /godowns/{gid}', async () => {
+  it('updateGodown PUTs name/address/max_capacity to /godowns/{gid}', async () => {
     vi.mocked(api.put).mockResolvedValue(envelope({ id: 'g1' }));
     await updateGodown('g1', 'Renamed', 'New Addr');
-    expect(api.put).toHaveBeenCalledWith('/godowns/g1', { name: 'Renamed', address: 'New Addr' });
+    expect(api.put).toHaveBeenCalledWith('/godowns/g1', { name: 'Renamed', address: 'New Addr', max_capacity: null });
+
+    vi.mocked(api.put).mockClear();
+    await updateGodown('g1', 'Renamed', 'New Addr', 5000);
+    expect(api.put).toHaveBeenCalledWith('/godowns/g1', { name: 'Renamed', address: 'New Addr', max_capacity: 5000 });
+  });
+
+  it('getGodown GETs /godowns/{gid} and unwraps', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope({ id: 'g1', name: 'W' }));
+    const res = await getGodown('g1');
+    expect(api.get).toHaveBeenCalledWith('/godowns/g1');
+    expect(res.data).toEqual({ id: 'g1', name: 'W' });
   });
 
   it('deleteGodown DELETEs /godowns/{gid}', async () => {

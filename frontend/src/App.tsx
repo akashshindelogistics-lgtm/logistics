@@ -5,6 +5,9 @@ import Dashboard from './pages/Dashboard';
 import Organizations from './pages/Organizations';
 import OrganizationDetail from './pages/OrganizationDetail';
 import Vehicles from './pages/Vehicles';
+import VehicleDetail from './pages/VehicleDetail';
+import DriverDetail from './pages/DriverDetail';
+import GodownDetail from './pages/GodownDetail';
 import Customers from './pages/Customers';
 import Dispatches from './pages/Dispatches';
 import Login from './pages/Login';
@@ -26,6 +29,9 @@ function AppShell() {
           <Route path="/orgs" element={<ProtectedRoute><Organizations /></ProtectedRoute>} />
           <Route path="/orgs/:id" element={<ProtectedRoute><OrganizationDetail /></ProtectedRoute>} />
           <Route path="/vehicles" element={<ProtectedRoute><Vehicles /></ProtectedRoute>} />
+          <Route path="/vehicles/:reg" element={<ProtectedRoute><VehicleDetail /></ProtectedRoute>} />
+          <Route path="/drivers/:id" element={<ProtectedRoute><DriverDetail /></ProtectedRoute>} />
+          <Route path="/godowns/:id" element={<ProtectedRoute><GodownDetail /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
           <Route path="/dispatches" element={<ProtectedRoute><Dispatches /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
