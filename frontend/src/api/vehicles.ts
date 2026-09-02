@@ -1,8 +1,13 @@
 import api from './client';
-import type { ApiResponse, Vehicle } from '../types';
+import type { ApiResponse, Unit, Vehicle } from '../types';
 
 export const listVehicles = () =>
   api.get<ApiResponse<Vehicle[]>>('/vehicles').then(r => r.data);
+
+export const updateVehicle = (reg: string, capacity: number, unit: Unit) =>
+  api
+    .put<ApiResponse<Vehicle>>(`/vehicles/${encodeURIComponent(reg)}`, { capacity, unit })
+    .then(r => r.data);
 
 export const addVehicle = (orgId: string, registrationNumber: string, capacity: number) =>
   api

@@ -83,7 +83,7 @@ describe('OrganizationDetail page', () => {
     expect(await screen.findByRole('heading', { name: 'Express Freight' })).toBeInTheDocument();
     expect(screen.getByText('1 Dock Rd')).toBeInTheDocument();
     expect(screen.getByText('MH01AB1234')).toBeInTheDocument();
-    expect(screen.getByText('10 MT')).toBeInTheDocument();
+    expect(screen.getByText('10 MetricTon')).toBeInTheDocument();
     expect(screen.getByText('North Godown')).toBeInTheDocument();
     expect(screen.getByText('Plot 5')).toBeInTheDocument();
   });

@@ -4,11 +4,25 @@ import type { ApiResponse, Godown, Location, Stock, StockTransfer } from '../typ
 export const listGodowns = (orgId: string) =>
   api.get<ApiResponse<Godown[]>>(`/orgs/${orgId}/godowns`).then(r => r.data);
 
+export const getGodown = (godownId: string) =>
+  api.get<ApiResponse<Godown>>(`/godowns/${godownId}`).then(r => r.data);
+
 export const createGodown = (orgId: string, name: string, address: string) =>
   api.post<ApiResponse<Godown>>(`/orgs/${orgId}/godowns`, { name, address }).then(r => r.data);
 
-export const updateGodown = (godownId: string, name: string, address: string) =>
-  api.put<ApiResponse<Godown>>(`/godowns/${godownId}`, { name, address }).then(r => r.data);
+export const updateGodown = (
+  godownId: string,
+  name: string,
+  address: string,
+  maxCapacity: number | null = null,
+) =>
+  api
+    .put<ApiResponse<Godown>>(`/godowns/${godownId}`, {
+      name,
+      address,
+      max_capacity: maxCapacity,
+    })
+    .then(r => r.data);
 
 export const deleteGodown = (godownId: string) =>
   api.delete<ApiResponse<null>>(`/godowns/${godownId}`).then(r => r.data);
