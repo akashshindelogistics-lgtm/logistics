@@ -77,16 +77,18 @@ or deleted otherwise.
 
 ## Dispatch
 
-`POST /api/orgs/{id}/dispatch` still takes `{ customer_id, stock_description,
-requested_quantity }`. It now:
+`POST /api/orgs/{id}/dispatch` takes `{ customer_id, line_items: [{
+stock_description, requested_quantity }] }` (see docs/dispatch-lifecycle.md).
+For each line it:
 
 1. Sums `quantity` for that `stock_description` across **all** the org's
-   godowns and fails if the total is short.
-2. Picks the nearest vehicle to the customer (unchanged Haversine logic).
-3. Decrements the requested quantity from the org's godowns, largest holding
+   godowns and fails the whole request if any line's total is short.
+2. Picks the nearest vehicle to the customer (unchanged Haversine logic),
+   checking capacity against the summed volume of every line.
+3. Decrements each line's quantity from the org's godowns, largest holding
    first, until satisfied.
-4. Writes one `DispatchOrder` (still keyed by `org_id` — dispatch history is
-   not godown-scoped).
+4. Writes one `DispatchOrder` with a `DispatchLineItems` row per line (still
+   keyed by `org_id` — dispatch history is not godown-scoped).
 
 ## Schema migration
 

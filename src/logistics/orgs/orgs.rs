@@ -1,6 +1,8 @@
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
-use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus};
+use crate::logistics::dispatch::dispatch::{
+    DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus,
+};
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::stock::stock::Stock;
@@ -20,6 +22,17 @@ fn haversine_distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
         + lat1.to_radians().cos() * lat2.to_radians().cos() * (d_lon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     r * c
+}
+
+/// A validated dispatch line item plus the godown holdings it will be drawn
+/// from (largest first). Built up-front for every requested line so nothing is
+/// drawn down until the whole order is known to be satisfiable.
+struct LineItemPlan {
+    description: String,
+    quantity: i64,
+    volume_in_size: i64,
+    /// `(godown_id, quantity_held)`, largest holding first.
+    holdings: Vec<(Uuid, i64)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -185,43 +198,77 @@ impl Organization {
     pub fn dispatch_stock_to_customer(
         &self,
         customer: &Customer,
-        stock_description: &str,
-        requested_quantity: i64,
+        line_items: &[DispatchLineItemInput],
     ) -> Result<DispatchOrder, Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
 
-        // 1. Verify stock availability across all of the org's godowns. A stock
-        //    item can be split across several godowns; the requested quantity is
-        //    checked against — and later drawn from — the combined holding.
-        let godowns = Godown::list_by_org(self.id)?;
-        let mut holdings: Vec<(Uuid, i64)> = Vec::new();
-        let mut stock_volume_in_size: Option<i64> = None;
-        for g in &godowns {
-            if let Some(s) = g.stock.iter().find(|s| s.description == stock_description) {
-                holdings.push((g.id, s.quantity));
-                stock_volume_in_size.get_or_insert(s.volume_in_size);
+        // 0. Basic shape checks on the requested lines.
+        if line_items.is_empty() {
+            return Err("A dispatch must carry at least one stock line item".into());
+        }
+        if line_items.iter().any(|li| li.requested_quantity <= 0) {
+            return Err("Every line item's requested quantity must be greater than zero".into());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for li in line_items {
+            if !seen.insert(li.stock_description.as_str()) {
+                return Err(format!(
+                    "Line item '{}' appears more than once; combine it into a single line",
+                    li.stock_description
+                )
+                .into());
             }
         }
 
-        if holdings.is_empty() {
-            return Err("Requested stock description not found in any of the organization's godowns".into());
-        }
+        // 1. Verify stock availability across all of the org's godowns, for
+        //    every line item. A stock item can be split across several godowns;
+        //    the requested quantity is checked against — and later drawn from —
+        //    the combined holding. Nothing is drawn down until every line has
+        //    been validated.
+        let godowns = Godown::list_by_org(self.id)?;
+        let mut plans: Vec<LineItemPlan> = Vec::new();
+        let mut required_volume: i64 = 0;
+        for li in line_items {
+            let mut holdings: Vec<(Uuid, i64)> = Vec::new();
+            let mut volume_in_size: Option<i64> = None;
+            for g in &godowns {
+                if let Some(s) = g.stock.iter().find(|s| s.description == li.stock_description) {
+                    holdings.push((g.id, s.quantity));
+                    volume_in_size.get_or_insert(s.volume_in_size);
+                }
+            }
 
-        let total_available: i64 = holdings.iter().map(|(_, qty)| qty).sum();
-        if total_available < requested_quantity {
-            return Err(format!(
-                "Insufficient stock quantity. Available: {}, Requested: {}",
-                total_available, requested_quantity
-            )
-            .into());
-        }
+            if holdings.is_empty() {
+                return Err(format!(
+                    "Stock '{}' was not found in any of the organization's godowns",
+                    li.stock_description
+                )
+                .into());
+            }
 
-        // Total volume this shipment occupies — checked against a vehicle's
-        // rated `capacity` below.
-        let required_volume = stock_volume_in_size
-            .unwrap_or(0)
-            .saturating_mul(requested_quantity);
+            let total_available: i64 = holdings.iter().map(|(_, qty)| qty).sum();
+            if total_available < li.requested_quantity {
+                return Err(format!(
+                    "Insufficient stock for '{}'. Available: {}, Requested: {}",
+                    li.stock_description, total_available, li.requested_quantity
+                )
+                .into());
+            }
+
+            let volume_in_size = volume_in_size.unwrap_or(0);
+            required_volume =
+                required_volume.saturating_add(volume_in_size.saturating_mul(li.requested_quantity));
+
+            // Largest holding first, so the drawdown touches the fewest rows.
+            holdings.sort_by_key(|&(_, qty)| std::cmp::Reverse(qty));
+            plans.push(LineItemPlan {
+                description: li.stock_description.clone(),
+                quantity: li.requested_quantity,
+                volume_in_size,
+                holdings,
+            });
+        }
 
         // 2. Fetch this org's vehicles that can actually take this trip:
         //    - an *active* driver is assigned (Vehicle.assigned_driver_id ->
@@ -306,24 +353,38 @@ impl Organization {
         let selected_vehicle_reg =
             nearest_vehicle_reg.ok_or("Failed to select vehicle for dispatch")?;
 
-        // 4. Draw the requested quantity down from the godowns, largest holding
-        //    first, until the request is satisfied.
-        holdings.sort_by(|a, b| b.1.cmp(&a.1));
-        let mut remaining = requested_quantity;
-        for (godown_id, available) in holdings {
-            if remaining <= 0 {
-                break;
+        // 4. Draw each line item's quantity down from its godowns, largest
+        //    holding first, until the request is satisfied. Every line was
+        //    validated as satisfiable in step 1.
+        let mut order_line_items: Vec<DispatchLineItem> = Vec::with_capacity(plans.len());
+        for LineItemPlan {
+            description,
+            quantity,
+            volume_in_size,
+            holdings,
+        } in plans
+        {
+            let mut remaining = quantity;
+            for (godown_id, available) in holdings {
+                if remaining <= 0 {
+                    break;
+                }
+                let taken = remaining.min(available);
+                conn.exec_drop(
+                    "UPDATE Stock SET quantity = :quantity WHERE godown_id = :godown_id AND description = :desc",
+                    params! {
+                        "quantity" => available - taken,
+                        "godown_id" => godown_id.to_string(),
+                        "desc" => &description,
+                    },
+                )?;
+                remaining -= taken;
             }
-            let taken = remaining.min(available);
-            conn.exec_drop(
-                "UPDATE Stock SET quantity = :quantity WHERE godown_id = :godown_id AND description = :desc",
-                params! {
-                    "quantity" => available - taken,
-                    "godown_id" => godown_id.to_string(),
-                    "desc" => stock_description,
-                },
-            )?;
-            remaining -= taken;
+            order_line_items.push(DispatchLineItem {
+                stock_description: description,
+                quantity,
+                volume_in_size,
+            });
         }
 
         // 5. Create and save DispatchOrder
@@ -342,8 +403,7 @@ impl Organization {
             org_id: self.id,
             customer_id: customer.id,
             vehicle_registration_number: selected_vehicle_reg,
-            stock_description: stock_description.to_string(),
-            quantity: requested_quantity,
+            line_items: order_line_items,
             status: DispatchStatus::Pending,
             dispatched_at: now,
             status_history: Vec::new(),
@@ -482,6 +542,14 @@ mod tests {
     use super::*;
     use crate::logistics::test_support::TestDb;
     use crate::logistics::vehicle::vehicle::Unit;
+
+    /// A one-line dispatch request, the common case in these tests.
+    fn line(description: &str, quantity: i64) -> DispatchLineItemInput {
+        DispatchLineItemInput {
+            stock_description: description.to_string(),
+            requested_quantity: quantity,
+        }
+    }
 
     #[test]
     fn test_create_organization() {
@@ -623,13 +691,15 @@ mod tests {
         customer.update_location(28.6200, 77.2100, Some("Connaught Place")).expect("Failed to update customer location");
 
         // Dispatch 15 Laptops to Customer
-        let dispatch_res = org.dispatch_stock_to_customer(&customer, "High-End Laptops", 15);
+        let dispatch_res = org.dispatch_stock_to_customer(&customer, &[line("High-End Laptops", 15)]);
         assert!(dispatch_res.is_ok(), "Failed to dispatch stock to customer");
 
         let dispatch_order = dispatch_res.unwrap();
         // Vehicle 2 (UP16 BZ 2222) in Noida is closest to Delhi customer vs Vehicle 1 in Mumbai
         assert_eq!(dispatch_order.vehicle_registration_number, "UP16 BZ 2222");
-        assert_eq!(dispatch_order.quantity, 15);
+        assert_eq!(dispatch_order.line_items.len(), 1);
+        assert_eq!(dispatch_order.line_items[0].stock_description, "High-End Laptops");
+        assert_eq!(dispatch_order.total_quantity(), 15);
         assert_eq!(dispatch_order.status, DispatchStatus::Pending);
         assert_eq!(dispatch_order.status_history.len(), 1);
         assert_eq!(
@@ -657,6 +727,119 @@ mod tests {
     }
 
     #[test]
+    fn test_dispatch_carries_several_line_items_in_one_trip() {
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("Mixed Load Co", "Pune HQ").expect("org");
+        org.update_location(18.52, 73.85, Some("Pune")).expect("org loc");
+
+        // Two stock items in one godown, a third split across a second godown.
+        let g1 = Godown::create(org.id, "G1", "MIDC A", None).expect("g1");
+        let g2 = Godown::create(org.id, "G2", "MIDC B", None).expect("g2");
+        Stock::new(2, 100, "Cement").add_to_godown(g1.id).expect("cement");
+        Stock::new(3, 40, "Rebar").add_to_godown(g1.id).expect("rebar g1");
+        Stock::new(3, 40, "Rebar").add_to_godown(g2.id).expect("rebar g2");
+        Stock::new(1, 500, "Sand").add_to_godown(g1.id).expect("sand");
+
+        let driver = Driver::create(org.id, "Mix Driver", "LIC-M", "0").expect("driver");
+        let mut v = Vehicle::new("MH14 MX 0001", 10_000, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("vehicle");
+        v.update_location(18.52, 73.85, Some("Pune")).expect("v loc");
+        v.assign_driver(Some(driver.id)).expect("assign");
+
+        let mut customer = Customer::create_customer(org.id, "Site Buyer", "Baner").expect("customer");
+        customer.update_location(18.55, 73.78, Some("Baner")).expect("cust loc");
+
+        // Rebar: 60 units, more than either godown alone holds (40 + 40).
+        let order = org
+            .dispatch_stock_to_customer(
+                &customer,
+                &[line("Cement", 30), line("Rebar", 60), line("Sand", 200)],
+            )
+            .expect("multi-line dispatch");
+
+        assert_eq!(order.line_items.len(), 3);
+        assert_eq!(order.total_quantity(), 290);
+
+        // Every line drew down: cement 100->70, rebar 80->20 total, sand 500->300.
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        let cement: Option<i64> = conn
+            .exec_first(
+                "SELECT quantity FROM Stock WHERE godown_id = :g AND description = 'Cement'",
+                params! { "g" => g1.id.to_string() },
+            )
+            .unwrap();
+        assert_eq!(cement, Some(70));
+        let rebar_total: Option<i64> = conn
+            .exec_first(
+                "SELECT COALESCE(SUM(quantity), 0) FROM Stock s
+                 JOIN Godowns gd ON gd.id = s.godown_id
+                 WHERE gd.org_id = :org AND s.description = 'Rebar'",
+                params! { "org" => org.id.to_string() },
+            )
+            .unwrap();
+        assert_eq!(rebar_total, Some(20));
+
+        // Reloads with all three lines, ordered as inserted.
+        let reloaded = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
+        let descs: Vec<&str> = reloaded
+            .line_items
+            .iter()
+            .map(|li| li.stock_description.as_str())
+            .collect();
+        assert_eq!(descs, ["Cement", "Rebar", "Sand"]);
+    }
+
+    #[test]
+    fn test_dispatch_rejects_the_whole_order_if_any_line_is_short() {
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("All Or Nothing", "HQ").expect("org");
+        org.update_location(18.52, 73.85, Some("HQ")).expect("loc");
+        let g = Godown::create(org.id, "G", "addr", None).expect("g");
+        Stock::new(1, 100, "Widgets").add_to_godown(g.id).expect("widgets");
+        Stock::new(1, 5, "Gadgets").add_to_godown(g.id).expect("gadgets");
+
+        let driver = Driver::create(org.id, "D", "L", "0").expect("driver");
+        let mut v = Vehicle::new("MH14 AN 0001", 10_000, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("vehicle");
+        v.update_location(18.52, 73.85, Some("HQ")).expect("v loc");
+        v.assign_driver(Some(driver.id)).expect("assign");
+
+        let mut customer = Customer::create_customer(org.id, "Buyer", "addr").expect("customer");
+        customer.update_location(18.55, 73.78, Some("addr")).expect("cust loc");
+
+        let err = org
+            .dispatch_stock_to_customer(&customer, &[line("Widgets", 10), line("Gadgets", 50)])
+            .expect_err("Gadgets is short, so the whole dispatch is rejected");
+        assert!(err.to_string().contains("Gadgets"), "unexpected: {err}");
+
+        // Widgets must NOT have been drawn down — the order is all-or-nothing.
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        let widgets: Option<i64> = conn
+            .exec_first(
+                "SELECT quantity FROM Stock WHERE godown_id = :g AND description = 'Widgets'",
+                params! { "g" => g.id.to_string() },
+            )
+            .unwrap();
+        assert_eq!(widgets, Some(100));
+    }
+
+    #[test]
+    fn test_dispatch_rejects_an_empty_or_duplicated_line_list() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Edge Cases", "HQ").expect("org");
+        let customer = Customer::create_customer(org.id, "Buyer", "addr").expect("customer");
+
+        assert!(
+            org.dispatch_stock_to_customer(&customer, &[]).is_err(),
+            "an empty line list is rejected"
+        );
+        let dup = org
+            .dispatch_stock_to_customer(&customer, &[line("Cement", 5), line("Cement", 3)])
+            .expect_err("a repeated description is rejected");
+        assert!(dup.to_string().contains("more than once"), "unexpected: {dup}");
+    }
+
+    #[test]
     fn test_dispatch_requires_a_vehicle_with_an_active_driver() {
         let _db = TestDb::create();
         let mut org = Organization::create_organization("Driverless Logistics", "Pune HQ")
@@ -675,7 +858,7 @@ mod tests {
 
         // No driver assigned yet -> rejected.
         let err = org
-            .dispatch_stock_to_customer(&customer, "Ceramic Tiles", 10)
+            .dispatch_stock_to_customer(&customer, &[line("Ceramic Tiles", 10)])
             .expect_err("dispatch should fail without an active assigned driver");
         assert!(
             err.to_string().contains("active assigned driver"),
@@ -687,7 +870,7 @@ mod tests {
         driver.update("On Leave", "LIC-X", "000", false).expect("deactivate");
         vehicle.assign_driver(Some(driver.id)).expect("assign");
         assert!(
-            org.dispatch_stock_to_customer(&customer, "Ceramic Tiles", 10)
+            org.dispatch_stock_to_customer(&customer, &[line("Ceramic Tiles", 10)])
                 .is_err(),
             "dispatch should fail with an inactive driver"
         );
@@ -695,7 +878,7 @@ mod tests {
         // Reactivate the driver -> dispatch succeeds.
         driver.update("Back To Work", "LIC-X", "000", true).expect("reactivate");
         let order = org
-            .dispatch_stock_to_customer(&customer, "Ceramic Tiles", 10)
+            .dispatch_stock_to_customer(&customer, &[line("Ceramic Tiles", 10)])
             .expect("dispatch should succeed once an active driver is assigned");
         assert_eq!(order.vehicle_registration_number, "MH12 ZZ 9999");
     }
@@ -723,7 +906,7 @@ mod tests {
         small.assign_driver(Some(driver.id)).expect("assign");
 
         let err = org
-            .dispatch_stock_to_customer(&customer, "Marble Slabs", 5)
+            .dispatch_stock_to_customer(&customer, &[line("Marble Slabs", 5)])
             .expect_err("should reject: vehicle too small");
         assert!(err.to_string().contains("capacity >= 50"), "unexpected: {err}");
 
@@ -735,7 +918,7 @@ mod tests {
         big.assign_driver(Some(driver2.id)).expect("assign");
 
         let order = org
-            .dispatch_stock_to_customer(&customer, "Marble Slabs", 5)
+            .dispatch_stock_to_customer(&customer, &[line("Marble Slabs", 5)])
             .expect("should succeed with a big-enough vehicle");
         assert_eq!(order.vehicle_registration_number, "MH31 BG 0002");
     }
@@ -765,10 +948,10 @@ mod tests {
         v2.assign_driver(Some(d2.id)).expect("assign d2");
 
         let first = org
-            .dispatch_stock_to_customer(&customer, "Fabric Rolls", 10)
+            .dispatch_stock_to_customer(&customer, &[line("Fabric Rolls", 10)])
             .expect("first dispatch");
         let second = org
-            .dispatch_stock_to_customer(&customer, "Fabric Rolls", 10)
+            .dispatch_stock_to_customer(&customer, &[line("Fabric Rolls", 10)])
             .expect("second dispatch uses the other vehicle");
         assert_ne!(
             first.vehicle_registration_number, second.vehicle_registration_number,
@@ -777,7 +960,7 @@ mod tests {
 
         // Both vehicles are now on active trips -> a third dispatch fails.
         let err = org
-            .dispatch_stock_to_customer(&customer, "Fabric Rolls", 10)
+            .dispatch_stock_to_customer(&customer, &[line("Fabric Rolls", 10)])
             .expect_err("third dispatch: no vehicle free");
         assert!(err.to_string().contains("active trip"), "unexpected: {err}");
 
@@ -797,7 +980,7 @@ mod tests {
             .expect("deliver");
 
         let fourth = org
-            .dispatch_stock_to_customer(&customer, "Fabric Rolls", 10)
+            .dispatch_stock_to_customer(&customer, &[line("Fabric Rolls", 10)])
             .expect("a freed vehicle can be dispatched again");
         assert_eq!(
             fourth.vehicle_registration_number, first.vehicle_registration_number,

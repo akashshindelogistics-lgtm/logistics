@@ -101,8 +101,9 @@ export default function OrganizationDetail() {
   const [showDocForm, setShowDocForm] = useState(false);
 
   const [dCustomerId, setDCustomerId] = useState('');
-  const [dStock, setDStock] = useState('');
-  const [dQty, setDQty] = useState('');
+  const [dLineItems, setDLineItems] = useState<{ description: string; quantity: string }[]>([
+    { description: '', quantity: '' },
+  ]);
   const [dMsg, setDMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [dSubmitting, setDSubmitting] = useState(false);
 
@@ -270,13 +271,27 @@ export default function OrganizationDetail() {
     }
   };
 
+  const updateLineItem = (index: number, field: 'description' | 'quantity', value: string) => {
+    setDLineItems(prev => prev.map((li, i) => (i === index ? { ...li, [field]: value } : li)));
+  };
+  const addLineItem = () => setDLineItems(prev => [...prev, { description: '', quantity: '' }]);
+  const removeLineItem = (index: number) =>
+    setDLineItems(prev => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+
   const handleDispatch = async (e: React.FormEvent) => {
     e.preventDefault();
     setDSubmitting(true); setDMsg(null);
     try {
-      await dispatchStock(id!, dCustomerId, dStock, Number(dQty));
+      const lineItems = dLineItems
+        .filter(li => li.description.trim() && li.quantity)
+        .map(li => ({ stockDescription: li.description.trim(), requestedQuantity: Number(li.quantity) }));
+      if (lineItems.length === 0) {
+        setDMsg({ text: 'Add at least one stock line with a description and quantity.', ok: false });
+        return;
+      }
+      await dispatchStock(id!, dCustomerId, lineItems);
       setDMsg({ text: 'Dispatch successful! Stock is on its way.', ok: true });
-      setDStock(''); setDQty('');
+      setDLineItems([{ description: '', quantity: '' }]);
       load();
     } catch (err) {
       const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -891,14 +906,47 @@ export default function OrganizationDetail() {
                   {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
-              <div className="field">
-                <label htmlFor="d-stock">Stock Description</label>
-                <input id="d-stock" placeholder="What is being dispatched?" value={dStock} onChange={e => setDStock(e.target.value)} required />
-              </div>
-              <div className="field">
-                <label htmlFor="d-qty">Quantity</label>
-                <input id="d-qty" type="number" placeholder="Units to dispatch" value={dQty} onChange={e => setDQty(e.target.value)} required />
-              </div>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '4px 0 10px' }}>Stock Lines</p>
+              {dLineItems.map((li, i) => {
+                const suffix = i === 0 ? '' : ` ${i + 1}`;
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 10 }} data-testid="dispatch-line-item">
+                    <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                      <label htmlFor={`d-stock-${i}`}>{`Stock Description${suffix}`}</label>
+                      <input
+                        id={`d-stock-${i}`}
+                        placeholder="What is being dispatched?"
+                        value={li.description}
+                        onChange={e => updateLineItem(i, 'description', e.target.value)}
+                      />
+                    </div>
+                    <div className="field" style={{ flex: '0 0 130px', marginBottom: 0 }}>
+                      <label htmlFor={`d-qty-${i}`}>{`Quantity${suffix}`}</label>
+                      <input
+                        id={`d-qty-${i}`}
+                        type="number"
+                        placeholder="Units"
+                        value={li.quantity}
+                        onChange={e => updateLineItem(i, 'quantity', e.target.value)}
+                      />
+                    </div>
+                    {dLineItems.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        aria-label={`Remove stock line ${i + 1}`}
+                        onClick={() => removeLineItem(i)}
+                        style={{ marginBottom: 2 }}
+                      >
+                        <IconTrash size={12} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <button type="button" className="btn btn-sm" onClick={addLineItem} style={{ marginBottom: 14 }}>
+                <IconPlus size={13} />Add another line
+              </button>
 
               {dMsg && (
                 <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: 13, background: dMsg.ok ? 'var(--green-bg)' : 'var(--red-bg)', color: dMsg.ok ? 'var(--green)' : 'var(--red)', display: 'flex', alignItems: 'center', gap: 8 }}>

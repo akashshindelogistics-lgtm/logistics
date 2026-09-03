@@ -1,5 +1,10 @@
 import api from './client';
-import type { ApiResponse, Organization } from '../types';
+import type { ApiResponse, DispatchOrder, Organization } from '../types';
+
+export interface DispatchLineItemInput {
+  stockDescription: string;
+  requestedQuantity: number;
+}
 
 export const listOrgs = () =>
   api.get<ApiResponse<Organization[]>>('/orgs').then(r => r.data);
@@ -19,13 +24,14 @@ export const deleteOrg = (id: string) =>
 export const dispatchStock = (
   orgId: string,
   customerId: string,
-  stockDescription: string,
-  requestedQuantity: number,
+  lineItems: DispatchLineItemInput[],
 ) =>
   api
-    .post(`/orgs/${orgId}/dispatch`, {
+    .post<ApiResponse<DispatchOrder>>(`/orgs/${orgId}/dispatch`, {
       customer_id: customerId,
-      stock_description: stockDescription,
-      requested_quantity: requestedQuantity,
+      line_items: lineItems.map(li => ({
+        stock_description: li.stockDescription,
+        requested_quantity: li.requestedQuantity,
+      })),
     })
     .then(r => r.data);

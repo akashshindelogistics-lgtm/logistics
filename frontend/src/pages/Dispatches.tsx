@@ -148,9 +148,18 @@ export default function Dispatches() {
                           <span className="entity-name">{o.vehicle_registration_number}</span>
                         </div>
                       </td>
-                      <td>{o.stock_description}</td>
                       <td>
-                        <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)' }}>{o.quantity}</span>
+                        {o.line_items.map((li, i) => (
+                          <div key={i}>
+                            {li.stock_description}
+                            <span className="muted" style={{ marginLeft: 4 }}>×{li.quantity}</span>
+                          </div>
+                        ))}
+                      </td>
+                      <td>
+                        <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-1)' }}>
+                          {o.line_items.reduce((sum, li) => sum + li.quantity, 0)}
+                        </span>
                         <span className="muted" style={{ marginLeft: 4 }}>units</span>
                       </td>
                       <td><span className={`status-tag ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span></td>

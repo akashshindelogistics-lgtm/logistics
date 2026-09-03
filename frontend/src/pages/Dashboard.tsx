@@ -92,8 +92,12 @@ export default function Dashboard() {
                   <tr key={o.id}>
                     <td><span className="mono">{o.id.slice(0, 8)}…</span></td>
                     <td className="entity-name">{o.vehicle_registration_number}</td>
-                    <td>{o.stock_description}</td>
-                    <td><strong>{o.quantity}</strong></td>
+                    <td>
+                      {o.line_items.length === 1
+                        ? o.line_items[0].stock_description
+                        : `${o.line_items.length} items`}
+                    </td>
+                    <td><strong>{o.line_items.reduce((sum, li) => sum + li.quantity, 0)}</strong></td>
                     <td><span className="status-tag tag-green">{o.status}</span></td>
                     <td className="muted">{new Date(o.dispatched_at * 1000).toLocaleString()}</td>
                   </tr>
