@@ -98,6 +98,7 @@ export default function OrganizationDetail() {
   const [docForm, setDocForm] = useState<DocFormState>(emptyDocForm);
   const [docSubmitting, setDocSubmitting] = useState(false);
   const [docMsg, setDocMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [showDocForm, setShowDocForm] = useState(false);
 
   const [dCustomerId, setDCustomerId] = useState('');
   const [dStock, setDStock] = useState('');
@@ -174,6 +175,7 @@ export default function OrganizationDetail() {
         expires_on: docForm.expiresOn,
       });
       setDocForm(emptyDocForm);
+      setShowDocForm(false);
       setDocMsg({ text: 'Compliance document recorded.', ok: true });
       load();
     } catch (err) {
@@ -558,6 +560,19 @@ export default function OrganizationDetail() {
             </div>
           )}
 
+          {org.vehicles.length > 0 && (
+            <div style={{ padding: '12px 20px 0' }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                aria-expanded={showDocForm}
+                onClick={() => { setShowDocForm(v => !v); setDocMsg(null); }}
+              >
+                <IconPlus size={13} />{showDocForm ? 'Close' : 'Add compliance document'}
+              </button>
+            </div>
+          )}
+
           {org.vehicles.length === 0 ? (
             <div className="empty-state" style={{ padding: '28px 20px' }}>
               <div className="empty-state-icon"><IconTruck size={22} /></div>
@@ -609,7 +624,7 @@ export default function OrganizationDetail() {
             </div>
           )}
 
-          {org.vehicles.length > 0 && (
+          {org.vehicles.length > 0 && showDocForm && (
             <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
               <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Add Compliance Document</p>
               <form onSubmit={handleAddDocument} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -648,7 +663,7 @@ export default function OrganizationDetail() {
                   <input id="doc-expiry" type="date" value={docForm.expiresOn} onChange={e => setDocForm(f => ({ ...f, expiresOn: e.target.value }))} required />
                 </div>
                 <button className="btn btn-primary" type="submit" disabled={docSubmitting} style={{ alignSelf: 'flex-end' }}>
-                  <IconPlus size={14} />{docSubmitting ? 'Saving…' : 'Add Document'}
+                  <IconPlus size={14} />{docSubmitting ? 'Saving…' : 'Save Document'}
                 </button>
               </form>
             </div>

@@ -141,11 +141,12 @@ test.describe('Organization', () => {
 
     // Record an insurance policy that lapses in 10 days.
     const soon = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    await page.getByRole('button', { name: /add compliance document/i }).click();
     await page.getByLabel('Vehicle', { exact: true }).selectOption(reg);
     await page.getByLabel('Document', { exact: true }).selectOption('Insurance');
     await page.getByLabel('Document Number').fill('POL-E2E-1');
     await page.getByLabel('Expiry Date').fill(soon);
-    await page.getByRole('button', { name: /add document/i }).click();
+    await page.getByRole('button', { name: /save document/i }).click();
 
     await expect(page.getByText(/compliance document recorded/i)).toBeVisible({ timeout: 8000 });
 

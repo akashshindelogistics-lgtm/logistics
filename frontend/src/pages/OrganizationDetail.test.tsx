@@ -272,11 +272,12 @@ describe('OrganizationDetail page', () => {
     renderPage();
     await screen.findByTestId('fleet-table');
 
+    await user.click(screen.getByRole('button', { name: /add compliance document/i }));
     await user.selectOptions(screen.getByLabelText('Vehicle'), 'MH01AB1234');
     await user.selectOptions(screen.getByLabelText('Document'), 'Permit');
     await user.type(screen.getByLabelText('Document Number'), 'PMT-2027-01');
     await user.type(screen.getByLabelText('Expiry Date'), '2027-03-31');
-    await user.click(screen.getByRole('button', { name: /add document/i }));
+    await user.click(screen.getByRole('button', { name: /save document/i }));
 
     expect(vehiclesApi.addVehicleDocument).toHaveBeenCalledWith('MH01AB1234', {
       doc_type: 'Permit',
