@@ -65,7 +65,21 @@
    Godown.max_capacity (Option<i64>) — a cap on Σ(volume_in_size × quantity)
    across the godown's stock. add/update stock over the cap is rejected 409.
    Set on create or PUT /api/godowns/{id}. None = unlimited.
-** TODO Track vehicle compliance paperwork (insurance, RC, permit, PUC/fitness certificate) with expiry dates and renewal reminders - mandatory for any commercial truck on Indian roads
+** DONE Track vehicle compliance paperwork (insurance, RC, permit, PUC/fitness certificate) with expiry dates and renewal reminders - mandatory for any commercial truck on Indian roads
+   New VehicleDocument model (src/logistics/vehicle/document.rs) + VehicleDocuments
+   table, cascade-deleted with the vehicle and the org. doc_type is one of
+   Insurance / RegistrationCertificate / Permit / PollutionCertificate /
+   FitnessCertificate (RC/PUC/FC shorthands accepted). Dates are ISO strings,
+   validated as real calendar dates; days_until_expiry and a Valid/ExpiringSoon
+   (<= 30 days) / Expired status are computed on every read with a dependency-free
+   days_from_civil helper. Routes: GET/POST /api/vehicles/{reg}/documents,
+   PUT/DELETE /api/vehicle-documents/{id} (renew = PUT), and
+   GET /api/orgs/{id}/vehicle-documents for the whole fleet. Frontend: a
+   "Vehicle Compliance" section on the org detail page with expiring/expired
+   count badges (the renewal reminder), a status-coded table, inline add form,
+   and per-row Renew/delete. 14 new Rust tests (9 model, 5 route), 5 new vehicles
+   api-client tests, 2 new OrganizationDetail tests, 1 new Playwright flow.
+   Plan/context: [[file:docs/vehicle-compliance.md]]
 ** TODO Add freight billing: a cost per dispatch, invoice generation, and a payment status (paid/pending/overdue) per customer
 ** TODO Support returns: a customer return should credit stock back into a godown and record a RETURNED dispatch, rather than the system only ever being able to decrement stock
 ** TODO Move from one login per org to role-scoped user accounts within an org (admin, dispatcher, warehouse staff) so more than one person at the same org can log in with different permissions

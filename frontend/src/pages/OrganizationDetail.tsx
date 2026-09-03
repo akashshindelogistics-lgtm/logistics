@@ -1,11 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getOrg, dispatchStock } from '../api/orgs';
-import { addVehicle, deleteVehicle } from '../api/vehicles';
+import {
+  addVehicle,
+  deleteVehicle,
+  listOrgVehicleDocuments,
+  addVehicleDocument,
+  updateVehicleDocument,
+  deleteVehicleDocument,
+} from '../api/vehicles';
 import { listCustomers } from '../api/customers';
 import { createGodown, deleteGodown, addGodownStock, transferGodownStock, listStockTransfers } from '../api/godowns';
 import { listDrivers, addDriver, deleteDriver, updateDriver, assignVehicleDriver } from '../api/drivers';
-import type { Organization, Customer, Driver, StockTransfer } from '../types';
+import type {
+  Organization,
+  Customer,
+  Driver,
+  StockTransfer,
+  ComplianceDocType,
+  VehicleDocument,
+} from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck, IconUsers } from '../components/Icons';
 import './page.css';
@@ -25,6 +39,34 @@ interface TransferFormState {
 }
 
 const emptyTransferForm: TransferFormState = { description: '', toGodownId: '', quantity: '' };
+
+interface DocFormState {
+  vehicleRegistration: string;
+  docType: ComplianceDocType;
+  documentNumber: string;
+  expiresOn: string;
+}
+
+const emptyDocForm: DocFormState = {
+  vehicleRegistration: '',
+  docType: 'Insurance',
+  documentNumber: '',
+  expiresOn: '',
+};
+
+const DOC_TYPE_LABELS: Record<ComplianceDocType, string> = {
+  Insurance: 'Insurance',
+  RegistrationCertificate: 'Registration (RC)',
+  Permit: 'Permit',
+  PollutionCertificate: 'Pollution (PUC)',
+  FitnessCertificate: 'Fitness',
+};
+
+const COMPLIANCE_STATUS_META = {
+  Valid: { label: 'Valid', className: 'tag-green' },
+  ExpiringSoon: { label: 'Expiring soon', className: 'tag-amber' },
+  Expired: { label: 'Expired', className: 'tag-red' },
+} as const;
 
 export default function OrganizationDetail() {
   const { id } = useParams<{ id: string }>();
@@ -52,6 +94,11 @@ export default function OrganizationDetail() {
   const [transferMsg, setTransferMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
 
+  const [vehicleDocuments, setVehicleDocuments] = useState<VehicleDocument[]>([]);
+  const [docForm, setDocForm] = useState<DocFormState>(emptyDocForm);
+  const [docSubmitting, setDocSubmitting] = useState(false);
+  const [docMsg, setDocMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
   const [dCustomerId, setDCustomerId] = useState('');
   const [dStock, setDStock] = useState('');
   const [dQty, setDQty] = useState('');
@@ -59,12 +106,19 @@ export default function OrganizationDetail() {
   const [dSubmitting, setDSubmitting] = useState(false);
 
   const load = () =>
-    Promise.all([getOrg(id!), listCustomers(), listDrivers(), listStockTransfers(id!)])
-      .then(([orgRes, custRes, drvRes, transferRes]) => {
+    Promise.all([
+      getOrg(id!),
+      listCustomers(),
+      listDrivers(),
+      listStockTransfers(id!),
+      listOrgVehicleDocuments(id!),
+    ])
+      .then(([orgRes, custRes, drvRes, transferRes, docRes]) => {
         setOrg(orgRes.data ?? null);
         setCustomers(custRes.data ?? []);
         setDrivers(drvRes.data ?? []);
         setTransfers(transferRes.data ?? []);
+        setVehicleDocuments(docRes.data ?? []);
       })
       .finally(() => setLoading(false));
 
@@ -106,6 +160,55 @@ export default function OrganizationDetail() {
 
   const handleAssignVehicleDriver = async (reg: string, driverId: string) => {
     await assignVehicleDriver(reg, driverId || null);
+    load();
+  };
+
+  const handleAddDocument = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDocSubmitting(true);
+    setDocMsg(null);
+    try {
+      await addVehicleDocument(docForm.vehicleRegistration, {
+        doc_type: docForm.docType,
+        document_number: docForm.documentNumber,
+        expires_on: docForm.expiresOn,
+      });
+      setDocForm(emptyDocForm);
+      setDocMsg({ text: 'Compliance document recorded.', ok: true });
+      load();
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setDocMsg({ text: apiMsg ? `Could not save document: ${apiMsg}` : 'Could not save document.', ok: false });
+    } finally {
+      setDocSubmitting(false);
+    }
+  };
+
+  const handleRenewDocument = async (doc: VehicleDocument) => {
+    const next = prompt(
+      `New expiry date for the ${DOC_TYPE_LABELS[doc.doc_type]} on ${doc.vehicle_registration} (YYYY-MM-DD):`,
+      doc.expires_on,
+    );
+    if (!next || next === doc.expires_on) return;
+    try {
+      await updateVehicleDocument(doc.id, {
+        doc_type: doc.doc_type,
+        document_number: doc.document_number,
+        issued_on: doc.issued_on,
+        expires_on: next,
+        notes: doc.notes,
+      });
+      setDocMsg({ text: 'Document renewed.', ok: true });
+      load();
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setDocMsg({ text: apiMsg ? `Renewal failed: ${apiMsg}` : 'Renewal failed.', ok: false });
+    }
+  };
+
+  const handleDeleteDocument = async (doc: VehicleDocument) => {
+    if (!confirm(`Delete the ${DOC_TYPE_LABELS[doc.doc_type]} record for ${doc.vehicle_registration}?`)) return;
+    await deleteVehicleDocument(doc.id);
     load();
   };
 
@@ -210,6 +313,9 @@ export default function OrganizationDetail() {
   const godownName = (godownId: string) =>
     org.godowns.find(g => g.id === godownId)?.name ?? 'a removed godown';
 
+  const expiringSoonCount = vehicleDocuments.filter(d => d.status === 'ExpiringSoon').length;
+  const expiredCount = vehicleDocuments.filter(d => d.status === 'Expired').length;
+
   const mapPins: MapPin[] = [];
   if (org.location)
     mapPins.push({ lat: org.location.latitude, lng: org.location.longitude, label: org.name, detail: org.address });
@@ -284,7 +390,7 @@ export default function OrganizationDetail() {
             </div>
           ) : (
             <div className="table-wrap">
-              <table>
+              <table data-testid="fleet-table">
                 <thead>
                   <tr><th>Registration</th><th>Capacity</th><th>Driver</th><th>Coordinates</th><th>Last Seen</th><th></th></tr>
                 </thead>
@@ -425,6 +531,128 @@ export default function OrganizationDetail() {
               </button>
             </form>
           </div>
+        </div>
+
+        {/* Vehicle compliance paperwork */}
+        <div className="section-card" style={{ gridColumn: '1 / -1' }}>
+          <div className="section-card-header">
+            <span className="section-card-title"><IconTruck size={15} />Vehicle Compliance</span>
+            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span className="badge">{vehicleDocuments.length}</span>
+              {expiringSoonCount > 0 && (
+                <span className="badge tag-amber">{expiringSoonCount} expiring soon</span>
+              )}
+              {expiredCount > 0 && (
+                <span className="badge tag-red">{expiredCount} expired</span>
+              )}
+            </span>
+          </div>
+
+          {docMsg && (
+            <div
+              role="status"
+              style={{ margin: '12px 20px 0', padding: '10px 14px', borderRadius: 8, fontSize: 13, background: docMsg.ok ? 'var(--green-bg)' : 'var(--red-bg)', color: docMsg.ok ? 'var(--green-text)' : 'var(--red-text)', display: 'flex', alignItems: 'center', gap: 8 }}
+            >
+              {docMsg.ok && <IconCheck size={14} />}
+              {docMsg.text}
+            </div>
+          )}
+
+          {org.vehicles.length === 0 ? (
+            <div className="empty-state" style={{ padding: '28px 20px' }}>
+              <div className="empty-state-icon"><IconTruck size={22} /></div>
+              <h3>Add a vehicle to track compliance</h3>
+              <p>Record each truck's insurance, RC, permit, PUC and fitness paperwork once it's in the fleet.</p>
+            </div>
+          ) : vehicleDocuments.length === 0 ? (
+            <div className="empty-state" style={{ padding: '28px 20px' }}>
+              <div className="empty-state-icon"><IconTruck size={22} /></div>
+              <h3>No compliance documents recorded</h3>
+              <p>Track each vehicle's papers and their expiry dates below.</p>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Vehicle</th><th>Document</th><th>Number</th><th>Expires</th><th>Status</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {vehicleDocuments.map(doc => {
+                    const meta = COMPLIANCE_STATUS_META[doc.status];
+                    return (
+                      <tr key={doc.id} data-testid="compliance-row">
+                        <td><span className="entity-name">{doc.vehicle_registration}</span></td>
+                        <td>{DOC_TYPE_LABELS[doc.doc_type]}</td>
+                        <td className="muted">{doc.document_number}</td>
+                        <td>
+                          {doc.expires_on}
+                          <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>
+                            {doc.days_until_expiry < 0
+                              ? `(${-doc.days_until_expiry}d ago)`
+                              : `(in ${doc.days_until_expiry}d)`}
+                          </span>
+                        </td>
+                        <td><span className={`badge ${meta.className}`}>{meta.label}</span></td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn btn-sm" onClick={() => handleRenewDocument(doc)}>Renew</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => handleDeleteDocument(doc)}>
+                              <IconTrash size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {org.vehicles.length > 0 && (
+            <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Add Compliance Document</p>
+              <form onSubmit={handleAddDocument} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="field" style={{ flex: '0 0 170px', marginBottom: 0 }}>
+                  <label htmlFor="doc-vehicle">Vehicle</label>
+                  <select
+                    id="doc-vehicle"
+                    value={docForm.vehicleRegistration}
+                    onChange={e => setDocForm(f => ({ ...f, vehicleRegistration: e.target.value }))}
+                    required
+                  >
+                    <option value="">Select…</option>
+                    {org.vehicles.map(v => (
+                      <option key={v.registration_number} value={v.registration_number}>{v.registration_number}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field" style={{ flex: '0 0 160px', marginBottom: 0 }}>
+                  <label htmlFor="doc-type">Document</label>
+                  <select
+                    id="doc-type"
+                    value={docForm.docType}
+                    onChange={e => setDocForm(f => ({ ...f, docType: e.target.value as ComplianceDocType }))}
+                  >
+                    {(Object.keys(DOC_TYPE_LABELS) as ComplianceDocType[]).map(t => (
+                      <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+                  <label htmlFor="doc-number">Document Number</label>
+                  <input id="doc-number" value={docForm.documentNumber} onChange={e => setDocForm(f => ({ ...f, documentNumber: e.target.value }))} required />
+                </div>
+                <div className="field" style={{ flex: '0 0 160px', marginBottom: 0 }}>
+                  <label htmlFor="doc-expiry">Expiry Date</label>
+                  <input id="doc-expiry" type="date" value={docForm.expiresOn} onChange={e => setDocForm(f => ({ ...f, expiresOn: e.target.value }))} required />
+                </div>
+                <button className="btn btn-primary" type="submit" disabled={docSubmitting} style={{ alignSelf: 'flex-end' }}>
+                  <IconPlus size={14} />{docSubmitting ? 'Saving…' : 'Add Document'}
+                </button>
+              </form>
+            </div>
+          )}
         </div>
 
         {/* Godowns (warehouses) and their stock */}

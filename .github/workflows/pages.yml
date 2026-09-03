@@ -64,7 +64,9 @@ jobs:
               '/api/godowns/{gid}/stock/{desc}', '/api/godowns/{gid}/transfer',
               '/api/orgs/{id}/stock-transfers', '/api/orgs/{id}/dispatch',
               '/api/dispatches/{id}/status', '/api/vehicles/{reg}/location',
-              '/api/vehicles/{reg}', '/api/customers', '/api/orgs/{id}/customers',
+              '/api/vehicles/{reg}', '/api/vehicles/{reg}/documents',
+              '/api/vehicle-documents/{id}', '/api/orgs/{id}/vehicle-documents',
+              '/api/customers', '/api/orgs/{id}/customers',
               '/api/customers/{id}', '/api/customers/{id}/location',
           ]
           missing = [p for p in expected if p not in paths]

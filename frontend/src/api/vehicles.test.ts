@@ -1,9 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
-import { listVehicles, addVehicle, deleteVehicle } from './vehicles';
+import {
+  listVehicles,
+  addVehicle,
+  deleteVehicle,
+  listVehicleDocuments,
+  listOrgVehicleDocuments,
+  addVehicleDocument,
+  updateVehicleDocument,
+  deleteVehicleDocument,
+} from './vehicles';
 
 vi.mock('./client', () => ({
-  default: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
+  default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }));
 
 const envelope = <T,>(data: T) => ({ data: { success: true, message: '', data } });
@@ -38,5 +47,51 @@ describe('vehicles api client', () => {
     vi.mocked(api.delete).mockResolvedValue(envelope(null));
     await deleteVehicle('MH01AB1234');
     expect(api.delete).toHaveBeenCalledWith('/vehicles/MH01AB1234');
+  });
+
+  it('listVehicleDocuments GETs the URL-encoded per-vehicle route', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope([]));
+    await listVehicleDocuments('MH 01 AB 1234');
+    expect(api.get).toHaveBeenCalledWith('/vehicles/MH%2001%20AB%201234/documents');
+  });
+
+  it('listOrgVehicleDocuments GETs the org-wide compliance route', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope([]));
+    await listOrgVehicleDocuments('o1');
+    expect(api.get).toHaveBeenCalledWith('/orgs/o1/vehicle-documents');
+  });
+
+  it('addVehicleDocument POSTs the payload to the per-vehicle route', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({}));
+    await addVehicleDocument('MH01AB1234', {
+      doc_type: 'Insurance',
+      document_number: 'POL-1',
+      expires_on: '2027-01-01',
+    });
+    expect(api.post).toHaveBeenCalledWith('/vehicles/MH01AB1234/documents', {
+      doc_type: 'Insurance',
+      document_number: 'POL-1',
+      expires_on: '2027-01-01',
+    });
+  });
+
+  it('updateVehicleDocument PUTs to /vehicle-documents/{id}', async () => {
+    vi.mocked(api.put).mockResolvedValue(envelope({}));
+    await updateVehicleDocument('d1', {
+      doc_type: 'Permit',
+      document_number: 'PMT-9',
+      expires_on: '2028-06-30',
+    });
+    expect(api.put).toHaveBeenCalledWith('/vehicle-documents/d1', {
+      doc_type: 'Permit',
+      document_number: 'PMT-9',
+      expires_on: '2028-06-30',
+    });
+  });
+
+  it('deleteVehicleDocument DELETEs /vehicle-documents/{id}', async () => {
+    vi.mocked(api.delete).mockResolvedValue(envelope(null));
+    await deleteVehicleDocument('d1');
+    expect(api.delete).toHaveBeenCalledWith('/vehicle-documents/d1');
   });
 });

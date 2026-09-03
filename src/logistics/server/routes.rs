@@ -10,6 +10,9 @@ use crate::logistics::godown::godown::Godown;
 use crate::logistics::godown::transfer::{StockTransfer, TransferError};
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::stock::stock::Stock;
+use crate::logistics::vehicle::document::{
+    ComplianceDocType, ComplianceStatus, VehicleDocument, VehicleDocumentError,
+};
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
 use actix_web::{delete, dev::Payload, get, post, put, web, FromRequest, HttpRequest, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
@@ -179,6 +182,23 @@ pub struct AssignDriverPayload {
     pub driver_id: Option<Uuid>,
 }
 
+/// Create or update (renew) one piece of vehicle compliance paperwork.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct VehicleDocumentPayload {
+    /// `Insurance`, `RegistrationCertificate`, `Permit`, `PollutionCertificate`
+    /// or `FitnessCertificate` (shorthands `RC` / `PUC` / `FC` also accepted).
+    pub doc_type: String,
+    /// Policy / certificate number as printed on the document.
+    pub document_number: String,
+    /// Issue date as ISO `YYYY-MM-DD`, optional.
+    #[serde(default)]
+    pub issued_on: Option<String>,
+    /// Expiry date as ISO `YYYY-MM-DD`. Required.
+    pub expires_on: String,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct DispatchRequestPayload {
     pub customer_id: Uuid,
@@ -291,6 +311,20 @@ pub struct DriverListResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Vec<Driver>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VehicleDocumentResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<VehicleDocument>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VehicleDocumentListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<VehicleDocument>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1113,6 +1147,268 @@ pub async fn assign_vehicle_driver(
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to assign driver: {}", err),
+            data: None,
+        }),
+    }
+}
+
+// ── Vehicle compliance document handlers (protected) ─────────────────────────
+//
+// Insurance / RC / permit / PUC / fitness paperwork, each with an expiry date.
+// Every route checks the vehicle (or the document's stored org) belongs to the
+// authenticated org before acting. See docs/vehicle-compliance.md.
+
+/// Verify a vehicle with `reg` belongs to `auth_org_id`, or build the 404/500
+/// response the handler should return early with.
+fn ensure_owned_vehicle(reg: &str, auth_org_id: Uuid) -> Result<(), HttpResponse> {
+    match Vehicle::list_by_org(auth_org_id) {
+        Ok(vehicles) if vehicles.iter().any(|v| v.registration_number == reg) => Ok(()),
+        Ok(_) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Vehicle not found in this organization".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch vehicle: {}", err),
+            data: None,
+        })),
+    }
+}
+
+/// Load a compliance document by id and verify it belongs to `auth_org_id`,
+/// or build the 403/404/500 response to return early with.
+fn load_owned_vehicle_document(
+    doc_id: Uuid,
+    auth_org_id: Uuid,
+) -> Result<VehicleDocument, HttpResponse> {
+    match VehicleDocument::get_by_id(doc_id) {
+        Ok(Some(doc)) if doc.org_id == auth_org_id => Ok(doc),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: document belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Vehicle document not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch vehicle document: {}", err),
+            data: None,
+        })),
+    }
+}
+
+/// Map a `VehicleDocumentError` to a caller-facing response: a bad date is a
+/// `400`, anything else a `500`.
+fn vehicle_document_error_response(err: VehicleDocumentError) -> HttpResponse {
+    match err {
+        VehicleDocumentError::InvalidDate(_) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: err.to_string(),
+            data: None,
+        }),
+        VehicleDocumentError::Db(_) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to save vehicle document: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/vehicles/{reg}/documents",
+    tag = "Vehicle compliance",
+    security(("bearer_auth" = [])),
+    params(("reg" = String, Path, description = "Vehicle registration number")),
+    responses(
+        (status = 200, description = "Compliance documents for the vehicle, soonest expiry first", body = VehicleDocumentListResponse),
+        (status = 404, description = "Vehicle not found in this organization", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/vehicles/{reg}/documents")]
+pub async fn list_vehicle_documents(
+    path: web::Path<String>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let reg = path.into_inner();
+    if let Err(resp) = ensure_owned_vehicle(&reg, auth.org_id) {
+        return resp;
+    }
+    match VehicleDocument::list_by_vehicle(&reg) {
+        Ok(docs) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} documents", docs.len()),
+            data: Some(docs),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list vehicle documents: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/vehicles/{reg}/documents",
+    tag = "Vehicle compliance",
+    security(("bearer_auth" = [])),
+    params(("reg" = String, Path, description = "Vehicle registration number")),
+    request_body = VehicleDocumentPayload,
+    responses(
+        (status = 201, description = "Document recorded", body = VehicleDocumentResponse),
+        (status = 400, description = "A supplied date is not a valid ISO date", body = EmptyResponse),
+        (status = 404, description = "Vehicle not found in this organization", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/vehicles/{reg}/documents")]
+pub async fn add_vehicle_document(
+    path: web::Path<String>,
+    payload: web::Json<VehicleDocumentPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let reg = path.into_inner();
+    if let Err(resp) = ensure_owned_vehicle(&reg, auth.org_id) {
+        return resp;
+    }
+    let body = payload.into_inner();
+    match VehicleDocument::create(
+        auth.org_id,
+        &reg,
+        ComplianceDocType::from_str(&body.doc_type),
+        body.document_number,
+        body.issued_on,
+        body.expires_on,
+        body.notes,
+    ) {
+        Ok(doc) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: "Vehicle document recorded".to_string(),
+            data: Some(doc),
+        }),
+        Err(err) => vehicle_document_error_response(err),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/vehicle-documents/{id}",
+    tag = "Vehicle compliance",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vehicle document UUID")),
+    request_body = VehicleDocumentPayload,
+    responses(
+        (status = 200, description = "Document updated / renewed", body = VehicleDocumentResponse),
+        (status = 400, description = "A supplied date is not a valid ISO date", body = EmptyResponse),
+        (status = 403, description = "Document belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Document not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/vehicle-documents/{id}")]
+pub async fn update_vehicle_document(
+    path: web::Path<Uuid>,
+    payload: web::Json<VehicleDocumentPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut doc = match load_owned_vehicle_document(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let body = payload.into_inner();
+    match doc.update(
+        ComplianceDocType::from_str(&body.doc_type),
+        body.document_number,
+        body.issued_on,
+        body.expires_on,
+        body.notes,
+    ) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Vehicle document updated".to_string(),
+            data: Some(doc),
+        }),
+        Err(err) => vehicle_document_error_response(err),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/vehicle-documents/{id}",
+    tag = "Vehicle compliance",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vehicle document UUID")),
+    responses(
+        (status = 200, description = "Document deleted", body = EmptyResponse),
+        (status = 403, description = "Document belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Document not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[delete("/vehicle-documents/{id}")]
+pub async fn delete_vehicle_document(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let doc = match load_owned_vehicle_document(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match doc.delete() {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::<String> {
+            success: true,
+            message: "Vehicle document deleted".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to delete vehicle document: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/vehicle-documents",
+    tag = "Vehicle compliance",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "Every compliance document across the org's fleet, soonest expiry first", body = VehicleDocumentListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/vehicle-documents")]
+pub async fn list_org_vehicle_documents(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match VehicleDocument::list_by_org(org_id) {
+        Ok(docs) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} documents", docs.len()),
+            data: Some(docs),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list vehicle documents: {}", err),
             data: None,
         }),
     }
@@ -2062,6 +2358,11 @@ impl Modify for SecurityAddon {
         update_driver,
         delete_driver,
         assign_vehicle_driver,
+        list_vehicle_documents,
+        add_vehicle_document,
+        update_vehicle_document,
+        delete_vehicle_document,
+        list_org_vehicle_documents,
         list_godowns,
         create_godown,
         get_godown,
@@ -2090,12 +2391,15 @@ impl Modify for SecurityAddon {
             CreateGodownPayload, UpdateGodownPayload,
             CreateCustomerPayload, DispatchRequestPayload,
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
+            VehicleDocumentPayload,
             TransferStockPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload,
             Organization, Vehicle, Unit, Location, Stock, Godown, StockTransfer, Customer, Driver,
+            VehicleDocument, ComplianceDocType, ComplianceStatus,
             DispatchOrder, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
+            VehicleDocumentResponse, VehicleDocumentListResponse,
             StockResponse, GodownResponse, GodownListResponse,
             StockTransferResponse, StockTransferListResponse,
             CustomerResponse, CustomerListResponse,
@@ -2110,6 +2414,7 @@ impl Modify for SecurityAddon {
         (name = "Organizations", description = "Organization management"),
         (name = "Vehicles", description = "Vehicle fleet management"),
         (name = "Drivers", description = "Driver records and vehicle assignment"),
+        (name = "Vehicle compliance", description = "Vehicle paperwork (insurance, RC, permit, PUC, fitness) and expiry tracking"),
         (name = "Godowns", description = "Warehouse (godown) and stock management"),
         (name = "Customers", description = "Customer management"),
         (name = "Dispatch", description = "Stock dispatch"),
@@ -2139,6 +2444,11 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(update_driver)
             .service(delete_driver)
             .service(assign_vehicle_driver)
+            .service(list_vehicle_documents)
+            .service(add_vehicle_document)
+            .service(update_vehicle_document)
+            .service(delete_vehicle_document)
+            .service(list_org_vehicle_documents)
             .service(list_godowns)
             .service(create_godown)
             .service(get_godown)
@@ -4613,5 +4923,224 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 400);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(body.message.contains("active assigned driver"), "{}", body.message);
+    }
+
+    // ── Vehicle compliance documents ────────────────────────────────────────
+
+    async fn add_vehicle_via_api(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth: &str,
+        reg: &str,
+    ) {
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{org_id}/vehicles"))
+            .insert_header(("Authorization", auth.to_string()))
+            .set_json(&CreateVehiclePayload {
+                registration_number: reg.to_string(),
+                capacity: 20,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        assert_eq!(test::call_service(app, req).await.status().as_u16(), 201);
+    }
+
+    /// An ISO `YYYY-MM-DD` string `offset` days from today (UTC).
+    fn iso_date_offset(offset: i64) -> String {
+        let target = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64)
+            .div_euclid(86_400)
+            + offset;
+        let z = target + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        format!("{y:04}-{m:02}-{d:02}")
+    }
+
+    #[actix_web::test]
+    async fn test_vehicle_document_crud_via_api() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Compliance Co").await;
+        add_vehicle_via_api(&app, org.id, &auth, "KA05-M9-4321").await;
+
+        // Record an insurance policy expiring in 10 days — "expiring soon".
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/KA05-M9-4321/documents")
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&VehicleDocumentPayload {
+                doc_type: "Insurance".to_string(),
+                document_number: "POL-778".to_string(),
+                issued_on: Some(iso_date_offset(-355)),
+                expires_on: iso_date_offset(10),
+                notes: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let created: ApiResponse<VehicleDocument> = test::read_body_json(resp).await;
+        let doc = created.data.unwrap();
+        assert_eq!(doc.status, ComplianceStatus::ExpiringSoon);
+        assert_eq!(doc.doc_type, ComplianceDocType::Insurance);
+
+        // It shows up in the per-vehicle list.
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles/KA05-M9-4321/documents")
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let list: ApiResponse<Vec<VehicleDocument>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(list.data.unwrap().len(), 1);
+
+        // Renew it: push the expiry a year out.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-documents/{}", doc.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&VehicleDocumentPayload {
+                doc_type: "Insurance".to_string(),
+                document_number: "POL-902".to_string(),
+                issued_on: Some(iso_date_offset(0)),
+                expires_on: iso_date_offset(365),
+                notes: Some("renewed".to_string()),
+            })
+            .to_request();
+        let renewed: ApiResponse<VehicleDocument> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let renewed = renewed.data.unwrap();
+        assert_eq!(renewed.status, ComplianceStatus::Valid);
+        assert_eq!(renewed.document_number, "POL-902");
+
+        // The org-wide compliance list sees it too.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vehicle-documents", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let org_list: ApiResponse<Vec<VehicleDocument>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(org_list.data.unwrap().len(), 1);
+
+        // Delete it.
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/vehicle-documents/{}", doc.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles/KA05-M9-4321/documents")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let list: ApiResponse<Vec<VehicleDocument>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert!(list.data.unwrap().is_empty());
+    }
+
+    #[actix_web::test]
+    async fn test_add_vehicle_document_rejects_a_bad_date_with_400() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Bad Date Co").await;
+        add_vehicle_via_api(&app, org.id, &auth, "BD-VH-1").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/BD-VH-1/documents")
+            .insert_header(("Authorization", auth))
+            .set_json(&VehicleDocumentPayload {
+                doc_type: "Permit".to_string(),
+                document_number: "PMT-1".to_string(),
+                issued_on: None,
+                expires_on: "31-12-2026".to_string(),
+                notes: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_add_vehicle_document_404_for_a_vehicle_in_another_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, auth_a) = setup_org(&app, "Owner Org").await;
+        let (_org_b, auth_b) = setup_org(&app, "Other Org").await;
+        add_vehicle_via_api(&app, org_a.id, &auth_a, "OWN-VH-1").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/OWN-VH-1/documents")
+            .insert_header(("Authorization", auth_b))
+            .set_json(&VehicleDocumentPayload {
+                doc_type: "Insurance".to_string(),
+                document_number: "SNEAKY".to_string(),
+                issued_on: None,
+                expires_on: iso_date_offset(200),
+                notes: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_update_vehicle_document_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, auth_a) = setup_org(&app, "Doc Owner").await;
+        let (_org_b, auth_b) = setup_org(&app, "Doc Intruder").await;
+        add_vehicle_via_api(&app, org_a.id, &auth_a, "DOC-VH-1").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/DOC-VH-1/documents")
+            .insert_header(("Authorization", auth_a))
+            .set_json(&VehicleDocumentPayload {
+                doc_type: "FitnessCertificate".to_string(),
+                document_number: "FC-1".to_string(),
+                issued_on: None,
+                expires_on: iso_date_offset(90),
+                notes: None,
+            })
+            .to_request();
+        let created: ApiResponse<VehicleDocument> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let doc_id = created.data.unwrap().id;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-documents/{doc_id}"))
+            .insert_header(("Authorization", auth_b))
+            .set_json(&VehicleDocumentPayload {
+                doc_type: "FitnessCertificate".to_string(),
+                document_number: "HIJACK".to_string(),
+                issued_on: None,
+                expires_on: iso_date_offset(90),
+                notes: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_list_org_vehicle_documents_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, _auth_a) = setup_org(&app, "Fleet A").await;
+        let (_org_b, auth_b) = setup_org(&app, "Fleet B").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vehicle-documents", org_a.id))
+            .insert_header(("Authorization", auth_b))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
 }

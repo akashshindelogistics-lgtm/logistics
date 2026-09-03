@@ -128,6 +128,32 @@ test.describe('Organization', () => {
     await expect(historyRow.getByText(dest)).toBeVisible();
   });
 
+  test('record a vehicle compliance document and see it flagged as expiring soon', async ({ page }) => {
+    const org = await registerOrg(page, `Compliance Flow Org ${uid()}`);
+    const reg = `KA05MC${uid().slice(-4)}`;
+    await page.goto(`/orgs/${org.id}`);
+
+    // Add a vehicle.
+    await page.getByLabel('Registration Number').fill(reg);
+    await page.getByLabel('Capacity (MT)').fill('12');
+    await page.getByRole('button', { name: /add vehicle/i }).click();
+    await expect(page.getByTestId('fleet-table').getByText(reg)).toBeVisible({ timeout: 8000 });
+
+    // Record an insurance policy that lapses in 10 days.
+    const soon = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    await page.getByLabel('Vehicle', { exact: true }).selectOption(reg);
+    await page.getByLabel('Document', { exact: true }).selectOption('Insurance');
+    await page.getByLabel('Document Number').fill('POL-E2E-1');
+    await page.getByLabel('Expiry Date').fill(soon);
+    await page.getByRole('button', { name: /add document/i }).click();
+
+    await expect(page.getByText(/compliance document recorded/i)).toBeVisible({ timeout: 8000 });
+
+    const complianceRow = page.getByTestId('compliance-row').filter({ hasText: 'POL-E2E-1' });
+    await expect(complianceRow.getByText('Expiring soon')).toBeVisible();
+    await expect(page.getByText(/1 expiring soon/i)).toBeVisible();
+  });
+
   test('org detail shows Dispatch Stock form', async ({ page }) => {
     const org = await registerOrg(page, `Dispatch Form Org ${uid()}`);
     await page.goto(`/orgs/${org.id}`);

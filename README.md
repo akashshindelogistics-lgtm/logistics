@@ -24,7 +24,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Organizations** — create and manage organizations, each with its own
   location, vehicles, stock, and customers.
 - **Vehicles** — register vehicles per organization and track their live
-  location.
+  location. Record each vehicle's compliance paperwork (insurance, RC,
+  permit, PUC and fitness certificate) with expiry dates; the dashboard
+  flags documents that are expiring within 30 days or already expired.
 - **Drivers** — keep driver records (name, licence number, phone) per
   organization and assign one to a vehicle from the dashboard. A vehicle
   needs an **active** assigned driver, spare capacity, and no trip already
@@ -192,6 +194,9 @@ All routes are served under the `/api` prefix.
 | PUT | `/api/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
 | GET/POST | `/api/drivers`, `/api/orgs/{id}/drivers` | List / add drivers |
 | PUT/DELETE | `/api/drivers/{id}` | Update (incl. active flag) or remove a driver |
+| GET/POST | `/api/vehicles/{reg}/documents` | List / record a vehicle's compliance paperwork (insurance, RC, permit, PUC, fitness) |
+| PUT/DELETE | `/api/vehicle-documents/{id}` | Renew (update) or delete a compliance document |
+| GET | `/api/orgs/{id}/vehicle-documents` | Whole-fleet compliance list, soonest expiry first |
 | GET/POST | `/api/customers`, `/api/orgs/{id}/customers` | List the org's customers / add one |
 | PUT/DELETE | `/api/customers/{id}/location`, `/api/customers/{id}` | Update a customer's location / delete the customer |
 | POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to one of its customers |
