@@ -56,6 +56,31 @@ export interface StockTransfer {
   transferred_at: number;
 }
 
+// Mirrors ComplianceDocType / ComplianceStatus / VehicleDocument in
+// src/logistics/vehicle/document.rs. `days_until_expiry` and `status` are
+// computed by the server on every read.
+export type ComplianceDocType =
+  | 'Insurance'
+  | 'RegistrationCertificate'
+  | 'Permit'
+  | 'PollutionCertificate'
+  | 'FitnessCertificate';
+
+export type ComplianceStatus = 'Valid' | 'ExpiringSoon' | 'Expired';
+
+export interface VehicleDocument {
+  id: string;
+  org_id: string;
+  vehicle_registration: string;
+  doc_type: ComplianceDocType;
+  document_number: string;
+  issued_on: string | null;
+  expires_on: string;
+  notes: string | null;
+  days_until_expiry: number;
+  status: ComplianceStatus;
+}
+
 export interface Organization {
   id: string;
   name: string;

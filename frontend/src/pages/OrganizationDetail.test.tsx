@@ -47,6 +47,7 @@ function mockLoad(
   vi.mocked(customersApi.listCustomers).mockResolvedValue(ok(customers));
   vi.mocked(driversApi.listDrivers).mockResolvedValue(ok(drivers));
   vi.mocked(godownsApi.listStockTransfers).mockResolvedValue(ok([]));
+  vi.mocked(vehiclesApi.listOrgVehicleDocuments).mockResolvedValue(ok([]));
 }
 
 function renderPage() {
@@ -60,6 +61,7 @@ describe('OrganizationDetail page', () => {
     // so tests that don't care about drivers/transfers don't have to mock them.
     vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
     vi.mocked(godownsApi.listStockTransfers).mockResolvedValue(ok([]));
+    vi.mocked(vehiclesApi.listOrgVehicleDocuments).mockResolvedValue(ok([]));
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -82,7 +84,7 @@ describe('OrganizationDetail page', () => {
 
     expect(await screen.findByRole('heading', { name: 'Express Freight' })).toBeInTheDocument();
     expect(screen.getByText('1 Dock Rd')).toBeInTheDocument();
-    expect(screen.getByText('MH01AB1234')).toBeInTheDocument();
+    expect(within(screen.getByTestId('fleet-table')).getByText('MH01AB1234')).toBeInTheDocument();
     expect(screen.getByText('10 MetricTon')).toBeInTheDocument();
     expect(screen.getByText('North Godown')).toBeInTheDocument();
     expect(screen.getByText('Plot 5')).toBeInTheDocument();
@@ -113,7 +115,9 @@ describe('OrganizationDetail page', () => {
     await user.click(screen.getByRole('button', { name: /add vehicle/i }));
 
     expect(vehiclesApi.addVehicle).toHaveBeenCalledWith('o1', 'MH09XY9999', 15);
-    await waitFor(() => expect(screen.getByText('MH09XY9999')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(within(screen.getByTestId('fleet-table')).getByText('MH09XY9999')).toBeInTheDocument(),
+    );
   });
 
   it('confirms a successful dispatch and clears the stock/qty fields', async () => {
@@ -232,7 +236,8 @@ describe('OrganizationDetail page', () => {
     vi.mocked(vehiclesApi.deleteVehicle).mockResolvedValue(ok(null));
 
     renderPage();
-    const row = (await screen.findByText('MH01AB1234')).closest('tr')!;
+    const fleet = await screen.findByTestId('fleet-table');
+    const row = within(fleet).getByText('MH01AB1234').closest('tr')!;
     await user.click(within(row).getByRole('button'));
 
     expect(vehiclesApi.deleteVehicle).toHaveBeenCalledWith('MH01AB1234');
@@ -255,6 +260,60 @@ describe('OrganizationDetail page', () => {
     await user.click(screen.getByRole('button', { name: /add driver/i }));
 
     expect(driversApi.addDriver).toHaveBeenCalledWith('o1', 'Sunita Rao', 'MH-9', '+91 99999 00000');
+  });
+
+  it('records a vehicle compliance document through the inline form', async () => {
+    const user = userEvent.setup();
+    mockLoad(
+      org({ vehicles: [{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }] }),
+    );
+    vi.mocked(vehiclesApi.addVehicleDocument).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByTestId('fleet-table');
+
+    await user.click(screen.getByRole('button', { name: /add compliance document/i }));
+    await user.selectOptions(screen.getByLabelText('Vehicle'), 'MH01AB1234');
+    await user.selectOptions(screen.getByLabelText('Document'), 'Permit');
+    await user.type(screen.getByLabelText('Document Number'), 'PMT-2027-01');
+    await user.type(screen.getByLabelText('Expiry Date'), '2027-03-31');
+    await user.click(screen.getByRole('button', { name: /save document/i }));
+
+    expect(vehiclesApi.addVehicleDocument).toHaveBeenCalledWith('MH01AB1234', {
+      doc_type: 'Permit',
+      document_number: 'PMT-2027-01',
+      expires_on: '2027-03-31',
+    });
+    expect(await screen.findByText(/compliance document recorded/i)).toBeInTheDocument();
+  });
+
+  it('flags expiring and expired compliance documents in the summary and table', async () => {
+    mockLoad(
+      org({ vehicles: [{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }] }),
+    );
+    vi.mocked(vehiclesApi.listOrgVehicleDocuments).mockResolvedValue(
+      ok([
+        {
+          id: 'vd1', org_id: 'o1', vehicle_registration: 'MH01AB1234',
+          doc_type: 'Insurance', document_number: 'POL-1', issued_on: null,
+          expires_on: '2020-01-01', notes: null, days_until_expiry: -900, status: 'Expired',
+        },
+        {
+          id: 'vd2', org_id: 'o1', vehicle_registration: 'MH01AB1234',
+          doc_type: 'PollutionCertificate', document_number: 'PUC-9', issued_on: null,
+          expires_on: '2099-01-01', notes: null, days_until_expiry: 12, status: 'ExpiringSoon',
+        },
+      ]),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('1 expiring soon')).toBeInTheDocument();
+    expect(screen.getByText('1 expired')).toBeInTheDocument();
+    const rows = screen.getAllByTestId('compliance-row');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText('Expired')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Expiring soon')).toBeInTheDocument();
   });
 
   it('assigns a driver to a vehicle from the fleet table', async () => {
