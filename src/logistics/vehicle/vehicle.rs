@@ -169,6 +169,20 @@ impl Vehicle {
         Ok(())
     }
 
+    /// The id of the organization that owns the vehicle with this
+    /// registration number, or `None` if there is no such vehicle.
+    pub fn org_of(reg: &str) -> Result<Option<Uuid>, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+
+        let row: Option<String> = conn.exec_first(
+            "SELECT org_id FROM Vehicle WHERE registration_number = :reg",
+            params! { "reg" => reg },
+        )?;
+
+        Ok(row.and_then(|s| Uuid::parse_str(&s).ok()))
+    }
+
     pub fn update_location(
         &mut self,
         latitude: f64,

@@ -321,7 +321,7 @@ export default function OrganizationDetail() {
     mapPins.push({ lat: org.location.latitude, lng: org.location.longitude, label: org.name, detail: org.address });
   org.vehicles.forEach(v => {
     if (v.location)
-      mapPins.push({ lat: v.location.latitude, lng: v.location.longitude, label: v.registration_number, detail: `${v.capacity} MT` });
+      mapPins.push({ lat: v.location.latitude, lng: v.location.longitude, label: v.registration_number, detail: `${v.capacity} ${v.unit}` });
   });
   org.godowns.forEach(g => {
     if (g.location)
@@ -405,7 +405,7 @@ export default function OrganizationDetail() {
                           <span className="entity-name">{v.registration_number}</span>
                         </div>
                       </td>
-                      <td><span className="badge tag-blue">{v.capacity} MT</span></td>
+                      <td><span className="badge tag-blue">{v.capacity} {v.unit}</span></td>
                       <td>
                         <select
                           aria-label={`Driver for ${v.registration_number}`}
@@ -484,7 +484,7 @@ export default function OrganizationDetail() {
                           <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--blue-bg)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                             <IconUsers size={13} />
                           </div>
-                          <span className="entity-name">{d.name}</span>
+                          <Link to={`/drivers/${d.id}`} className="entity-name" style={{ textDecoration: 'none', color: 'var(--blue)' }}>{d.name}</Link>
                         </div>
                       </td>
                       <td className="muted">{d.license_number}</td>
@@ -684,7 +684,7 @@ export default function OrganizationDetail() {
                   <div key={g.id} data-testid="godown-card" style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
                       <div>
-                        <div style={{ fontWeight: 700 }}>{g.name}</div>
+                        <Link to={`/godowns/${g.id}`} style={{ fontWeight: 700, textDecoration: 'none', color: 'var(--blue)' }}>{g.name}</Link>
                         <div className="muted" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
                           <IconPin size={11} />{g.address}
                         </div>

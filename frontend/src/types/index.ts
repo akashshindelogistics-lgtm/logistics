@@ -5,10 +5,14 @@ export interface Location {
   address?: string;
 }
 
+// Mirrors Unit in src/logistics/vehicle/vehicle.rs.
+export type Unit = 'MetricTon' | 'Kg' | 'Litre' | 'Box' | 'Pallet' | 'Piece';
+export const UNITS: Unit[] = ['MetricTon', 'Kg', 'Litre', 'Box', 'Pallet', 'Piece'];
+
 export interface Vehicle {
   registration_number: string;
   capacity: number;
-  unit: 'MetricTon';
+  unit: Unit;
   location?: Location;
   assigned_driver_id?: string | null;
 }
@@ -33,6 +37,8 @@ export interface Godown {
   org_id: string;
   name: string;
   address: string;
+  /** Optional cap on total stored volume (Σ volume_in_size × quantity). */
+  max_capacity?: number | null;
   location?: Location;
   stock: Stock[];
 }

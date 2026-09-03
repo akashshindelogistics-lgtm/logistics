@@ -119,3 +119,15 @@
   Customers, Vehicles), and the Sidebar/Navbar/LocationMap components. react-leaflet and
   LocationMap are mocked in page tests; router navigate/useParams are mocked per file.
   `npx tsc -b` and `npm run test:unit` both clean.
+* DONE Add UI dashboard edit pages for vehicle, driver and godown details
+  Clicking an entity's name in a list now opens a detail page with an
+  editable, pre-filled form and a Save button: /vehicles/:reg (capacity,
+  unit), /drivers/:id (name, licence, phone, active), /godowns/:id (name,
+  address, max capacity). Backend gains the one missing update route,
+  PUT /api/vehicles/{reg} {capacity, unit}, with a check_owned_vehicle
+  403/404 ownership guard (Vehicle::org_of); drivers and godowns reuse
+  their existing PUT routes, and updateGodown now always sends max_capacity
+  so the cap can be cleared. 3 new Rust route tests, 9 new frontend unit
+  tests, 4 new Playwright flows. Fleet displays now show the vehicle's real
+  unit instead of a hardcoded "MT".
+  Plan/context: [[file:docs/ui-editing.md]]

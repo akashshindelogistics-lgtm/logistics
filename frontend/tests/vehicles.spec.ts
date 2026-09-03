@@ -26,7 +26,7 @@ test.describe('Vehicles', () => {
 
     // Vehicle appears in the Fleet Vehicles table
     await expect(page.getByText(regNumber)).toBeVisible({ timeout: 8000 });
-    await expect(page.getByText('15 MT')).toBeVisible();
+    await expect(page.getByText('15 MetricTon')).toBeVisible();
 
     // Vehicles page also shows it
     await page.goto('/vehicles');

@@ -3,6 +3,7 @@ import api from './client';
 import {
   listVehicles,
   addVehicle,
+  updateVehicle,
   deleteVehicle,
   listVehicleDocuments,
   listOrgVehicleDocuments,
@@ -35,6 +36,13 @@ describe('vehicles api client', () => {
       capacity: 12,
       unit: 'MetricTon',
     });
+  });
+
+  it('updateVehicle PUTs capacity/unit to /vehicles/{reg} (URL-encoded) and unwraps', async () => {
+    vi.mocked(api.put).mockResolvedValue(envelope({ registration_number: 'MH 01', capacity: 30, unit: 'Box' }));
+    const res = await updateVehicle('MH 01', 30, 'Box');
+    expect(api.put).toHaveBeenCalledWith('/vehicles/MH%2001', { capacity: 30, unit: 'Box' });
+    expect(res.data).toEqual({ registration_number: 'MH 01', capacity: 30, unit: 'Box' });
   });
 
   it('deleteVehicle URL-encodes the registration number', async () => {

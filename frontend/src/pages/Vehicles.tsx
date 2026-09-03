@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { listVehicles, deleteVehicle } from '../api/vehicles';
 import { IconTruck, IconPin } from '../components/Icons';
 import type { Vehicle } from '../types';
@@ -20,7 +21,7 @@ export default function Vehicles() {
 
   const pins: MapPin[] = vehicles.filter(v => v.location).map(v => ({
     lat: v.location!.latitude, lng: v.location!.longitude,
-    label: v.registration_number, detail: `${v.capacity} MT`,
+    label: v.registration_number, detail: `${v.capacity} ${v.unit}`,
   }));
 
   const withLocation = vehicles.filter(v => v.location).length;
@@ -82,10 +83,12 @@ export default function Vehicles() {
                         <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--green-bg)', color: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <IconTruck size={15} />
                         </div>
-                        <span className="entity-name">{v.registration_number}</span>
+                        <Link to={`/vehicles/${encodeURIComponent(v.registration_number)}`} className="entity-name" style={{ textDecoration: 'none', color: 'var(--blue)' }}>
+                          {v.registration_number}
+                        </Link>
                       </div>
                     </td>
-                    <td><span className="badge tag-blue">{v.capacity} MT</span></td>
+                    <td><span className="badge tag-blue">{v.capacity} {v.unit}</span></td>
                     <td className="coord-cell">{v.location ? v.location.latitude.toFixed(5) : <span className="muted">—</span>}</td>
                     <td className="coord-cell">{v.location ? v.location.longitude.toFixed(5) : <span className="muted">—</span>}</td>
                     <td className="muted">{v.location ? new Date(v.location.timestamp * 1000).toLocaleString() : '—'}</td>

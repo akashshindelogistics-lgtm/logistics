@@ -99,6 +99,12 @@ pub struct CreateVehiclePayload {
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct UpdateVehiclePayload {
+    pub capacity: i64,
+    pub unit: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateStockPayload {
     pub volume_in_size: i64,
     pub quantity: i64,
@@ -834,6 +840,69 @@ pub async fn add_vehicle(
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to register vehicle: {}", err),
+            data: None,
+        }),
+    }
+}
+
+/// Verify a vehicle with this registration number exists and belongs to
+/// `auth_org_id`, or return the 403/404/500 response to bail out with.
+fn check_owned_vehicle(reg: &str, auth_org_id: Uuid) -> Result<(), HttpResponse> {
+    match Vehicle::org_of(reg) {
+        Ok(Some(org_id)) if org_id == auth_org_id => Ok(()),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: vehicle belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Vehicle not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch vehicle: {}", err),
+            data: None,
+        })),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/vehicles/{reg}",
+    tag = "Vehicles",
+    security(("bearer_auth" = [])),
+    params(("reg" = String, Path, description = "Vehicle registration number")),
+    request_body = UpdateVehiclePayload,
+    responses(
+        (status = 200, description = "Vehicle updated successfully", body = VehicleResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Vehicle not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/vehicles/{reg}")]
+pub async fn edit_vehicle(
+    path: web::Path<String>,
+    payload: web::Json<UpdateVehiclePayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let reg = path.into_inner();
+    if let Err(resp) = check_owned_vehicle(&reg, auth.org_id) {
+        return resp;
+    }
+
+    let mut vehicle = Vehicle::new(&reg, payload.capacity, Unit::from_str(&payload.unit));
+    match vehicle.update_vehicle(payload.capacity, Unit::from_str(&payload.unit)) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Vehicle updated successfully".to_string(),
+            data: Some(vehicle),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to update vehicle: {}", err),
             data: None,
         }),
     }
@@ -2351,6 +2420,7 @@ impl Modify for SecurityAddon {
         delete_org,
         list_vehicles,
         add_vehicle,
+        edit_vehicle,
         update_vehicle_location,
         delete_vehicle,
         list_drivers,
@@ -2387,7 +2457,7 @@ impl Modify for SecurityAddon {
         schemas(
             LoginPayload, LoginData,
             CreateOrgPayload, UpdateOrgPayload, LocationPayload,
-            CreateVehiclePayload, CreateStockPayload, UpdateStockPayload,
+            CreateVehiclePayload, UpdateVehiclePayload, CreateStockPayload, UpdateStockPayload,
             CreateGodownPayload, UpdateGodownPayload,
             CreateCustomerPayload, DispatchRequestPayload,
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
@@ -2437,6 +2507,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(delete_org)
             .service(list_vehicles)
             .service(add_vehicle)
+            .service(edit_vehicle)
             .service(update_vehicle_location)
             .service(delete_vehicle)
             .service(list_drivers)
@@ -3067,6 +3138,87 @@ mod tests {
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(body.success);
         assert_eq!(body.message, "Vehicle deleted successfully");
+    }
+
+    #[actix_web::test]
+    async fn test_edit_vehicle_updates_capacity_and_unit() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Edit Vehicle Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vehicles", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateVehiclePayload {
+                registration_number: "EDIT-VH-1".to_string(),
+                capacity: 10,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+
+        let req = test::TestRequest::put()
+            .uri("/api/vehicles/EDIT-VH-1")
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateVehiclePayload { capacity: 42, unit: "Box".to_string() })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<Vehicle> = test::read_body_json(resp).await;
+        let v = body.data.unwrap();
+        assert_eq!(v.capacity, 42);
+        assert_eq!(v.unit, Unit::Box);
+
+        // Persisted.
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let body: ApiResponse<Vec<Vehicle>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let stored = body.data.unwrap().into_iter().find(|v| v.registration_number == "EDIT-VH-1").unwrap();
+        assert_eq!(stored.capacity, 42);
+        assert_eq!(stored.unit, Unit::Box);
+    }
+
+    #[actix_web::test]
+    async fn test_edit_vehicle_unknown_reg_returns_404() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, auth) = setup_org(&app, "Edit Vehicle 404 Org").await;
+
+        let req = test::TestRequest::put()
+            .uri("/api/vehicles/NO-SUCH-VH")
+            .insert_header(("Authorization", auth))
+            .set_json(&UpdateVehiclePayload { capacity: 5, unit: "MetricTon".to_string() })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_edit_vehicle_from_another_org_returns_403() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Edit Vehicle Owner").await;
+        let (_other, other_auth) = setup_org(&app, "Edit Vehicle Attacker").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vehicles", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&CreateVehiclePayload {
+                registration_number: "OWNED-VH-1".to_string(),
+                capacity: 10,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+
+        let req = test::TestRequest::put()
+            .uri("/api/vehicles/OWNED-VH-1")
+            .insert_header(("Authorization", other_auth))
+            .set_json(&UpdateVehiclePayload { capacity: 999, unit: "MetricTon".to_string() })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
 
     /// Create an org (with credentials) and one godown under it, returning

@@ -190,6 +190,7 @@ All routes are served under the `/api` prefix.
 | GET | `/api/orgs/{id}/stock-transfers` | Godown-to-godown transfer history (audit trail) |
 | POST | `/api/orgs/{id}/vehicles` | Add a vehicle to an organization |
 | GET/DELETE | `/api/vehicles`, `/api/vehicles/{reg}` | List vehicles / remove one |
+| PUT | `/api/vehicles/{reg}` | Update a vehicle's capacity and unit |
 | PUT | `/api/vehicles/{reg}/location` | Update a vehicle's location |
 | PUT | `/api/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
 | GET/POST | `/api/drivers`, `/api/orgs/{id}/drivers` | List / add drivers |
