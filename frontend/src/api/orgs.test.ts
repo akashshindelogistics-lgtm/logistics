@@ -56,13 +56,18 @@ describe('orgs api client', () => {
     expect(api.delete).toHaveBeenCalledWith('/orgs/o1');
   });
 
-  it('dispatchStock POSTs the snake_cased dispatch payload to /orgs/{id}/dispatch', async () => {
+  it('dispatchStock POSTs the snake_cased line-item payload to /orgs/{id}/dispatch', async () => {
     vi.mocked(api.post).mockResolvedValue(envelope({}));
-    await dispatchStock('o1', 'cust-9', 'Cement', 40);
+    await dispatchStock('o1', 'cust-9', [
+      { stockDescription: 'Cement', requestedQuantity: 40 },
+      { stockDescription: 'Sand', requestedQuantity: 10 },
+    ]);
     expect(api.post).toHaveBeenCalledWith('/orgs/o1/dispatch', {
       customer_id: 'cust-9',
-      stock_description: 'Cement',
-      requested_quantity: 40,
+      line_items: [
+        { stock_description: 'Cement', requested_quantity: 40 },
+        { stock_description: 'Sand', requested_quantity: 10 },
+      ],
     });
   });
 });

@@ -38,10 +38,11 @@ convention.
 
 ## Dispatch
 
-`POST /api/orgs/{id}/dispatch` takes `{ customer_id, stock_description,
-requested_quantity }` unchanged, but now also rejects a `customer_id` that
-belongs to another org with `400 "Customer belongs to a different
-organization"` — an org can only dispatch to its own customers.
+`POST /api/orgs/{id}/dispatch` takes `{ customer_id, line_items: [{
+stock_description, requested_quantity }] }` (see docs/dispatch-lifecycle.md),
+and rejects a `customer_id` that belongs to another org with `400 "Customer
+belongs to a different organization"` — an org can only dispatch to its own
+customers.
 
 ## Frontend
 

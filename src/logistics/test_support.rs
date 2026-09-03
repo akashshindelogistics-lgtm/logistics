@@ -198,19 +198,38 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     )
     .expect("migrate: create Customers");
 
+    // Transitional: a dispatch used to carry exactly one stock line
+    // (`Dispatches.stock_description` + `quantity`); it now carries a list of
+    // line items in `DispatchLineItems`. Dev/test dispatches are disposable,
+    // so drop and recreate the dispatch tables when the old columns are
+    // present rather than carry a data migration. See docs/dispatch-lifecycle.md.
+    crate::logistics::dispatch::dispatch::drop_legacy_single_line_dispatch_tables(conn)
+        .expect("migrate: drop legacy single-line dispatch tables");
+
     conn.query_drop(
         "CREATE TABLE IF NOT EXISTS Dispatches (
             id VARCHAR(36) PRIMARY KEY,
             org_id VARCHAR(36) NOT NULL,
             customer_id VARCHAR(36) NOT NULL,
             vehicle_registration_number VARCHAR(255) NOT NULL,
-            stock_description VARCHAR(255) NOT NULL,
-            quantity BIGINT NOT NULL,
             status VARCHAR(50) NOT NULL,
             dispatched_at BIGINT NOT NULL
         )",
     )
     .expect("migrate: create Dispatches");
+
+    conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS DispatchLineItems (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            dispatch_id VARCHAR(36) NOT NULL,
+            stock_description VARCHAR(255) NOT NULL,
+            quantity BIGINT NOT NULL,
+            volume_in_size BIGINT NOT NULL,
+            CONSTRAINT fk_dispatch_line_item_dispatch
+                FOREIGN KEY (dispatch_id) REFERENCES Dispatches(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create DispatchLineItems");
 
     conn.query_drop(
         "CREATE TABLE IF NOT EXISTS DispatchStatusHistory (

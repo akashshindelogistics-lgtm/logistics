@@ -15,17 +15,68 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
+/// Transitional: a dispatch used to carry exactly one stock line
+/// (`Dispatches.stock_description` + `Dispatches.quantity`). It now carries a
+/// list of line items in a separate `DispatchLineItems` table. There is no
+/// hosted backend and dev/test dispatches are disposable, so when the old
+/// single-line columns are detected we drop and recreate the dispatch tables
+/// rather than carry a real data migration — the same approach the godown and
+/// customer changes took. Kept in sync with `test_support::migrate`.
+pub fn drop_legacy_single_line_dispatch_tables(
+    conn: &mut mysql::PooledConn,
+) -> Result<(), Box<dyn Error>> {
+    let legacy: Option<i64> = conn.exec_first(
+        "SELECT 1 FROM information_schema.columns
+         WHERE table_schema = DATABASE()
+           AND table_name = 'Dispatches'
+           AND column_name = 'stock_description'",
+        (),
+    )?;
+    if legacy.is_some() {
+        // Children first — every other dispatch table has an
+        // `ON DELETE CASCADE` FK to `Dispatches(id)`.
+        for table in [
+            "DispatchLineItems",
+            "DispatchProofOfDelivery",
+            "DispatchStatusHistory",
+            "Dispatches",
+        ] {
+            conn.query_drop(format!("DROP TABLE IF EXISTS {table}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn ensure_dispatches_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    drop_legacy_single_line_dispatch_tables(conn)?;
     conn.exec_drop(
         "CREATE TABLE IF NOT EXISTS Dispatches (
             id VARCHAR(36) PRIMARY KEY,
             org_id VARCHAR(36) NOT NULL,
             customer_id VARCHAR(36) NOT NULL,
             vehicle_registration_number VARCHAR(255) NOT NULL,
-            stock_description VARCHAR(255) NOT NULL,
-            quantity BIGINT NOT NULL,
             status VARCHAR(50) NOT NULL,
             dispatched_at BIGINT NOT NULL
+        )",
+        (),
+    )?;
+    Ok(())
+}
+
+/// One stock line on a dispatch. `volume_in_size` is snapshotted from the
+/// stock item at dispatch time so the shipment's footprint is fixed even if
+/// the godown's stock record later changes. Kept in sync with
+/// `test_support::migrate`.
+fn ensure_line_items_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    conn.exec_drop(
+        "CREATE TABLE IF NOT EXISTS DispatchLineItems (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            dispatch_id VARCHAR(36) NOT NULL,
+            stock_description VARCHAR(255) NOT NULL,
+            quantity BIGINT NOT NULL,
+            volume_in_size BIGINT NOT NULL,
+            CONSTRAINT fk_dispatch_line_item_dispatch
+                FOREIGN KEY (dispatch_id) REFERENCES Dispatches(id) ON DELETE CASCADE
         )",
         (),
     )?;
@@ -74,6 +125,7 @@ pub fn ensure_tables(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>>
     ensure_dispatches_table(conn)?;
     ensure_status_history_table(conn)?;
     ensure_proof_of_delivery_table(conn)?;
+    ensure_line_items_table(conn)?;
     Ok(())
 }
 
@@ -253,14 +305,58 @@ pub struct ProofOfDeliveryInput {
     pub signature_or_photo_url: String,
 }
 
+/// One stock line on a dispatch: a description and how many units of it the
+/// shipment carries. `volume_in_size` is the per-unit volume, snapshotted
+/// from the stock item when the dispatch was created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DispatchLineItem {
+    pub stock_description: String,
+    pub quantity: i64,
+    pub volume_in_size: i64,
+}
+
+impl DispatchLineItem {
+    fn list_by_dispatch(
+        conn: &mut mysql::PooledConn,
+        dispatch_id: Uuid,
+    ) -> Result<Vec<Self>, Box<dyn Error>> {
+        let rows: Vec<(String, i64, i64)> = conn.exec_map(
+            "SELECT stock_description, quantity, volume_in_size FROM DispatchLineItems
+             WHERE dispatch_id = :dispatch_id ORDER BY id ASC",
+            params! { "dispatch_id" => dispatch_id.to_string() },
+            |(stock_description, quantity, volume_in_size)| {
+                (stock_description, quantity, volume_in_size)
+            },
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|(stock_description, quantity, volume_in_size)| DispatchLineItem {
+                stock_description,
+                quantity,
+                volume_in_size,
+            })
+            .collect())
+    }
+}
+
+/// The caller-supplied half of a [`DispatchLineItem`] — a description and the
+/// quantity requested. `volume_in_size` is looked up from the stock item by
+/// [`Organization::dispatch_stock_to_customer`](crate::logistics::orgs::orgs::Organization::dispatch_stock_to_customer),
+/// not passed in.
+#[derive(Debug, Clone)]
+pub struct DispatchLineItemInput {
+    pub stock_description: String,
+    pub requested_quantity: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DispatchOrder {
     pub id: Uuid,
     pub org_id: Uuid,
     pub customer_id: Uuid,
     pub vehicle_registration_number: String,
-    pub stock_description: String,
-    pub quantity: i64,
+    /// Every stock line this shipment carries. Always at least one.
+    pub line_items: Vec<DispatchLineItem>,
     pub status: DispatchStatus,
     pub dispatched_at: i64,
     /// Every status this dispatch has passed through, oldest first.
@@ -276,31 +372,47 @@ pub struct DispatchOrder {
 }
 
 impl DispatchOrder {
-    /// Persist a newly created dispatch and record its first status-history
-    /// entry (`self.status` at `self.dispatched_at`), appending it to
-    /// `self.status_history` so the returned value matches what a
-    /// subsequent [`Self::get_by_id`] would return without a re-fetch.
+    /// Total units across every line item — the old single `quantity` field's
+    /// closest equivalent, for summaries and display.
+    pub fn total_quantity(&self) -> i64 {
+        self.line_items.iter().map(|li| li.quantity).sum()
+    }
+
+    /// Persist a newly created dispatch: the `Dispatches` row, one
+    /// `DispatchLineItems` row per line item, and the first status-history
+    /// entry (`self.status` at `self.dispatched_at`), appending that entry to
+    /// `self.status_history` so the returned value matches what a subsequent
+    /// [`Self::get_by_id`] would return without a re-fetch.
     pub fn save(&mut self) -> Result<(), Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
-        ensure_dispatches_table(&mut conn)?;
-        ensure_status_history_table(&mut conn)?;
-        ensure_proof_of_delivery_table(&mut conn)?;
+        ensure_tables(&mut conn)?;
 
         conn.exec_drop(
-            "INSERT INTO Dispatches (id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at)
-             VALUES (:id, :org_id, :customer_id, :vehicle_registration_number, :stock_description, :quantity, :status, :dispatched_at)",
+            "INSERT INTO Dispatches (id, org_id, customer_id, vehicle_registration_number, status, dispatched_at)
+             VALUES (:id, :org_id, :customer_id, :vehicle_registration_number, :status, :dispatched_at)",
             params! {
                 "id" => self.id.to_string(),
                 "org_id" => self.org_id.to_string(),
                 "customer_id" => self.customer_id.to_string(),
                 "vehicle_registration_number" => &self.vehicle_registration_number,
-                "stock_description" => &self.stock_description,
-                "quantity" => self.quantity,
                 "status" => self.status.as_str(),
                 "dispatched_at" => self.dispatched_at,
             },
         )?;
+
+        for item in &self.line_items {
+            conn.exec_drop(
+                "INSERT INTO DispatchLineItems (dispatch_id, stock_description, quantity, volume_in_size)
+                 VALUES (:dispatch_id, :stock_description, :quantity, :volume_in_size)",
+                params! {
+                    "dispatch_id" => self.id.to_string(),
+                    "stock_description" => &item.stock_description,
+                    "quantity" => item.quantity,
+                    "volume_in_size" => item.volume_in_size,
+                },
+            )?;
+        }
 
         conn.exec_drop(
             "INSERT INTO DispatchStatusHistory (dispatch_id, status, changed_at)
@@ -354,9 +466,7 @@ impl DispatchOrder {
 
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
-        ensure_dispatches_table(&mut conn)?;
-        ensure_status_history_table(&mut conn)?;
-        ensure_proof_of_delivery_table(&mut conn)?;
+        ensure_tables(&mut conn)?;
 
         let changed_at = now_unix();
 
@@ -408,37 +518,30 @@ impl DispatchOrder {
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
-        ensure_dispatches_table(&mut conn)?;
-        ensure_status_history_table(&mut conn)?;
-        ensure_proof_of_delivery_table(&mut conn)?;
+        ensure_tables(&mut conn)?;
 
-        let row: Option<(String, String, String, String, String, i64, String, i64)> = conn
-            .exec_first(
-                "SELECT id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at FROM Dispatches WHERE id = :id",
-                params! { "id" => id.to_string() },
-            )?;
+        let row: Option<DispatchRow> = conn.exec_first(
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at FROM Dispatches WHERE id = :id",
+            params! { "id" => id.to_string() },
+        )?;
 
         let Some(row) = row else {
             return Ok(None);
         };
+        let line_items = DispatchLineItem::list_by_dispatch(&mut conn, id)?;
         let history = DispatchStatusEvent::list_by_dispatch(&mut conn, id)?;
         let proof = ProofOfDelivery::get_by_dispatch(&mut conn, id)?;
-        Ok(Some(Self::row_to_order(row, history, proof)))
+        Ok(Some(Self::row_to_order(row, line_items, history, proof)))
     }
 
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
-        ensure_dispatches_table(&mut conn)?;
-        ensure_status_history_table(&mut conn)?;
-        ensure_proof_of_delivery_table(&mut conn)?;
+        ensure_tables(&mut conn)?;
 
-        let rows: Vec<(String, String, String, String, String, i64, String, i64)> = conn.exec_map(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at FROM Dispatches",
+        let rows: Vec<DispatchRow> = conn.exec(
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at FROM Dispatches",
             (),
-            |(id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at)| {
-                (id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at)
-            },
         )?;
 
         Self::rows_to_orders(&mut conn, rows)
@@ -447,34 +550,29 @@ impl DispatchOrder {
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
-        ensure_dispatches_table(&mut conn)?;
-        ensure_status_history_table(&mut conn)?;
-        ensure_proof_of_delivery_table(&mut conn)?;
+        ensure_tables(&mut conn)?;
 
-        let rows: Vec<(String, String, String, String, String, i64, String, i64)> = conn.exec_map(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, stock_description, quantity, status, dispatched_at FROM Dispatches WHERE org_id = :org_id",
+        let rows: Vec<DispatchRow> = conn.exec(
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at FROM Dispatches WHERE org_id = :org_id",
             params! { "org_id" => org_id.to_string() },
-            |(id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at)| {
-                (id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at)
-            },
         )?;
 
         Self::rows_to_orders(&mut conn, rows)
     }
 
     fn row_to_order(
-        row: (String, String, String, String, String, i64, String, i64),
+        row: DispatchRow,
+        line_items: Vec<DispatchLineItem>,
         status_history: Vec<DispatchStatusEvent>,
         proof_of_delivery: Option<ProofOfDelivery>,
     ) -> Self {
-        let (id, org_id, customer_id, vehicle_reg, stock_desc, qty, status, dispatched_at) = row;
+        let (id, org_id, customer_id, vehicle_reg, status, dispatched_at) = row;
         DispatchOrder {
             id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
             org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
             customer_id: Uuid::parse_str(&customer_id).unwrap_or_else(|_| Uuid::new_v4()),
             vehicle_registration_number: vehicle_reg,
-            stock_description: stock_desc,
-            quantity: qty,
+            line_items,
             status: status.parse().unwrap_or(DispatchStatus::Pending),
             dispatched_at,
             status_history,
@@ -482,24 +580,29 @@ impl DispatchOrder {
         }
     }
 
-    /// Fetch each row's status history and proof of delivery (if any) and
-    /// assemble the full `DispatchOrder` list. Two extra queries per
-    /// dispatch, matching the N+1-per-parent pattern `Godown::list_by_org`
+    /// Fetch each row's line items, status history and proof of delivery (if
+    /// any) and assemble the full `DispatchOrder` list. A few extra queries
+    /// per dispatch, matching the N+1-per-parent pattern `Godown::list_by_org`
     /// already uses for its stock.
     fn rows_to_orders(
         conn: &mut mysql::PooledConn,
-        rows: Vec<(String, String, String, String, String, i64, String, i64)>,
+        rows: Vec<DispatchRow>,
     ) -> Result<Vec<Self>, Box<dyn Error>> {
         rows.into_iter()
             .map(|row| {
                 let id = Uuid::parse_str(&row.0).unwrap_or_else(|_| Uuid::new_v4());
+                let line_items = DispatchLineItem::list_by_dispatch(conn, id)?;
                 let history = DispatchStatusEvent::list_by_dispatch(conn, id)?;
                 let proof = ProofOfDelivery::get_by_dispatch(conn, id)?;
-                Ok(Self::row_to_order(row, history, proof))
+                Ok(Self::row_to_order(row, line_items, history, proof))
             })
             .collect()
     }
 }
+
+/// One raw `Dispatches` row: `(id, org_id, customer_id,
+/// vehicle_registration_number, status, dispatched_at)`.
+type DispatchRow = (String, String, String, String, String, i64);
 
 #[cfg(test)]
 mod tests {
@@ -507,14 +610,21 @@ mod tests {
     use crate::logistics::test_support::TestDb;
     use DispatchStatus::*;
 
+    fn line(desc: &str, qty: i64) -> DispatchLineItem {
+        DispatchLineItem {
+            stock_description: desc.to_string(),
+            quantity: qty,
+            volume_in_size: 1,
+        }
+    }
+
     fn sample_order(status: DispatchStatus) -> DispatchOrder {
         DispatchOrder {
             id: Uuid::new_v4(),
             org_id: Uuid::new_v4(),
             customer_id: Uuid::new_v4(),
             vehicle_registration_number: "TEST-001".to_string(),
-            stock_description: "Cement".to_string(),
-            quantity: 10,
+            line_items: vec![line("Cement", 10)],
             status,
             dispatched_at: 1_700_000_000,
             status_history: Vec::new(),
@@ -574,6 +684,43 @@ mod tests {
         assert_eq!(fetched.status_history.len(), 1);
         assert_eq!(fetched.status_history[0].status, Pending);
         assert_eq!(fetched.status_history[0].changed_at, 1_700_000_000);
+    }
+
+    #[test]
+    fn test_save_and_reload_multiple_line_items_in_order() {
+        let _db = TestDb::create();
+        let mut order = sample_order(Pending);
+        order.line_items = vec![line("Cement", 30), line("Sand", 12), line("Rebar", 5)];
+        order.save().expect("save");
+
+        let fetched = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
+        assert_eq!(fetched.line_items.len(), 3);
+        assert_eq!(fetched.line_items[0].stock_description, "Cement");
+        assert_eq!(fetched.line_items[1].stock_description, "Sand");
+        assert_eq!(fetched.line_items[2].stock_description, "Rebar");
+        assert_eq!(fetched.total_quantity(), 47);
+    }
+
+    #[test]
+    fn test_deleting_a_dispatch_cascades_to_its_line_items() {
+        let _db = TestDb::create();
+        let mut order = sample_order(Pending);
+        order.line_items = vec![line("Cement", 30), line("Sand", 12)];
+        order.save().expect("save");
+
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        conn.exec_drop(
+            "DELETE FROM Dispatches WHERE id = :id",
+            params! { "id" => order.id.to_string() },
+        )
+        .unwrap();
+        let remaining: Option<i64> = conn
+            .exec_first(
+                "SELECT COUNT(*) FROM DispatchLineItems WHERE dispatch_id = :id",
+                params! { "id" => order.id.to_string() },
+            )
+            .unwrap();
+        assert_eq!(remaining, Some(0));
     }
 
     #[test]

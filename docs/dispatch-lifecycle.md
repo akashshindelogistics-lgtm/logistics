@@ -74,13 +74,40 @@ hosting the actual image.
 { receiver_name, signature_or_photo_url }` — required when `status` is
 `DELIVERED`, ignored otherwise.
 
-`POST /api/orgs/{id}/dispatch` (`dispatch_stock_to_customer`) is unchanged
-in what it does — it still allocates stock and a vehicle in one step — but
-the `DispatchOrder` it returns now starts at `PENDING` instead of the old
-fixed `"DISPATCHED"` string. `GET /api/dispatches` and
+`POST /api/orgs/{id}/dispatch` (`dispatch_stock_to_customer`) allocates
+stock and a vehicle in one step and returns a `DispatchOrder` that starts at
+`PENDING`. `GET /api/dispatches` and
 `GET /api/dispatches/{id}/summary` both return the current status plus its
 full history and proof of delivery, since `DispatchOrder::get_by_id` /
 `list_by_org` / `list_all` populate both alongside every other field.
+
+## Multiple line items per dispatch
+
+Tracked by the `todo.org` item *"Allow one dispatch to carry multiple stock
+line items."* A real shipment usually mixes several SKUs, so a dispatch now
+carries a list of line items instead of a single `stock_description` +
+`quantity`.
+
+- `DispatchOrder.line_items: Vec<DispatchLineItem>` where
+  `DispatchLineItem { stock_description, quantity, volume_in_size }`.
+  `volume_in_size` is snapshotted from the stock item at dispatch time.
+  `DispatchOrder::total_quantity()` sums across the lines.
+- Stored in a `DispatchLineItems` table (`ON DELETE CASCADE` from
+  `Dispatches`), read back with the same N+1-per-parent pattern as
+  `status_history` / `proof_of_delivery`. The old
+  `Dispatches.stock_description` / `Dispatches.quantity` columns are gone;
+  `drop_legacy_single_line_dispatch_tables` drops and recreates the dispatch
+  tables when the old columns are detected (dev/test data is disposable — the
+  same approach the godown and customer changes took).
+- `POST /api/orgs/{id}/dispatch` takes
+  `{ customer_id, line_items: [{ stock_description, requested_quantity }] }`.
+  Validation is **all-or-nothing**: the request is rejected (and nothing is
+  drawn down) if the list is empty, a quantity is `<= 0`, a description is
+  repeated, or *any* line can't be satisfied from the org's godowns. The
+  vehicle capacity check is against the summed volume of every line.
+- The dashboard's Dispatch form has repeatable stock-line rows ("Add another
+  line" / remove); the Dispatches and Dashboard tables list every line and
+  show the combined quantity.
 
 ## Not done here
 

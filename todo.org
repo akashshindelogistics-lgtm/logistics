@@ -45,7 +45,22 @@
    error distinguishes "no vehicles" / "none with an active driver" /
    "none free and large enough". Freeing a trip (DELIVERED/RETURNED/
    CANCELLED) returns its vehicle to the pool.
-** TODO Allow one dispatch to carry multiple stock line items - today `dispatch_stock_to_customer` takes a single `stock_description`, but a real shipment usually mixes several SKUs in one trip
+** DONE Allow one dispatch to carry multiple stock line items - today `dispatch_stock_to_customer` takes a single `stock_description`, but a real shipment usually mixes several SKUs in one trip
+   DispatchOrder now holds line_items: Vec<DispatchLineItem> { stock_description,
+   quantity, volume_in_size } in a new DispatchLineItems table (cascade-deleted
+   with the dispatch); the old Dispatches.stock_description / .quantity columns
+   are gone, and drop_legacy_single_line_dispatch_tables recreates the dispatch
+   tables when the old schema is detected. dispatch_stock_to_customer takes
+   &[DispatchLineItemInput] and is all-or-nothing: rejects an empty list, a
+   non-positive quantity, a repeated description, or any line that can't be met
+   from the org's godowns, before drawing anything down; vehicle capacity is
+   checked against the summed volume. POST /api/orgs/{id}/dispatch now takes
+   { customer_id, line_items: [{ stock_description, requested_quantity }] }.
+   Frontend: the dispatch form has repeatable stock-line rows (Add another line
+   / remove), and the Dispatches + Dashboard tables list every line with a
+   combined quantity. AI summary lists all line items. 6 new Rust tests
+   (3 model, 3 route), 3 new frontend unit tests, 1 new Playwright flow.
+   Plan/context: [[file:docs/dispatch-lifecycle.md]]
 ** DONE Support stock transfer between two godowns of the same org (distinct from dispatch-to-customer), with an audit trail of the move
    New StockTransfer model (src/logistics/godown/transfer.rs) + insert-only
    StockTransfers audit table. POST /api/godowns/{gid}/transfer takes

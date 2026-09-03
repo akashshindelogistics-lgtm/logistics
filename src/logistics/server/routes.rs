@@ -3,7 +3,8 @@ use crate::logistics::auth::auth::{
 };
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::{
-    DispatchOrder, DispatchStatus, DispatchStatusEvent, ProofOfDelivery, ProofOfDeliveryInput,
+    DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus, DispatchStatusEvent,
+    ProofOfDelivery, ProofOfDeliveryInput,
 };
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
@@ -205,11 +206,20 @@ pub struct VehicleDocumentPayload {
     pub notes: Option<String>,
 }
 
+/// One line on a dispatch request: a stock description and how many units of
+/// it to send.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct DispatchLineItemPayload {
+    pub stock_description: String,
+    pub requested_quantity: i64,
+}
+
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct DispatchRequestPayload {
     pub customer_id: Uuid,
-    pub stock_description: String,
-    pub requested_quantity: i64,
+    /// The stock lines this shipment carries. Must contain at least one item;
+    /// a description may not be repeated.
+    pub line_items: Vec<DispatchLineItemPayload>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -2258,11 +2268,16 @@ pub async fn dispatch_stock(
         }
     };
 
-    match org.dispatch_stock_to_customer(
-        &customer,
-        &payload.stock_description,
-        payload.requested_quantity,
-    ) {
+    let line_items: Vec<DispatchLineItemInput> = payload
+        .line_items
+        .iter()
+        .map(|li| DispatchLineItemInput {
+            stock_description: li.stock_description.clone(),
+            requested_quantity: li.requested_quantity,
+        })
+        .collect();
+
+    match org.dispatch_stock_to_customer(&customer, &line_items) {
         Ok(order) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: "Stock dispatched successfully".to_string(),
@@ -2459,14 +2474,14 @@ impl Modify for SecurityAddon {
             CreateOrgPayload, UpdateOrgPayload, LocationPayload,
             CreateVehiclePayload, UpdateVehiclePayload, CreateStockPayload, UpdateStockPayload,
             CreateGodownPayload, UpdateGodownPayload,
-            CreateCustomerPayload, DispatchRequestPayload,
+            CreateCustomerPayload, DispatchRequestPayload, DispatchLineItemPayload,
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
             VehicleDocumentPayload,
             TransferStockPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload,
             Organization, Vehicle, Unit, Location, Stock, Godown, StockTransfer, Customer, Driver,
             VehicleDocument, ComplianceDocType, ComplianceStatus,
-            DispatchOrder, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
+            DispatchOrder, DispatchLineItem, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             VehicleDocumentResponse, VehicleDocumentListResponse,
@@ -3375,8 +3390,10 @@ mod tests {
             .insert_header(("Authorization", auth.clone()))
             .set_json(&DispatchRequestPayload {
                 customer_id: customer.id,
-                stock_description: "Dispatch Test Goods".to_string(),
-                requested_quantity: 10,
+                line_items: vec![DispatchLineItemPayload {
+                    stock_description: "Dispatch Test Goods".to_string(),
+                    requested_quantity: 10,
+                }],
             })
             .to_request();
         let body: ApiResponse<DispatchOrder> =
@@ -4140,8 +4157,10 @@ mod tests {
             .insert_header(("Authorization", auth_a))
             .set_json(&DispatchRequestPayload {
                 customer_id: foreign_customer.id,
-                stock_description: "Anything".to_string(),
-                requested_quantity: 1,
+                line_items: vec![DispatchLineItemPayload {
+                    stock_description: "Anything".to_string(),
+                    requested_quantity: 1,
+                }],
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -4158,8 +4177,10 @@ mod tests {
         let customer_id = Uuid::new_v4();
         let payload = DispatchRequestPayload {
             customer_id,
-            stock_description: "Nonexistent Stock Description".to_string(),
-            requested_quantity: 10,
+            line_items: vec![DispatchLineItemPayload {
+                stock_description: "Nonexistent Stock Description".to_string(),
+                requested_quantity: 10,
+            }],
         };
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/dispatch", org_id))
@@ -4185,6 +4206,108 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_dispatch_stock_carries_multiple_line_items() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        // setup_dispatch already dispatched "Dispatch Test Goods" x10 on the
+        // one godown+vehicle; reuse its org/customer for a second, multi-line
+        // dispatch. The vehicle is now on an active trip, so add a second
+        // vehicle + driver and more stock first.
+        let (org, first, auth) = setup_dispatch(&app, "Multi Line Dispatch Org").await;
+        assert_eq!(first.line_items.len(), 1);
+
+        // Second vehicle + active driver.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vehicles", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateVehiclePayload {
+                registration_number: "DISP-VH-002".to_string(),
+                capacity: 100_000,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        test::call_service(&app, req).await;
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/drivers", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateDriverPayload {
+                name: "Second Driver".to_string(),
+                license_number: "DISP-LIC-002".to_string(),
+                phone: "+91 90000 00001".to_string(),
+            })
+            .to_request();
+        let driver: ApiResponse<Driver> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let req = test::TestRequest::put()
+            .uri("/api/vehicles/DISP-VH-002/driver")
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&AssignDriverPayload { driver_id: Some(driver.data.unwrap().id) })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        // A second stock item in the same org (a fresh godown).
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/godowns", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateGodownPayload {
+                name: "Second Godown".to_string(),
+                address: "9 Second Road".to_string(),
+                max_capacity: None,
+            })
+            .to_request();
+        let godown2: ApiResponse<Godown> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let godown2 = godown2.data.unwrap();
+        for (desc, qty) in [("Bricks", 500i64), ("Tiles", 300i64)] {
+            let req = test::TestRequest::post()
+                .uri(&format!("/api/godowns/{}/stock", godown2.id))
+                .insert_header(("Authorization", auth.clone()))
+                .set_json(&CreateStockPayload {
+                    volume_in_size: 1,
+                    quantity: qty,
+                    description: desc.to_string(),
+                    reorder_threshold: None,
+                })
+                .to_request();
+            assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+        }
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&DispatchRequestPayload {
+                customer_id: first.customer_id,
+                line_items: vec![
+                    DispatchLineItemPayload { stock_description: "Bricks".to_string(), requested_quantity: 120 },
+                    DispatchLineItemPayload { stock_description: "Tiles".to_string(), requested_quantity: 40 },
+                ],
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<DispatchOrder> = test::read_body_json(resp).await;
+        let order = body.data.unwrap();
+        assert_eq!(order.line_items.len(), 2);
+        assert_eq!(order.line_items[0].stock_description, "Bricks");
+        assert_eq!(order.line_items[1].stock_description, "Tiles");
+        assert_eq!(order.line_items.iter().map(|li| li.quantity).sum::<i64>(), 160);
+
+        // A duplicated description is rejected with 400.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&DispatchRequestPayload {
+                customer_id: first.customer_id,
+                line_items: vec![
+                    DispatchLineItemPayload { stock_description: "Bricks".to_string(), requested_quantity: 1 },
+                    DispatchLineItemPayload { stock_description: "Bricks".to_string(), requested_quantity: 2 },
+                ],
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
     }
 
     // ── GET /api/orgs success path ────────────────────────────────────────────
@@ -4810,8 +4933,10 @@ mod tests {
         let attacker_org_id = Uuid::new_v4();
         let payload = DispatchRequestPayload {
             customer_id: Uuid::new_v4(),
-            stock_description: "Stolen Stock".to_string(),
-            requested_quantity: 10,
+            line_items: vec![DispatchLineItemPayload {
+                stock_description: "Stolen Stock".to_string(),
+                requested_quantity: 10,
+            }],
         };
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/dispatch", target_org_id))
@@ -5067,8 +5192,10 @@ mod tests {
             .insert_header(("Authorization", auth))
             .set_json(&DispatchRequestPayload {
                 customer_id: customer.id,
-                stock_description: "Widgets".to_string(),
-                requested_quantity: 5,
+                line_items: vec![DispatchLineItemPayload {
+                    stock_description: "Widgets".to_string(),
+                    requested_quantity: 5,
+                }],
             })
             .to_request();
         let resp = test::call_service(&app, req).await;

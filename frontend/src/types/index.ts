@@ -120,13 +120,20 @@ export interface ProofOfDelivery {
   delivered_at: number;
 }
 
+// One stock line on a dispatch. Mirrors DispatchLineItem in
+// src/logistics/dispatch/dispatch.rs.
+export interface DispatchLineItem {
+  stock_description: string;
+  quantity: number;
+  volume_in_size: number;
+}
+
 export interface DispatchOrder {
   id: string;
   org_id: string;
   customer_id: string;
   vehicle_registration_number: string;
-  stock_description: string;
-  quantity: number;
+  line_items: DispatchLineItem[];
   status: DispatchStatus;
   dispatched_at: number;
   status_history: DispatchStatusEvent[];

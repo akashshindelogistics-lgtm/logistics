@@ -40,13 +40,24 @@ pub async fn generate_dispatch_summary(
         None => "location not set".to_string(),
     };
 
+    let stock_lines = if dispatch.line_items.is_empty() {
+        "none recorded".to_string()
+    } else {
+        dispatch
+            .line_items
+            .iter()
+            .map(|li| format!("{} ({} units)", li.stock_description, li.quantity))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
     let prompt = format!(
         "You are a logistics status assistant. Write a clear, friendly 2–3 sentence status \
         update for the following dispatch order. Be specific and informative — mention the \
-        vehicle, stock item, quantity, and customer. Do not use bullet points.\n\n\
+        vehicle, the stock items and their quantities, and the customer. Do not use bullet points.\n\n\
         Order ID: {id}\n\
         Vehicle: {vehicle}\n\
-        Stock item: {stock} ({qty} units)\n\
+        Stock items: {stock}\n\
         Status: {status}\n\
         Dispatched: {when}\n\
         Customer: {customer_name}\n\
@@ -54,8 +65,7 @@ pub async fn generate_dispatch_summary(
         Customer GPS: {customer_loc}",
         id = &dispatch.id.to_string()[..8],
         vehicle = dispatch.vehicle_registration_number,
-        stock = dispatch.stock_description,
-        qty = dispatch.quantity,
+        stock = stock_lines,
         status = dispatch.status,
         when = dispatched_when,
         customer_name = customer.name,

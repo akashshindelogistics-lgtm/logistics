@@ -192,6 +192,42 @@ test.describe('Dispatches', () => {
     await expect(rows).toHaveCount(1, { timeout: 8000 });
   });
 
+  test('dispatch several stock lines in one order and see them all in the table', async ({ page }) => {
+    const org = await registerOrg(page, `Multi Line ${uid()}`);
+    const custName = `Multi Customer ${uid()}`;
+    const itemA = `Bricks ${uid()}`;
+    const itemB = `Tiles ${uid()}`;
+    const reg = `MH19ML${uid().toUpperCase().slice(0, 4)}`;
+
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Registration Number').fill(reg);
+    await page.getByLabel('Capacity (MT)').fill('500');
+    await page.getByRole('button', { name: /add vehicle/i }).click();
+    await expect(page.getByTestId('fleet-table').getByText(reg)).toBeVisible({ timeout: 8000 });
+
+    await assignActiveDriver(page, org.id, reg);
+    await addStockViaApi(page, org.id, itemA, 200);
+    await addStockViaApi(page, org.id, itemB, 200);
+    const custId = await createCustomerWithLocation(page, org.id, custName);
+
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Customer').selectOption({ value: custId });
+    await page.getByLabel('Stock Description').fill(itemA);
+    await page.getByLabel('Quantity', { exact: true }).fill('30');
+    await page.getByRole('button', { name: /add another line/i }).click();
+    await page.getByLabel('Stock Description 2').fill(itemB);
+    await page.getByLabel('Quantity 2').fill('12');
+    await page.getByRole('button', { name: /dispatch stock/i }).click();
+    await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
+
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').first();
+    await expect(row.getByText(itemA)).toBeVisible({ timeout: 8000 });
+    await expect(row.getByText(itemB)).toBeVisible();
+    // Qty column shows the combined total (30 + 12).
+    await expect(row.getByText('42', { exact: true })).toBeVisible();
+  });
+
   test('dispatch form requires customer to be selected', async ({ page }) => {
     const org = await registerOrg(page, `Dispatch Required ${uid()}`);
     await addStockViaApi(page, org.id, 'Wood', 10);

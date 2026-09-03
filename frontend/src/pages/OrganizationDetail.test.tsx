@@ -129,13 +129,58 @@ describe('OrganizationDetail page', () => {
     await screen.findByRole('heading', { name: 'Express Freight' });
 
     await user.selectOptions(screen.getByLabelText(/customer/i), 'c1');
-    await user.type(screen.getByLabelText(/stock description/i), 'Cement');
-    await user.type(screen.getByLabelText(/quantity/i), '30');
+    await user.type(screen.getByLabelText('Stock Description'), 'Cement');
+    await user.type(screen.getByLabelText('Quantity'), '30');
     await user.click(screen.getByRole('button', { name: /dispatch stock/i }));
 
-    expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', 'Cement', 30);
+    expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', [
+      { stockDescription: 'Cement', requestedQuantity: 30 },
+    ]);
     expect(await screen.findByText(/dispatch successful/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/stock description/i)).toHaveValue('');
+    expect(screen.getByLabelText('Stock Description')).toHaveValue('');
+  });
+
+  it('dispatches several stock lines in one order', async () => {
+    const user = userEvent.setup();
+    mockLoad(org());
+    vi.mocked(orgsApi.dispatchStock).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Express Freight' });
+
+    await user.selectOptions(screen.getByLabelText(/customer/i), 'c1');
+    await user.type(screen.getByLabelText('Stock Description'), 'Cement');
+    await user.type(screen.getByLabelText('Quantity'), '30');
+    await user.click(screen.getByRole('button', { name: /add another line/i }));
+    await user.type(screen.getByLabelText('Stock Description 2'), 'Sand');
+    await user.type(screen.getByLabelText('Quantity 2'), '10');
+    await user.click(screen.getByRole('button', { name: /dispatch stock/i }));
+
+    expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', [
+      { stockDescription: 'Cement', requestedQuantity: 30 },
+      { stockDescription: 'Sand', requestedQuantity: 10 },
+    ]);
+  });
+
+  it('removes an extra stock line before dispatching', async () => {
+    const user = userEvent.setup();
+    mockLoad(org());
+    vi.mocked(orgsApi.dispatchStock).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByRole('heading', { name: 'Express Freight' });
+
+    await user.selectOptions(screen.getByLabelText(/customer/i), 'c1');
+    await user.type(screen.getByLabelText('Stock Description'), 'Cement');
+    await user.type(screen.getByLabelText('Quantity'), '30');
+    await user.click(screen.getByRole('button', { name: /add another line/i }));
+    await user.type(screen.getByLabelText('Stock Description 2'), 'Sand');
+    await user.click(screen.getByRole('button', { name: /remove stock line 2/i }));
+    await user.click(screen.getByRole('button', { name: /dispatch stock/i }));
+
+    expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', [
+      { stockDescription: 'Cement', requestedQuantity: 30 },
+    ]);
   });
 
   it('shows a failure message when the dispatch call rejects', async () => {
@@ -147,8 +192,8 @@ describe('OrganizationDetail page', () => {
     await screen.findByRole('heading', { name: 'Express Freight' });
 
     await user.selectOptions(screen.getByLabelText(/customer/i), 'c1');
-    await user.type(screen.getByLabelText(/stock description/i), 'Cement');
-    await user.type(screen.getByLabelText(/quantity/i), '30');
+    await user.type(screen.getByLabelText('Stock Description'), 'Cement');
+    await user.type(screen.getByLabelText('Quantity'), '30');
     await user.click(screen.getByRole('button', { name: /dispatch stock/i }));
 
     expect(await screen.findByText(/dispatch failed/i)).toBeInTheDocument();
