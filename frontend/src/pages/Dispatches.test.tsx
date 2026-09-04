@@ -4,9 +4,13 @@ import userEvent from '@testing-library/user-event';
 import Dispatches from './Dispatches';
 import { STATUS_TAG_CLASS } from '../lib/dispatchLifecycle';
 import * as dispatchesApi from '../api/dispatches';
+import * as orgsApi from '../api/orgs';
+import * as authApi from '../api/auth';
 import type { DispatchOrder } from '../types';
 
 vi.mock('../api/dispatches');
+vi.mock('../api/orgs');
+vi.mock('../api/auth');
 
 function makeOrder(overrides: Partial<DispatchOrder> = {}): DispatchOrder {
   return {
@@ -26,6 +30,18 @@ function makeOrder(overrides: Partial<DispatchOrder> = {}): DispatchOrder {
 describe('Dispatches page', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(authApi.getOrgId).mockReturnValue('org-1');
+    vi.mocked(orgsApi.getOrg).mockResolvedValue({
+      success: true,
+      message: '',
+      data: {
+        id: 'org-1', name: 'Org', address: 'x', vehicles: [],
+        godowns: [
+          { id: 'g1', org_id: 'org-1', name: 'Main Godown', address: 'a', stock: [] },
+          { id: 'g2', org_id: 'org-1', name: 'Returns Bay', address: 'b', stock: [] },
+        ],
+      },
+    });
   });
 
   it('shows an empty state when there are no orders', async () => {
@@ -79,7 +95,7 @@ describe('Dispatches page', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm' }));
 
     await waitFor(() => expect(screen.getByText('CONFIRMED')).toBeInTheDocument());
-    expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith('order-1', 'CONFIRMED', undefined);
+    expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith('order-1', 'CONFIRMED', undefined, undefined);
     // The row now offers the next step in the lifecycle, not the old one.
     expect(screen.getByRole('button', { name: 'Mark Loaded' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
@@ -127,10 +143,12 @@ describe('Dispatches page', () => {
 
     await user.click(confirmBtn);
 
-    expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith('order-1', 'DELIVERED', {
-      receiver_name: 'Priya Sharma',
-      signature_or_photo_url: 'https://example.com/sig.png',
-    });
+    expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith(
+      'order-1',
+      'DELIVERED',
+      { receiver_name: 'Priya Sharma', signature_or_photo_url: 'https://example.com/sig.png' },
+      undefined,
+    );
     await waitFor(() => expect(screen.getByText('DELIVERED')).toBeInTheDocument());
   });
 
@@ -146,5 +164,59 @@ describe('Dispatches page', () => {
 
     expect(await screen.findByText(/status update failed/i)).toBeInTheDocument();
     expect(screen.getByText('PENDING')).toBeInTheDocument();
+  });
+
+  it('marks an in-transit dispatch returned, choosing the godown that receives the stock', async () => {
+    const user = userEvent.setup();
+    const order = makeOrder({
+      status: 'IN_TRANSIT',
+      status_history: [
+        { status: 'PENDING', changed_at: 1 },
+        { status: 'IN_TRANSIT', changed_at: 2 },
+      ],
+    });
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+    vi.mocked(dispatchesApi.updateDispatchStatus).mockResolvedValue({
+      success: true,
+      message: '',
+      data: { ...order, status: 'RETURNED', status_history: [...order.status_history, { status: 'RETURNED', changed_at: 3 }] },
+    });
+
+    render(<Dispatches />);
+    await screen.findByText('IN TRANSIT');
+
+    await user.click(screen.getByRole('button', { name: 'Mark Returned' }));
+    // The API must not fire until the return is confirmed.
+    expect(dispatchesApi.updateDispatchStatus).not.toHaveBeenCalled();
+
+    await user.selectOptions(await screen.findByLabelText(/return stock to/i), 'g2');
+    await user.click(screen.getByRole('button', { name: /confirm return/i }));
+
+    expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith('order-1', 'RETURNED', undefined, 'g2');
+    await waitFor(() => expect(screen.getByText('RETURNED')).toBeInTheDocument());
+  });
+
+  it('marks a dispatch returned with the auto godown default when none is chosen', async () => {
+    const user = userEvent.setup();
+    const order = makeOrder({
+      status: 'IN_TRANSIT',
+      status_history: [
+        { status: 'PENDING', changed_at: 1 },
+        { status: 'IN_TRANSIT', changed_at: 2 },
+      ],
+    });
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+    vi.mocked(dispatchesApi.updateDispatchStatus).mockResolvedValue({
+      success: true,
+      message: '',
+      data: { ...order, status: 'RETURNED' },
+    });
+
+    render(<Dispatches />);
+    await screen.findByText('IN TRANSIT');
+    await user.click(screen.getByRole('button', { name: 'Mark Returned' }));
+    await user.click(await screen.findByRole('button', { name: /confirm return/i }));
+
+    expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith('order-1', 'RETURNED', undefined, undefined);
   });
 });

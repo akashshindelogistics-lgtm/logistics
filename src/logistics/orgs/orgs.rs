@@ -966,9 +966,9 @@ mod tests {
 
         // Completing the first trip frees its vehicle for reuse.
         let mut first = DispatchOrder::get_by_id(first.id).expect("get").expect("exists");
-        first.transition_to(DispatchStatus::Confirmed, None).expect("confirm");
-        first.transition_to(DispatchStatus::Loaded, None).expect("load");
-        first.transition_to(DispatchStatus::InTransit, None).expect("in transit");
+        first.transition_to(DispatchStatus::Confirmed, None, None).expect("confirm");
+        first.transition_to(DispatchStatus::Loaded, None, None).expect("load");
+        first.transition_to(DispatchStatus::InTransit, None, None).expect("in transit");
         first
             .transition_to(
                 DispatchStatus::Delivered,
@@ -976,6 +976,7 @@ mod tests {
                     receiver_name: "Buyer".to_string(),
                     signature_or_photo_url: "https://example.test/sig.png".to_string(),
                 }),
+                None,
             )
             .expect("deliver");
 

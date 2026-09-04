@@ -96,7 +96,20 @@
    api-client tests, 2 new OrganizationDetail tests, 1 new Playwright flow.
    Plan/context: [[file:docs/vehicle-compliance.md]]
 ** TODO Add freight billing: a cost per dispatch, invoice generation, and a payment status (paid/pending/overdue) per customer
-** TODO Support returns: a customer return should credit stock back into a godown and record a RETURNED dispatch, rather than the system only ever being able to decrement stock
+** DONE Support returns: a customer return should credit stock back into a godown and record a RETURNED dispatch, rather than the system only ever being able to decrement stock
+   Moving a dispatch IN_TRANSIT -> RETURNED now credits every line item's
+   quantity back into a godown (bump an existing Stock row, or insert one with
+   the line item's snapshotted volume_in_size). DispatchOrder::transition_to
+   gained a return_to_godown_id: Option<Uuid> arg; when None,
+   resolve_return_godown picks a godown already stocking one of the returned
+   items, else the org's first godown by name (a godown from another org is
+   rejected and the status is left unchanged). PUT /api/dispatches/{id}/status
+   carries an optional return_to_godown_id on UpdateDispatchStatusPayload.
+   Frontend: the Dispatches page's "Mark Returned" action opens an inline
+   godown picker (default "auto"). 5 new Rust tests (3 model, 1 route, plus the
+   existing lifecycle tests updated for the new arg), 3 new frontend unit tests,
+   1 new Playwright flow.
+   Plan/context: [[file:docs/dispatch-lifecycle.md]]
 ** TODO Move from one login per org to role-scoped user accounts within an org (admin, dispatcher, warehouse staff) so more than one person at the same org can log in with different permissions
 ** TODO Add an endpoint for GPS trackers to push vehicle location automatically, instead of only the manual `PUT .../location` call
 ** TODO Support multi-stop routes so one vehicle's trip can serve several customer orders in a sequence, instead of one dispatch always meaning one vehicle to one customer

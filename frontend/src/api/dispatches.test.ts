@@ -51,4 +51,14 @@ describe('dispatches api client', () => {
       },
     });
   });
+
+  it('updateDispatchStatus PUTs return_to_godown_id when marking RETURNED', async () => {
+    vi.mocked(api.put).mockResolvedValue({ data: { success: true, message: '', data: {} } });
+    await updateDispatchStatus('abc-123', 'RETURNED', undefined, 'godown-9');
+    expect(api.put).toHaveBeenCalledWith('/dispatches/abc-123/status', {
+      status: 'RETURNED',
+      proof_of_delivery: undefined,
+      return_to_godown_id: 'godown-9',
+    });
+  });
 });

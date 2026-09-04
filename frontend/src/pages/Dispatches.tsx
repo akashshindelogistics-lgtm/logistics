@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listDispatches, getDispatchSummary, updateDispatchStatus } from '../api/dispatches';
+import { getOrg } from '../api/orgs';
+import { getOrgId } from '../api/auth';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, type NextAction } from '../lib/dispatchLifecycle';
 import type { DispatchOrder } from '../types';
@@ -18,6 +20,10 @@ export default function Dispatches() {
   const [podReceiver, setPodReceiver] = useState('');
   const [podUrl, setPodUrl] = useState('');
 
+  const [godowns, setGodowns] = useState<{ id: string; name: string }[]>([]);
+  const [returnDraft, setReturnDraft] = useState<{ order: DispatchOrder; action: NextAction } | null>(null);
+  const [returnGodownId, setReturnGodownId] = useState('');
+
   useEffect(() => {
     listDispatches()
       .then(r => {
@@ -25,6 +31,13 @@ export default function Dispatches() {
         setOrders(sorted);
       })
       .finally(() => setLoading(false));
+
+    const orgId = getOrgId();
+    if (orgId) {
+      getOrg(orgId)
+        .then(r => setGodowns((r.data?.godowns ?? []).map(g => ({ id: g.id, name: g.name }))))
+        .catch(() => { /* the godown picker just falls back to the server default */ });
+    }
   }, []);
 
   async function handleAiStatus(orderId: string) {
@@ -51,17 +64,20 @@ export default function Dispatches() {
     order: DispatchOrder,
     action: NextAction,
     proof?: { receiver_name: string; signature_or_photo_url: string },
+    returnToGodownId?: string,
   ) {
     setActionLoadingId(order.id);
     setActionError(prev => ({ ...prev, [order.id]: '' }));
     try {
-      const res = await updateDispatchStatus(order.id, action.status, proof);
+      const res = await updateDispatchStatus(order.id, action.status, proof, returnToGodownId);
       if (res.data) {
         const updated = res.data;
         setOrders(prev => prev.map(o => (o.id === order.id ? updated : o)));
         setPodDraft(null);
         setPodReceiver('');
         setPodUrl('');
+        setReturnDraft(null);
+        setReturnGodownId('');
       } else {
         setActionError(prev => ({ ...prev, [order.id]: res.message || 'Status update failed.' }));
       }
@@ -82,6 +98,11 @@ export default function Dispatches() {
       setPodUrl('');
       return;
     }
+    if (action.isReturn) {
+      setReturnDraft({ order, action });
+      setReturnGodownId('');
+      return;
+    }
     applyStatus(order, action);
   }
 
@@ -91,6 +112,11 @@ export default function Dispatches() {
       receiver_name: podReceiver.trim(),
       signature_or_photo_url: podUrl.trim(),
     });
+  }
+
+  function handleConfirmReturn() {
+    if (!returnDraft) return;
+    applyStatus(returnDraft.order, returnDraft.action, undefined, returnGodownId || undefined);
   }
 
   return (
@@ -235,6 +261,40 @@ export default function Dispatches() {
                               <IconCheck size={13} /> Confirm Delivery
                             </button>
                             <button className="btn btn-ghost btn-sm" onClick={() => setPodDraft(null)}>
+                              <IconX size={13} /> Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {returnDraft?.order.id === o.id && (
+                      <tr key={`${o.id}-return`}>
+                        <td colSpan={8} style={{ padding: '0 16px 14px' }}>
+                          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', padding: 12, background: 'var(--surface)', borderRadius: 8 }}>
+                            <div className="field" style={{ marginBottom: 0 }}>
+                              <label htmlFor={`return-godown-${o.id}`}>Return stock to</label>
+                              <select
+                                id={`return-godown-${o.id}`}
+                                value={returnGodownId}
+                                onChange={e => setReturnGodownId(e.target.value)}
+                              >
+                                <option value="">Auto — a godown that stocks these items</option>
+                                {godowns.map(g => (
+                                  <option key={g.id} value={g.id}>{g.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <span className="muted" style={{ fontSize: 12, paddingBottom: 8 }}>
+                              The shipment's stock is credited back into the godown.
+                            </span>
+                            <button
+                              className="btn btn-danger btn-sm"
+                              onClick={handleConfirmReturn}
+                              disabled={actionLoadingId === o.id}
+                            >
+                              <IconCheck size={13} /> Confirm Return
+                            </button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setReturnDraft(null)}>
                               <IconX size={13} /> Cancel
                             </button>
                           </div>
