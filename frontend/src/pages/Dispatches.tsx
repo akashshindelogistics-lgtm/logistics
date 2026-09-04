@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react';
 import { listDispatches, getDispatchSummary, updateDispatchStatus } from '../api/dispatches';
+import { listOrgInvoices, createDispatchInvoice, payInvoice } from '../api/billing';
+import { getOrgId } from '../api/auth';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, type NextAction } from '../lib/dispatchLifecycle';
-import type { DispatchOrder } from '../types';
+import type { DispatchOrder, Invoice, PaymentStatus } from '../types';
 import './page.css';
+
+const PAYMENT_TAG_CLASS: Record<PaymentStatus, string> = {
+  PENDING: 'tag-amber',
+  PAID: 'tag-green',
+  OVERDUE: 'tag-red',
+};
 
 export default function Dispatches() {
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
@@ -18,6 +26,13 @@ export default function Dispatches() {
   const [podReceiver, setPodReceiver] = useState('');
   const [podUrl, setPodUrl] = useState('');
 
+  const [invoices, setInvoices] = useState<Record<string, Invoice>>({});
+  const [invoiceDraftId, setInvoiceDraftId] = useState<string | null>(null);
+  const [invAmount, setInvAmount] = useState('');
+  const [invDue, setInvDue] = useState('');
+  const [invBusyId, setInvBusyId] = useState<string | null>(null);
+  const [invError, setInvError] = useState<Record<string, string>>({});
+
   useEffect(() => {
     listDispatches()
       .then(r => {
@@ -25,7 +40,49 @@ export default function Dispatches() {
         setOrders(sorted);
       })
       .finally(() => setLoading(false));
+
+    const orgId = getOrgId();
+    if (orgId) {
+      listOrgInvoices(orgId)
+        .then(r => {
+          const byDispatch: Record<string, Invoice> = {};
+          for (const inv of r.data ?? []) byDispatch[inv.dispatch_id] = inv;
+          setInvoices(byDispatch);
+        })
+        .catch(() => { /* billing is best-effort on this page */ });
+    }
   }, []);
+
+  async function handleCreateInvoice(order: DispatchOrder) {
+    setInvBusyId(order.id);
+    setInvError(prev => ({ ...prev, [order.id]: '' }));
+    try {
+      const res = await createDispatchInvoice(order.id, { amount: Number(invAmount), dueOn: invDue });
+      if (res.data) {
+        setInvoices(prev => ({ ...prev, [order.id]: res.data! }));
+        setInvoiceDraftId(null);
+        setInvAmount('');
+        setInvDue('');
+      } else {
+        setInvError(prev => ({ ...prev, [order.id]: res.message || 'Could not raise the invoice.' }));
+      }
+    } catch (err) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setInvError(prev => ({ ...prev, [order.id]: msg || 'Could not raise the invoice.' }));
+    } finally {
+      setInvBusyId(null);
+    }
+  }
+
+  async function handlePayInvoice(order: DispatchOrder, invoice: Invoice) {
+    setInvBusyId(order.id);
+    try {
+      const res = await payInvoice(invoice.id);
+      if (res.data) setInvoices(prev => ({ ...prev, [order.id]: res.data! }));
+    } finally {
+      setInvBusyId(null);
+    }
+  }
 
   async function handleAiStatus(orderId: string) {
     if (openId === orderId) {
@@ -130,6 +187,7 @@ export default function Dispatches() {
                   <th>Stock Item</th>
                   <th>Qty</th>
                   <th>Status</th>
+                  <th>Billing</th>
                   <th>Actions</th>
                   <th>Dispatched At</th>
                   <th>AI Status</th>
@@ -163,6 +221,37 @@ export default function Dispatches() {
                         <span className="muted" style={{ marginLeft: 4 }}>units</span>
                       </td>
                       <td><span className={`status-tag ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span></td>
+                      <td data-testid="billing-cell">
+                        {invoices[o.id] ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                            <span>
+                              <span style={{ fontWeight: 700 }}>{invoices[o.id].amount.toLocaleString()}</span>{' '}
+                              <span className={`status-tag ${PAYMENT_TAG_CLASS[invoices[o.id].status]}`}>
+                                {invoices[o.id].status}
+                              </span>
+                            </span>
+                            {invoices[o.id].status !== 'PAID' && (
+                              <button
+                                className="btn btn-sm btn-primary"
+                                onClick={() => handlePayInvoice(o, invoices[o.id])}
+                                disabled={invBusyId === o.id}
+                              >
+                                Mark paid
+                              </button>
+                            )}
+                          </div>
+                        ) : invoiceDraftId === o.id ? (
+                          <span className="muted">see form below</span>
+                        ) : (
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => { setInvoiceDraftId(o.id); setInvAmount(''); setInvDue(''); }}
+                          >
+                            Invoice
+                          </button>
+                        )}
+                        {invError[o.id] && <div className="errortxt" style={{ marginTop: 4 }}>{invError[o.id]}</div>}
+                      </td>
                       <td>
                         {NEXT_ACTIONS[o.status] ? (
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -205,9 +294,46 @@ export default function Dispatches() {
                         </button>
                       </td>
                     </tr>
+                    {invoiceDraftId === o.id && (
+                      <tr key={`${o.id}-invoice`}>
+                        <td colSpan={9} style={{ padding: '0 16px 14px' }}>
+                          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', padding: 12, background: 'var(--surface)', borderRadius: 8 }}>
+                            <div className="field" style={{ marginBottom: 0 }}>
+                              <label htmlFor={`inv-amount-${o.id}`}>Freight Amount</label>
+                              <input
+                                id={`inv-amount-${o.id}`}
+                                type="number"
+                                value={invAmount}
+                                onChange={e => setInvAmount(e.target.value)}
+                                placeholder="e.g. 4500"
+                              />
+                            </div>
+                            <div className="field" style={{ marginBottom: 0 }}>
+                              <label htmlFor={`inv-due-${o.id}`}>Due Date</label>
+                              <input
+                                id={`inv-due-${o.id}`}
+                                type="date"
+                                value={invDue}
+                                onChange={e => setInvDue(e.target.value)}
+                              />
+                            </div>
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => handleCreateInvoice(o)}
+                              disabled={!invAmount || !invDue || invBusyId === o.id}
+                            >
+                              <IconCheck size={13} /> Raise Invoice
+                            </button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setInvoiceDraftId(null)}>
+                              <IconX size={13} /> Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {podDraft?.order.id === o.id && (
                       <tr key={`${o.id}-pod`}>
-                        <td colSpan={8} style={{ padding: '0 16px 14px' }}>
+                        <td colSpan={9} style={{ padding: '0 16px 14px' }}>
                           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', padding: 12, background: 'var(--surface)', borderRadius: 8 }}>
                             <div className="field" style={{ marginBottom: 0 }}>
                               <label htmlFor={`pod-receiver-${o.id}`}>Receiver Name</label>
@@ -243,7 +369,7 @@ export default function Dispatches() {
                     )}
                     {openId === o.id && (
                       <tr key={`${o.id}-summary`}>
-                        <td colSpan={8} style={{ padding: '0 16px 14px', background: 'var(--ai-summary-bg, var(--surface))' }}>
+                        <td colSpan={9} style={{ padding: '0 16px 14px', background: 'var(--ai-summary-bg, var(--surface))' }}>
                           <div className="ai-summary-card">
                             {o.status_history.length > 0 && (
                               <div style={{ marginBottom: 12 }}>

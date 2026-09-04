@@ -140,6 +140,31 @@ export interface DispatchOrder {
   proof_of_delivery: ProofOfDelivery | null;
 }
 
+// Mirrors PaymentStatus / Invoice / CustomerBillingSummary in
+// src/logistics/billing/invoice.rs. `status` is computed by the server on
+// every read from paid_on / due_on / today.
+export type PaymentStatus = 'PENDING' | 'PAID' | 'OVERDUE';
+
+export interface Invoice {
+  id: string;
+  org_id: string;
+  dispatch_id: string;
+  customer_id: string;
+  amount: number;
+  issued_on: string;
+  due_on: string;
+  paid_on: string | null;
+  status: PaymentStatus;
+}
+
+export interface CustomerBillingSummary {
+  customer_id: string;
+  invoice_count: number;
+  total_outstanding: number;
+  overdue_count: number;
+  invoices: Invoice[];
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   message: string;

@@ -4,9 +4,28 @@ import userEvent from '@testing-library/user-event';
 import Dispatches from './Dispatches';
 import { STATUS_TAG_CLASS } from '../lib/dispatchLifecycle';
 import * as dispatchesApi from '../api/dispatches';
-import type { DispatchOrder } from '../types';
+import * as billingApi from '../api/billing';
+import * as authApi from '../api/auth';
+import type { DispatchOrder, Invoice } from '../types';
 
 vi.mock('../api/dispatches');
+vi.mock('../api/billing');
+vi.mock('../api/auth');
+
+function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
+  return {
+    id: 'inv-1',
+    org_id: 'org-1',
+    dispatch_id: 'order-1',
+    customer_id: 'cust-1',
+    amount: 4500,
+    issued_on: '2026-09-01',
+    due_on: '2026-09-30',
+    paid_on: null,
+    status: 'PENDING',
+    ...overrides,
+  };
+}
 
 function makeOrder(overrides: Partial<DispatchOrder> = {}): DispatchOrder {
   return {
@@ -26,6 +45,8 @@ function makeOrder(overrides: Partial<DispatchOrder> = {}): DispatchOrder {
 describe('Dispatches page', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(authApi.getOrgId).mockReturnValue('org-1');
+    vi.mocked(billingApi.listOrgInvoices).mockResolvedValue({ success: true, message: '', data: [] });
   });
 
   it('shows an empty state when there are no orders', async () => {
@@ -146,5 +167,54 @@ describe('Dispatches page', () => {
 
     expect(await screen.findByText(/status update failed/i)).toBeInTheDocument();
     expect(screen.getByText('PENDING')).toBeInTheDocument();
+  });
+
+  it('raises a freight invoice for an uninvoiced dispatch', async () => {
+    const user = userEvent.setup();
+    const order = makeOrder();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+    vi.mocked(billingApi.createDispatchInvoice).mockResolvedValue({
+      success: true,
+      message: '',
+      data: makeInvoice({ dispatch_id: order.id }),
+    });
+
+    render(<Dispatches />);
+    await screen.findByText('PENDING');
+
+    await user.click(screen.getByRole('button', { name: 'Invoice' }));
+    await user.type(screen.getByLabelText('Freight Amount'), '4500');
+    await user.type(screen.getByLabelText('Due Date'), '2026-09-30');
+    await user.click(screen.getByRole('button', { name: /raise invoice/i }));
+
+    expect(billingApi.createDispatchInvoice).toHaveBeenCalledWith('order-1', {
+      amount: 4500,
+      dueOn: '2026-09-30',
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: /mark paid/i })).toBeInTheDocument());
+  });
+
+  it('marks an existing pending invoice paid', async () => {
+    const user = userEvent.setup();
+    const order = makeOrder();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+    vi.mocked(billingApi.listOrgInvoices).mockResolvedValue({
+      success: true,
+      message: '',
+      data: [makeInvoice({ dispatch_id: order.id })],
+    });
+    vi.mocked(billingApi.payInvoice).mockResolvedValue({
+      success: true,
+      message: '',
+      data: makeInvoice({ dispatch_id: order.id, status: 'PAID', paid_on: '2026-09-10' }),
+    });
+
+    render(<Dispatches />);
+    const payBtn = await screen.findByRole('button', { name: /mark paid/i });
+    await user.click(payBtn);
+
+    expect(billingApi.payInvoice).toHaveBeenCalledWith('inv-1');
+    await waitFor(() => expect(screen.getByText('PAID')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /mark paid/i })).not.toBeInTheDocument();
   });
 });

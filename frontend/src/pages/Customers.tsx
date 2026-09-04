@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
 import { listCustomers, createCustomer, deleteCustomer } from '../api/customers';
+import { listOrgInvoices } from '../api/billing';
 import { getOrgId } from '../api/auth';
 import { IconUsers, IconPlus, IconX, IconPin, IconTrash } from '../components/Icons';
 import type { Customer } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import './page.css';
+
+interface CustomerBalance {
+  outstanding: number;
+  overdue: number;
+}
 
 export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -13,9 +19,27 @@ export default function Customers() {
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [balances, setBalances] = useState<Record<string, CustomerBalance>>({});
 
   const load = () => listCustomers().then(r => setCustomers(r.data ?? [])).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+
+  const loadBalances = () => {
+    const orgId = getOrgId();
+    if (!orgId) return;
+    listOrgInvoices(orgId)
+      .then(r => {
+        const byCustomer: Record<string, CustomerBalance> = {};
+        for (const inv of r.data ?? []) {
+          const e = (byCustomer[inv.customer_id] ??= { outstanding: 0, overdue: 0 });
+          if (inv.status !== 'PAID') e.outstanding += inv.amount;
+          if (inv.status === 'OVERDUE') e.overdue += 1;
+        }
+        setBalances(byCustomer);
+      })
+      .catch(() => { /* billing column is best-effort */ });
+  };
+
+  useEffect(() => { load(); loadBalances(); }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +128,7 @@ export default function Customers() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Customer</th><th>Address</th><th>Location</th><th></th></tr>
+                <tr><th>Customer</th><th>Address</th><th>Location</th><th>Billing</th><th></th></tr>
               </thead>
               <tbody>
                 {customers.map(c => (
@@ -122,6 +146,19 @@ export default function Customers() {
                       {c.location
                         ? <span className="coord-cell" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><IconPin size={12} />{c.location.latitude.toFixed(4)}, {c.location.longitude.toFixed(4)}</span>
                         : <span className="muted">Not set</span>}
+                    </td>
+                    <td>
+                      {balances[c.id] && balances[c.id].outstanding > 0 ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 700 }}>{balances[c.id].outstanding.toLocaleString()}</span>
+                          <span className="muted">outstanding</span>
+                          {balances[c.id].overdue > 0 && (
+                            <span className="badge tag-red">{balances[c.id].overdue} overdue</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="muted">Settled</span>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <button className="btn btn-danger btn-sm" onClick={() => handleDelete(c)} aria-label={`Delete ${c.name}`}>
