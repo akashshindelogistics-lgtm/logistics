@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod auth;
+pub mod billing;
 pub mod customer;
 pub mod db;
 pub mod dispatch;

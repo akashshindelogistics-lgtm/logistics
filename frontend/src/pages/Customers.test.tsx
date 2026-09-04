@@ -3,9 +3,11 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Customers from './Customers';
 import * as customersApi from '../api/customers';
+import * as billingApi from '../api/billing';
 import type { Customer } from '../types';
 
 vi.mock('../api/customers');
+vi.mock('../api/billing');
 vi.mock('../api/auth', () => ({ getOrgId: () => 'org1' }));
 vi.mock('../components/LocationMap', () => ({
   default: ({ pins }: { pins: unknown[] }) => <div data-testid="map">{pins.length} pins</div>,
@@ -18,7 +20,10 @@ function customer(overrides: Partial<Customer> = {}): Customer {
 }
 
 describe('Customers page', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(billingApi.listOrgInvoices).mockResolvedValue(ok([]));
+  });
 
   it('shows the empty state when there are no customers', async () => {
     vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([]));
@@ -103,5 +108,25 @@ describe('Customers page', () => {
     render(<Customers />);
     const toolbar = (await screen.findByText('All Customers')).parentElement!;
     expect(within(toolbar).getByText('2')).toBeInTheDocument();
+  });
+
+  it('shows a customer outstanding balance and overdue count from their invoices', async () => {
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([customer(), customer({ id: 'c2', name: 'Settled Co' })]));
+    vi.mocked(billingApi.listOrgInvoices).mockResolvedValue(
+      ok([
+        { id: 'i1', org_id: 'org1', dispatch_id: 'd1', customer_id: 'c1', amount: 400, issued_on: '2026-09-01', due_on: '2026-10-01', paid_on: null, status: 'PENDING' as const },
+        { id: 'i2', org_id: 'org1', dispatch_id: 'd2', customer_id: 'c1', amount: 250, issued_on: '2026-08-01', due_on: '2026-08-15', paid_on: null, status: 'OVERDUE' as const },
+        { id: 'i3', org_id: 'org1', dispatch_id: 'd3', customer_id: 'c2', amount: 999, issued_on: '2026-07-01', due_on: '2026-07-15', paid_on: '2026-07-10', status: 'PAID' as const },
+      ]),
+    );
+
+    render(<Customers />);
+
+    const techHubRow = (await screen.findByText('TechHub Stores')).closest('tr')!;
+    expect(within(techHubRow).getByText('650')).toBeInTheDocument();
+    expect(within(techHubRow).getByText('1 overdue')).toBeInTheDocument();
+
+    const settledRow = screen.getByText('Settled Co').closest('tr')!;
+    expect(within(settledRow).getByText('Settled')).toBeInTheDocument();
   });
 });

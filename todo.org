@@ -95,7 +95,21 @@
    and per-row Renew/delete. 14 new Rust tests (9 model, 5 route), 5 new vehicles
    api-client tests, 2 new OrganizationDetail tests, 1 new Playwright flow.
    Plan/context: [[file:docs/vehicle-compliance.md]]
-** TODO Add freight billing: a cost per dispatch, invoice generation, and a payment status (paid/pending/overdue) per customer
+** DONE Add freight billing: a cost per dispatch, invoice generation, and a payment status (paid/pending/overdue) per customer
+   New Invoice model (src/logistics/billing/invoice.rs) + Invoices table, one
+   invoice per dispatch (dispatch_id UNIQUE, cascade-deleted with the dispatch
+   and the org). amount is a whole currency number (> 0); issued_on is stamped
+   server-side, due_on is caller-supplied, and a PENDING / PAID / OVERDUE status
+   is computed on every read from paid_on / due_on / today (ISO date strings,
+   compared lexicographically). Routes: POST/GET /api/dispatches/{id}/invoice,
+   PUT /api/invoices/{id} (amend while unpaid, 409 once paid),
+   POST /api/invoices/{id}/pay (idempotent), GET /api/orgs/{id}/invoices, and
+   GET /api/customers/{id}/billing for a customer's outstanding total +
+   overdue count. Frontend: a Billing column on the Dispatches page (inline
+   "Invoice" form + "Mark paid"), and an outstanding-balance / overdue column
+   on the Customers page. 12 new Rust tests (9 model, 3 route), 9 new frontend
+   unit tests, 1 new Playwright flow.
+   Plan/context: [[file:docs/billing.md]]
 ** TODO Support returns: a customer return should credit stock back into a godown and record a RETURNED dispatch, rather than the system only ever being able to decrement stock
 ** TODO Move from one login per org to role-scoped user accounts within an org (admin, dispatcher, warehouse staff) so more than one person at the same org can log in with different permissions
 ** TODO Add an endpoint for GPS trackers to push vehicle location automatically, instead of only the manual `PUT .../location` call

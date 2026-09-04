@@ -138,6 +138,50 @@ test.describe('Dispatches', () => {
     await expect(page.getByText(stockDesc)).toBeVisible({ timeout: 8000 });
   });
 
+  test('raise a freight invoice for a dispatch and mark it paid', async ({ page }) => {
+    const org = await registerOrg(page, `Billing Flow ${uid()}`);
+    const custName = `Billing Customer ${uid()}`;
+    const stockDesc = `Pipes ${uid()}`;
+    const token = await page.evaluate(() => localStorage.getItem('logi_token'));
+
+    const vehReg = `BF${uid().toUpperCase().slice(0, 6)}`;
+    await page.request.post(`/api/orgs/${org.id}/vehicles`, {
+      data: { registration_number: vehReg, capacity: 100, unit: 'MetricTon' },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    await assignActiveDriver(page, org.id, vehReg);
+    await addStockViaApi(page, org.id, stockDesc, 50);
+    const custId = await createCustomerWithLocation(page, org.id, custName);
+
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Customer').selectOption({ value: custId });
+    await page.getByLabel('Stock Description').fill(stockDesc);
+    await page.getByLabel('Quantity', { exact: true }).fill('10');
+    await page.getByRole('button', { name: /dispatch stock/i }).click();
+    await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
+
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').first();
+    await expect(row.getByText(stockDesc)).toBeVisible({ timeout: 8000 });
+
+    // Raise an invoice due in 30 days.
+    const due = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+    await row.getByRole('button', { name: 'Invoice' }).click();
+    await page.getByLabel('Freight Amount').fill('4500');
+    await page.getByLabel('Due Date').fill(due);
+    await page.getByRole('button', { name: /raise invoice/i }).click();
+
+    const billing = row.getByTestId('billing-cell');
+    await expect(billing.getByText('PENDING', { exact: true })).toBeVisible({ timeout: 8000 });
+    await billing.getByRole('button', { name: /mark paid/i }).click();
+    await expect(billing.getByText('PAID', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    // The customer's billing shows settled once paid.
+    await page.goto('/customers');
+    const custRow = page.locator('tbody tr', { hasText: custName });
+    await expect(custRow.getByText('Settled')).toBeVisible({ timeout: 8000 });
+  });
+
   test('dispatch shows error when stock is insufficient', async ({ page }) => {
     const org = await registerOrg(page, `Dispatch Insufficient ${uid()}`);
     const custName = `Customer ${uid()}`;

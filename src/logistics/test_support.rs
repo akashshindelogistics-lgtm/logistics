@@ -256,6 +256,24 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create DispatchProofOfDelivery");
 
     conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS Invoices (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            dispatch_id VARCHAR(36) NOT NULL UNIQUE,
+            customer_id VARCHAR(36) NOT NULL,
+            amount BIGINT NOT NULL,
+            issued_on VARCHAR(10) NOT NULL,
+            due_on VARCHAR(10) NOT NULL,
+            paid_on VARCHAR(10) DEFAULT NULL,
+            CONSTRAINT fk_invoice_org
+                FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE,
+            CONSTRAINT fk_invoice_dispatch
+                FOREIGN KEY (dispatch_id) REFERENCES Dispatches(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create Invoices");
+
+    conn.query_drop(
         "CREATE TABLE IF NOT EXISTS OrgCredentials (
             org_id VARCHAR(36) PRIMARY KEY,
             org_name VARCHAR(255) NOT NULL,
