@@ -4,7 +4,9 @@ import { registerOrg, loginOrg, uid } from './helpers';
 /**
  * A single, narrated walk through the whole product: register an org, sign
  * out and back in, build up a warehouse and fleet, dispatch a multi-item
- * shipment to a customer, and carry it through its delivery lifecycle.
+ * shipment to a customer and carry it through its delivery lifecycle, raise
+ * and pay a freight invoice, and dispatch + return a second shipment to see
+ * its stock credited back into a godown.
  *
  * This is meant to be watched, not just asserted on — run it with
  * `npm run test:e2e:demo` (playwright.demo.config.ts), which always opens a
@@ -12,7 +14,7 @@ import { registerOrg, loginOrg, uid } from './helpers';
  * test.step() below shows up as its own line in the list reporter and as a
  * labelled section in the trace, so progress is easy to follow either way.
  */
-test('full logistics workflow: register, login, warehouse, fleet, and a shipment through delivery', async ({ page }) => {
+test('full logistics workflow: register, login, warehouse, fleet, delivery, billing, and a return', async ({ page }) => {
   test.slow();
 
   const orgName = `Demo Logistics Co ${uid()}`;
@@ -20,6 +22,7 @@ test('full logistics workflow: register, login, warehouse, fleet, and a shipment
   const godownB = `Overflow Warehouse ${uid()}`;
   const stockA = `Cement Bags ${uid()}`;
   const stockB = `Steel Rods ${uid()}`;
+  const stockC = `Cable Reels ${uid()}`;
   const vehicleReg = `MH12DM${uid().toUpperCase().slice(0, 4)}`;
   const driverName = `Ramesh Kulkarni ${uid()}`;
   const custName = `Sunrise Traders ${uid()}`;
@@ -177,6 +180,66 @@ test('full logistics workflow: register, login, warehouse, fleet, and a shipment
     await row.getByRole('button', { name: /ai status/i }).click();
     await expect(page.getByText(/received by/i)).toBeVisible();
     await expect(page.getByText('Anita Rao').last()).toBeVisible();
+  });
+
+  await test.step('Raise a freight invoice for the delivered dispatch and mark it paid', async () => {
+    const row = page.locator('tbody tr').filter({ hasText: stockA });
+    const due = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+
+    await row.getByRole('button', { name: 'Invoice' }).click();
+    await page.getByLabel('Freight Amount').fill('4500');
+    await page.getByLabel('Due Date').fill(due);
+    await page.getByRole('button', { name: /raise invoice/i }).click();
+
+    const billing = row.getByTestId('billing-cell');
+    await expect(billing.getByText('PENDING', { exact: true })).toBeVisible({ timeout: 8000 });
+    await billing.getByRole('button', { name: /mark paid/i }).click();
+    await expect(billing.getByText('PAID', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    // A paid-up customer shows as settled on the Customers page.
+    await page.goto('/customers');
+    const custRow = page.locator('tbody tr', { hasText: custName });
+    await expect(custRow.getByText('Settled')).toBeVisible({ timeout: 8000 });
+  });
+
+  await test.step('Dispatch a shipment, then return it and see the stock credited back', async () => {
+    await page.goto(`/orgs/${org.id}`);
+    // hasText would also match the overflow godown's card here — its own
+    // "To Godown" transfer option now reads "Central Warehouse …" since it
+    // holds stock post-transfer. Filter on the card's own heading link
+    // instead, which only ever matches the card it names.
+    const card = page.getByTestId('godown-card').filter({ has: page.getByRole('link', { name: godownA, exact: true }) });
+    await card.getByLabel('Stock Item').fill(stockC);
+    await card.getByLabel('Stock Quantity').fill('60');
+    await card.getByLabel('Volume').fill('1');
+    await card.getByRole('button', { name: /add stock/i }).click();
+    await expect(page.getByText(stockC).first()).toBeVisible({ timeout: 8000 });
+
+    await page.getByLabel('Customer').selectOption({ value: custId });
+    await page.getByLabel('Stock Description').fill(stockC);
+    await page.getByLabel('Quantity', { exact: true }).fill('20');
+    await page.getByRole('button', { name: /dispatch stock/i }).click();
+    await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
+
+    // 60 - 20 = 40 left in the godown after the dispatch.
+    await expect(page.getByTestId('godown-card').filter({ hasText: stockC }).getByText('40')).toBeVisible({ timeout: 8000 });
+
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').filter({ hasText: stockC });
+    await row.getByRole('button', { name: 'Confirm' }).click();
+    await expect(row.getByText('CONFIRMED', { exact: true })).toBeVisible({ timeout: 8000 });
+    await row.getByRole('button', { name: 'Mark Loaded' }).click();
+    await expect(row.getByText('LOADED', { exact: true })).toBeVisible({ timeout: 8000 });
+    await row.getByRole('button', { name: 'Mark In Transit' }).click();
+    await expect(row.getByText('IN TRANSIT', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    await row.getByRole('button', { name: 'Mark Returned' }).click();
+    await page.getByRole('button', { name: /confirm return/i }).click();
+    await expect(row.getByText('RETURNED', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    // The 20 returned units are back in the godown: 40 + 20 = 60.
+    await page.goto(`/orgs/${org.id}`);
+    await expect(page.getByTestId('godown-card').filter({ hasText: stockC }).getByText('60')).toBeVisible({ timeout: 8000 });
   });
 
   await test.step('Edit the vehicle, driver and godown from their detail pages', async () => {
