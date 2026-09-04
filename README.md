@@ -36,13 +36,16 @@ operations, live location maps, and AI-generated dispatch summaries.
   audit trail of every move.
 - **Customers** — manage customer records and their delivery locations. Each
   customer belongs to one organization and is never shared between orgs.
-- **Dispatches** — create dispatch orders that move stock from an
-  organization to a customer, and advance each one through a lifecycle
-  (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/`RETURNED`/
-  `CANCELLED`) with a full timestamped status history. Marking one
+- **Dispatches** — create dispatch orders that move one or more stock line
+  items from an organization to a customer, and advance each one through a
+  lifecycle (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/
+  `RETURNED`/`CANCELLED`) with a full timestamped status history. Marking one
   `DELIVERED` requires proof of delivery (receiver name plus a
-  signature/photo); marking one `RETURNED` credits the shipment's stock
-  back into a godown.
+  signature/photo); marking one `RETURNED` credits the shipment's stock back
+  into a godown.
+- **Freight billing** — raise one invoice per dispatch with an amount and a
+  due date; the dashboard tracks each invoice as paid / pending / overdue
+  and rolls a customer's unpaid invoices up into an outstanding balance.
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
 - **Authentication** — org-level login secured with JWTs and bcrypt-hashed
@@ -81,6 +84,7 @@ operations, live location maps, and AI-generated dispatch summaries.
 │   ├── logistics/
 │   │   ├── ai/          # Claude-powered dispatch summaries
 │   │   ├── auth/        # JWT auth and org credentials
+│   │   ├── billing/     # Freight invoices
 │   │   ├── customer/    # Customer domain model
 │   │   ├── db/          # Database connection setup
 │   │   ├── dispatch/    # Dispatch order domain model
@@ -165,6 +169,12 @@ npm run test:unit
 
 # Frontend end-to-end tests (Playwright)
 npm run test:e2e
+
+# Watch the whole product run in a real browser window: register, login,
+# godowns/stock/transfer, fleet + compliance, driver, customer, a dispatch
+# carried through delivery, and entity edits. Starts the Vite dev server
+# and the Rust API itself if they aren't already running.
+npm run test:e2e:demo
 ```
 
 ## API overview
@@ -205,6 +215,11 @@ All routes are served under the `/api` prefix.
 | GET | `/api/dispatches` | List dispatch orders |
 | PUT | `/api/dispatches/{id}/status` | Advance a dispatch's lifecycle status |
 | GET | `/api/dispatches/{id}/summary` | AI-generated summary of a dispatch |
+| GET/POST | `/api/dispatches/{id}/invoice` | Get / raise the freight invoice for a dispatch |
+| PUT | `/api/invoices/{id}` | Amend an unpaid invoice's amount or due date |
+| POST | `/api/invoices/{id}/pay` | Mark an invoice paid |
+| GET | `/api/orgs/{id}/invoices` | All freight invoices for the org |
+| GET | `/api/customers/{id}/billing` | A customer's payment standing (outstanding, overdue) |
 | GET | `/api/health` | Health check |
 
 The published Swagger UI (see CI/CD below) has "Try it out" enabled and the

@@ -1,6 +1,9 @@
 use crate::logistics::auth::auth::{
     decode_token, generate_token, OrgCredentials, OrgSummary,
 };
+use crate::logistics::billing::invoice::{
+    CustomerBillingSummary, Invoice, InvoiceError, PaymentStatus,
+};
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::{
     DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus, DispatchStatusEvent,
@@ -242,6 +245,15 @@ pub struct ProofOfDeliveryPayload {
     pub signature_or_photo_url: String,
 }
 
+/// Raise or amend a freight invoice.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct InvoicePayload {
+    /// Freight charge, in whole currency units. Must be greater than zero.
+    pub amount: i64,
+    /// Payment due date as ISO `YYYY-MM-DD`.
+    pub due_on: String,
+}
+
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct LoginPayload {
     pub org_id: Uuid,
@@ -360,6 +372,27 @@ pub struct LocationResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Location>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct InvoiceResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Invoice>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct InvoiceListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<Invoice>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CustomerBillingResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<CustomerBillingSummary>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -2401,6 +2434,284 @@ pub async fn get_dispatch_summary(
     }
 }
 
+// ── Freight billing handlers (protected) ─────────────────────────────────────
+//
+// One invoice per dispatch. Every route checks the underlying dispatch (or the
+// invoice's stored org) belongs to the authenticated org. See docs/billing.md.
+
+/// Load an invoice by id and verify it belongs to `auth_org_id`, or build the
+/// 403/404/500 response to return early with.
+fn load_owned_invoice(invoice_id: Uuid, auth_org_id: Uuid) -> Result<Invoice, HttpResponse> {
+    match Invoice::get_by_id(invoice_id) {
+        Ok(Some(inv)) if inv.org_id == auth_org_id => Ok(inv),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: invoice belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Invoice not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch invoice: {}", err),
+            data: None,
+        })),
+    }
+}
+
+/// Map an `InvoiceError` to a caller-facing response: a validation problem is
+/// a `400`, a duplicate/paid conflict a `409`, anything else a `500`.
+fn invoice_error_response(err: InvoiceError) -> HttpResponse {
+    match err {
+        InvoiceError::InvalidDate(_) | InvoiceError::NonPositiveAmount => {
+            HttpResponse::BadRequest().json(ApiResponse::<String> {
+                success: false,
+                message: err.to_string(),
+                data: None,
+            })
+        }
+        InvoiceError::AlreadyInvoiced | InvoiceError::AlreadyPaid => {
+            HttpResponse::Conflict().json(ApiResponse::<String> {
+                success: false,
+                message: err.to_string(),
+                data: None,
+            })
+        }
+        InvoiceError::Db(_) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to save invoice: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/dispatches/{id}/invoice",
+    tag = "Billing",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Dispatch UUID")),
+    request_body = InvoicePayload,
+    responses(
+        (status = 201, description = "Invoice raised", body = InvoiceResponse),
+        (status = 400, description = "Amount not positive or due date invalid", body = EmptyResponse),
+        (status = 409, description = "The dispatch already has an invoice", body = EmptyResponse),
+        (status = 403, description = "Dispatch belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Dispatch not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/dispatches/{id}/invoice")]
+pub async fn create_dispatch_invoice(
+    path: web::Path<Uuid>,
+    payload: web::Json<InvoicePayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match Invoice::create(
+        dispatch.org_id,
+        dispatch.id,
+        dispatch.customer_id,
+        payload.amount,
+        payload.due_on.clone(),
+    ) {
+        Ok(inv) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: "Invoice raised".to_string(),
+            data: Some(inv),
+        }),
+        Err(err) => invoice_error_response(err),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/dispatches/{id}/invoice",
+    tag = "Billing",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Dispatch UUID")),
+    responses(
+        (status = 200, description = "The dispatch's invoice", body = InvoiceResponse),
+        (status = 403, description = "Dispatch belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Dispatch or invoice not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/dispatches/{id}/invoice")]
+pub async fn get_dispatch_invoice(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match Invoice::get_by_dispatch(dispatch.id) {
+        Ok(Some(inv)) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Invoice retrieved".to_string(),
+            data: Some(inv),
+        }),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "This dispatch has not been invoiced yet".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch invoice: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/invoices/{id}",
+    tag = "Billing",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Invoice UUID")),
+    request_body = InvoicePayload,
+    responses(
+        (status = 200, description = "Invoice updated", body = InvoiceResponse),
+        (status = 400, description = "Amount not positive or due date invalid", body = EmptyResponse),
+        (status = 409, description = "A paid invoice cannot be changed", body = EmptyResponse),
+        (status = 403, description = "Invoice belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Invoice not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/invoices/{id}")]
+pub async fn update_invoice(
+    path: web::Path<Uuid>,
+    payload: web::Json<InvoicePayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut inv = match load_owned_invoice(path.into_inner(), auth.org_id) {
+        Ok(i) => i,
+        Err(resp) => return resp,
+    };
+    match inv.update(payload.amount, payload.due_on.clone()) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Invoice updated".to_string(),
+            data: Some(inv),
+        }),
+        Err(err) => invoice_error_response(err),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/invoices/{id}/pay",
+    tag = "Billing",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Invoice UUID")),
+    responses(
+        (status = 200, description = "Invoice marked paid (idempotent)", body = InvoiceResponse),
+        (status = 403, description = "Invoice belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Invoice not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/invoices/{id}/pay")]
+pub async fn pay_invoice(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let mut inv = match load_owned_invoice(path.into_inner(), auth.org_id) {
+        Ok(i) => i,
+        Err(resp) => return resp,
+    };
+    match inv.mark_paid() {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Invoice marked paid".to_string(),
+            data: Some(inv),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to mark invoice paid: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/invoices",
+    tag = "Billing",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "Every invoice for the org, most recently issued first", body = InvoiceListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/invoices")]
+pub async fn list_org_invoices(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match Invoice::list_by_org(org_id) {
+        Ok(invoices) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} invoices", invoices.len()),
+            data: Some(invoices),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list invoices: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/customers/{id}/billing",
+    tag = "Billing",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Customer UUID")),
+    responses(
+        (status = 200, description = "The customer's payment standing", body = CustomerBillingResponse),
+        (status = 403, description = "Customer belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Customer not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/customers/{id}/billing")]
+pub async fn get_customer_billing(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let customer = match load_owned_customer(path.into_inner(), auth.org_id) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
+    match Invoice::customer_summary(customer.id) {
+        Ok(summary) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Billing summary retrieved".to_string(),
+            data: Some(summary),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to build billing summary: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── OpenAPI + routing ─────────────────────────────────────────────────────────
 
 struct SecurityAddon;
@@ -2472,6 +2783,12 @@ impl Modify for SecurityAddon {
         dispatch_stock,
         update_dispatch_status,
         get_dispatch_summary,
+        create_dispatch_invoice,
+        get_dispatch_invoice,
+        update_invoice,
+        pay_invoice,
+        list_org_invoices,
+        get_customer_billing,
     ),
     components(
         schemas(
@@ -2483,10 +2800,11 @@ impl Modify for SecurityAddon {
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
             VehicleDocumentPayload,
             TransferStockPayload,
-            UpdateDispatchStatusPayload, ProofOfDeliveryPayload,
+            UpdateDispatchStatusPayload, ProofOfDeliveryPayload, InvoicePayload,
             Organization, Vehicle, Unit, Location, Stock, Godown, StockTransfer, Customer, Driver,
             VehicleDocument, ComplianceDocType, ComplianceStatus,
             DispatchOrder, DispatchLineItem, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
+            Invoice, PaymentStatus, CustomerBillingSummary,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             VehicleDocumentResponse, VehicleDocumentListResponse,
@@ -2495,6 +2813,7 @@ impl Modify for SecurityAddon {
             CustomerResponse, CustomerListResponse,
             DriverResponse, DriverListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
+            InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
     ),
@@ -2508,6 +2827,7 @@ impl Modify for SecurityAddon {
         (name = "Godowns", description = "Warehouse (godown) and stock management"),
         (name = "Customers", description = "Customer management"),
         (name = "Dispatch", description = "Stock dispatch"),
+        (name = "Billing", description = "Freight invoices and customer payment status"),
     )
 )]
 pub struct ApiDoc;
@@ -2558,7 +2878,13 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(list_dispatches)
             .service(dispatch_stock)
             .service(update_dispatch_status)
-            .service(get_dispatch_summary),
+            .service(get_dispatch_summary)
+            .service(create_dispatch_invoice)
+            .service(get_dispatch_invoice)
+            .service(update_invoice)
+            .service(pay_invoice)
+            .service(list_org_invoices)
+            .service(get_customer_billing),
     )
     .service(
         SwaggerUi::new("/swagger-ui/{_:.*}")
@@ -5028,6 +5354,140 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 403);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(!body.success);
+    }
+
+    // ── Billing ─────────────────────────────────────────────────────────────
+
+    /// An ISO `YYYY-MM-DD` string `offset` days from today (UTC).
+    fn billing_date_offset(offset: i64) -> String {
+        let days = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64)
+            .div_euclid(86_400)
+            + offset;
+        let z = days + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        format!("{y:04}-{m:02}-{d:02}")
+    }
+
+    #[actix_web::test]
+    async fn test_invoice_lifecycle_via_api() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, dispatch, auth) = setup_dispatch(&app, "Billing Flow Org").await;
+
+        // Raise an invoice due in 15 days -> PENDING.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/dispatches/{}/invoice", dispatch.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&InvoicePayload { amount: 4500, due_on: billing_date_offset(15) })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let inv: ApiResponse<Invoice> = test::read_body_json(resp).await;
+        let inv = inv.data.unwrap();
+        assert_eq!(inv.amount, 4500);
+        assert_eq!(inv.status, PaymentStatus::Pending);
+
+        // A second invoice for the same dispatch -> 409.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/dispatches/{}/invoice", dispatch.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&InvoicePayload { amount: 1, due_on: billing_date_offset(1) })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
+
+        // Amend the amount.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/invoices/{}", inv.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&InvoicePayload { amount: 5200, due_on: billing_date_offset(15) })
+            .to_request();
+        let amended: ApiResponse<Invoice> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(amended.data.unwrap().amount, 5200);
+
+        // It shows in the org-wide list and the customer billing summary.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/invoices", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let list: ApiResponse<Vec<Invoice>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(list.data.unwrap().len(), 1);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/customers/{}/billing", dispatch.customer_id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let summary: ApiResponse<CustomerBillingSummary> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let summary = summary.data.unwrap();
+        assert_eq!(summary.total_outstanding, 5200);
+        assert_eq!(summary.overdue_count, 0);
+
+        // Pay it -> PAID, and outstanding drops to zero.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/invoices/{}/pay", inv.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let paid: ApiResponse<Invoice> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(paid.data.unwrap().status, PaymentStatus::Paid);
+
+        // Editing a paid invoice -> 409.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/invoices/{}", inv.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&InvoicePayload { amount: 1, due_on: billing_date_offset(30) })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
+    }
+
+    #[actix_web::test]
+    async fn test_create_invoice_rejects_bad_amount_with_400() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, dispatch, auth) = setup_dispatch(&app, "Bad Amount Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/dispatches/{}/invoice", dispatch.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&InvoicePayload { amount: 0, due_on: billing_date_offset(10) })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_invoice_routes_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, dispatch, auth) = setup_dispatch(&app, "Invoice Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Invoice Intruder Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/dispatches/{}/invoice", dispatch.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&InvoicePayload { amount: 100, due_on: billing_date_offset(10) })
+            .to_request();
+        let created: ApiResponse<Invoice> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let inv_id = created.data.unwrap().id;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/invoices/{}/pay", inv_id))
+            .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
 
     // ── Drivers ─────────────────────────────────────────────────────────────
