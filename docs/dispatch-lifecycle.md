@@ -28,7 +28,8 @@ PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED
 - `LOADED` — stock has been physically loaded onto the assigned vehicle.
 - `IN_TRANSIT` — the vehicle has left for the delivery address.
 - `DELIVERED` / `RETURNED` — terminal. `RETURNED` is reachable only from
-  `IN_TRANSIT` (a delivery attempt that didn't land). Reaching `DELIVERED`
+  `IN_TRANSIT` (a delivery attempt that didn't land) and **credits the
+  shipment's stock back into a godown** — see below. Reaching `DELIVERED`
   additionally requires proof of delivery — see below.
 - `CANCELLED` — terminal, reachable from `PENDING` / `CONFIRMED` / `LOADED`
   but not once the vehicle is already out.
@@ -64,6 +65,29 @@ There is no file-upload/storage system backing `signature_or_photo_url` —
 it's a free-form URL or `data:` URI column; the caller is responsible for
 hosting the actual image.
 
+## Returns
+
+Tracked by the `todo.org` item *"Support returns: a customer return should
+credit stock back into a godown and record a RETURNED dispatch."*
+
+Moving a dispatch `IN_TRANSIT → RETURNED` now adds every line item's
+quantity back into the org's stock, alongside recording the status change:
+
+- `DispatchOrder::transition_to`'s third argument, `return_to_godown_id:
+  Option<Uuid>`, is the godown to credit. It must belong to this dispatch's
+  org — a foreign godown is rejected and the status is left unchanged.
+- When it's `None`, `resolve_return_godown` picks a godown that already
+  holds one of the returned items (by name), and failing that the org's
+  first godown by name. An org with no godown at all fails the return.
+- `credit_line_items_back` bumps an existing `Stock` row's `quantity` for
+  each line item, or inserts one (carrying the line item's snapshotted
+  `volume_in_size`) if the chosen godown doesn't stock it yet — the same
+  find-or-top-up shape `StockTransfer` uses for its destination.
+- `PUT /api/dispatches/{id}/status` carries the optional
+  `return_to_godown_id` on `UpdateDispatchStatusPayload`; the Dispatches
+  page's "Mark Returned" action opens an inline godown picker (defaulting
+  to "auto").
+
 ## API
 
 | Method | Path | Description |
@@ -72,7 +96,8 @@ hosting the actual image.
 
 `UpdateDispatchStatusPayload` carries an optional `proof_of_delivery:
 { receiver_name, signature_or_photo_url }` — required when `status` is
-`DELIVERED`, ignored otherwise.
+`DELIVERED`, ignored otherwise — and an optional `return_to_godown_id`, used
+only when `status` is `RETURNED` (see **Returns** above).
 
 `POST /api/orgs/{id}/dispatch` (`dispatch_stock_to_customer`) allocates
 stock and a vehicle in one step and returns a `DispatchOrder` that starts at

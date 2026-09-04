@@ -15,6 +15,9 @@ export interface NextAction {
   label: string;
   variant: 'primary' | 'danger';
   requiresProof?: boolean;
+  /** RETURNED credits the shipment's stock back into a godown; the UI lets
+   *  the user pick which one (optional — the server has a sensible default). */
+  isReturn?: boolean;
 }
 
 // Mirrors DispatchStatus::can_transition_to in src/logistics/dispatch/dispatch.rs
@@ -37,7 +40,7 @@ export const NEXT_ACTIONS: Partial<Record<DispatchStatus, NextAction[]>> = {
   ],
   IN_TRANSIT: [
     { status: 'DELIVERED', label: 'Mark Delivered', variant: 'primary', requiresProof: true },
-    { status: 'RETURNED', label: 'Mark Returned', variant: 'danger' },
+    { status: 'RETURNED', label: 'Mark Returned', variant: 'danger', isReturn: true },
   ],
 };
 

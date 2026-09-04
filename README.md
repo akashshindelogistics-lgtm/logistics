@@ -39,9 +39,10 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Dispatches** — create dispatch orders that move one or more stock line
   items from an organization to a customer, and advance each one through a
   lifecycle (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/
-  `RETURNED`/`CANCELLED`) with a full timestamped status history and proof of
-  delivery (receiver name plus a signature/photo) required to mark one
-  `DELIVERED`.
+  `RETURNED`/`CANCELLED`) with a full timestamped status history. Marking one
+  `DELIVERED` requires proof of delivery (receiver name plus a
+  signature/photo); marking one `RETURNED` credits the shipment's stock back
+  into a godown.
 - **Freight billing** — raise one invoice per dispatch with an amount and a
   due date; the dashboard tracks each invoice as paid / pending / overdue
   and rolls a customer's unpaid invoices up into an outstanding balance.

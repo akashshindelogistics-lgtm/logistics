@@ -232,6 +232,11 @@ pub struct UpdateDispatchStatusPayload {
     /// missing. Ignored for every other status.
     #[serde(default)]
     pub proof_of_delivery: Option<ProofOfDeliveryPayload>,
+    /// Only used when `status` is `RETURNED`: the godown that should receive
+    /// the returned stock. Optional — the server falls back to a godown that
+    /// already holds one of the returned items, or the org's first godown.
+    #[serde(default)]
+    pub return_to_godown_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -2358,7 +2363,7 @@ pub async fn update_dispatch_status(
             signature_or_photo_url: p.signature_or_photo_url.clone(),
         });
 
-    match dispatch.transition_to(payload.status, proof) {
+    match dispatch.transition_to(payload.status, proof, payload.return_to_godown_id) {
         Ok(()) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: format!("Dispatch status updated to {}", dispatch.status),
@@ -5054,6 +5059,7 @@ mod tests {
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Confirmed,
                 proof_of_delivery: None,
+                return_to_godown_id: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -5070,6 +5076,7 @@ mod tests {
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Confirmed,
                 proof_of_delivery: None,
+                return_to_godown_id: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -5105,6 +5112,7 @@ mod tests {
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Confirmed,
                 proof_of_delivery: None,
+                return_to_godown_id: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -5124,6 +5132,7 @@ mod tests {
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Confirmed,
                 proof_of_delivery: None,
+                return_to_godown_id: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -5154,12 +5163,81 @@ mod tests {
                     receiver_name: "Priya Sharma".to_string(),
                     signature_or_photo_url: "https://example.com/sig.png".to_string(),
                 }),
+                return_to_godown_id: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 400);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(!body.success);
+    }
+
+    #[actix_web::test]
+    async fn test_update_dispatch_status_returned_credits_stock_back_into_a_godown() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, dispatch, auth) = setup_dispatch(&app, "Return Flow Org").await;
+        // setup_dispatch stocked "Dispatch Test Goods" x100 and dispatched 10 of it.
+
+        async fn goods_qty(
+            app: &impl actix_web::dev::Service<
+                actix_http::Request,
+                Response = actix_web::dev::ServiceResponse,
+                Error = actix_web::Error,
+            >,
+            org_id: Uuid,
+            auth: &str,
+        ) -> i64 {
+            let req = test::TestRequest::get()
+                .uri(&format!("/api/orgs/{org_id}/godowns"))
+                .insert_header(("Authorization", auth.to_string()))
+                .to_request();
+            let body: ApiResponse<Vec<Godown>> =
+                test::read_body_json(test::call_service(app, req).await).await;
+            body.data
+                .unwrap()
+                .iter()
+                .flat_map(|g| &g.stock)
+                .filter(|s| s.description == "Dispatch Test Goods")
+                .map(|s| s.quantity)
+                .sum()
+        }
+
+        assert_eq!(goods_qty(&app, org.id, &auth).await, 90, "10 units were dispatched");
+
+        for status in [
+            DispatchStatus::Confirmed,
+            DispatchStatus::Loaded,
+            DispatchStatus::InTransit,
+        ] {
+            let req = test::TestRequest::put()
+                .uri(&format!("/api/dispatches/{}/status", dispatch.id))
+                .insert_header(("Authorization", auth.clone()))
+                .set_json(&UpdateDispatchStatusPayload {
+                    status,
+                    proof_of_delivery: None,
+                    return_to_godown_id: None,
+                })
+                .to_request();
+            assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+        }
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", dispatch.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Returned,
+                proof_of_delivery: None,
+                return_to_godown_id: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<DispatchOrder> = test::read_body_json(resp).await;
+        assert_eq!(body.data.unwrap().status, DispatchStatus::Returned);
+
+        // The 10 returned units are back in the godown.
+        assert_eq!(goods_qty(&app, org.id, &auth).await, 100);
     }
 
     /// Walk a fresh dispatch through PENDING -> CONFIRMED -> LOADED ->
@@ -5185,6 +5263,7 @@ mod tests {
                 .set_json(&UpdateDispatchStatusPayload {
                     status,
                     proof_of_delivery: None,
+                    return_to_godown_id: None,
                 })
                 .to_request();
             let resp = test::call_service(app, req).await;
@@ -5209,6 +5288,7 @@ mod tests {
             .set_json(&UpdateDispatchStatusPayload {
                 status: DispatchStatus::Delivered,
                 proof_of_delivery: None,
+                return_to_godown_id: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -5233,6 +5313,7 @@ mod tests {
                     receiver_name: "Priya Sharma".to_string(),
                     signature_or_photo_url: "https://example.com/sig.png".to_string(),
                 }),
+                return_to_godown_id: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;

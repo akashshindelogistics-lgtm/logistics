@@ -433,21 +433,28 @@ impl DispatchOrder {
     }
 
     /// Move this dispatch to `next`, validating against the lifecycle state
-    /// machine ([`DispatchStatus::can_transition_to`]). Moving to
-    /// [`DispatchStatus::Delivered`] additionally requires `proof_of_delivery`
-    /// — pass `None` for every other status.
+    /// machine ([`DispatchStatus::can_transition_to`]).
+    ///
+    /// - Moving to [`DispatchStatus::Delivered`] requires `proof_of_delivery`.
+    /// - Moving to [`DispatchStatus::Returned`] credits every line item's
+    ///   quantity back into a godown: `return_to_godown_id` if given (it must
+    ///   belong to this dispatch's org), otherwise a godown that already
+    ///   holds one of the returned items, otherwise the org's first godown.
+    ///
+    /// Pass `None` for the extra arguments on every other status.
     ///
     /// On success, updates `status` on the `Dispatches` row, appends a
-    /// `DispatchStatusHistory` entry timestamped now (and, for a delivery, a
-    /// `DispatchProofOfDelivery` row stamped with that same timestamp), and
-    /// updates `self.status` / `self.status_history` /
-    /// `self.proof_of_delivery` in place so the caller doesn't need to
-    /// re-fetch. On an illegal transition or a missing delivery proof,
-    /// returns an `Err` describing why and leaves `self` untouched.
+    /// `DispatchStatusHistory` entry timestamped now (plus, for a delivery, a
+    /// `DispatchProofOfDelivery` row; for a return, the `Stock` top-ups), and
+    /// updates `self.status` / `self.status_history` / `self.proof_of_delivery`
+    /// in place so the caller doesn't need to re-fetch. On an illegal
+    /// transition or a missing requirement, returns an `Err` and leaves `self`
+    /// untouched.
     pub fn transition_to(
         &mut self,
         next: DispatchStatus,
         proof_of_delivery: Option<ProofOfDeliveryInput>,
+        return_to_godown_id: Option<Uuid>,
     ) -> Result<(), Box<dyn Error>> {
         if !self.status.can_transition_to(next) {
             return Err(format!(
@@ -468,6 +475,14 @@ impl DispatchOrder {
         let mut conn = db_connection.get_connection()?;
         ensure_tables(&mut conn)?;
 
+        // For a return, work out the receiving godown up front so an
+        // unresolvable one fails before any state change.
+        let credit_godown = if next == DispatchStatus::Returned {
+            Some(self.resolve_return_godown(&mut conn, return_to_godown_id)?)
+        } else {
+            None
+        };
+
         let changed_at = now_unix();
 
         conn.exec_drop(
@@ -477,6 +492,10 @@ impl DispatchOrder {
                 "id" => self.id.to_string(),
             },
         )?;
+
+        if let Some(godown_id) = credit_godown {
+            self.credit_line_items_back(&mut conn, godown_id)?;
+        }
 
         conn.exec_drop(
             "INSERT INTO DispatchStatusHistory (dispatch_id, status, changed_at)
@@ -512,6 +531,105 @@ impl DispatchOrder {
             changed_at,
         });
 
+        Ok(())
+    }
+
+    /// Pick the godown a return's stock should be credited into: the
+    /// caller's choice if given (validated against this dispatch's org),
+    /// otherwise a godown already holding one of the returned items,
+    /// otherwise the org's first godown by name. Errors if the org has no
+    /// godown at all.
+    fn resolve_return_godown(
+        &self,
+        conn: &mut mysql::PooledConn,
+        requested: Option<Uuid>,
+    ) -> Result<Uuid, Box<dyn Error>> {
+        if let Some(godown_id) = requested {
+            let owned: Option<i64> = conn.exec_first(
+                "SELECT 1 FROM Godowns WHERE id = :id AND org_id = :org_id",
+                params! {
+                    "id" => godown_id.to_string(),
+                    "org_id" => self.org_id.to_string(),
+                },
+            )?;
+            return owned.map(|_| godown_id).ok_or_else(|| {
+                "return_to_godown_id is not a godown in this dispatch's organization".into()
+            });
+        }
+
+        let descriptions: Vec<&str> = self
+            .line_items
+            .iter()
+            .map(|li| li.stock_description.as_str())
+            .collect();
+        if !descriptions.is_empty() {
+            let placeholders = vec!["?"; descriptions.len()].join(", ");
+            let mut args: Vec<mysql::Value> = vec![self.org_id.to_string().into()];
+            args.extend(descriptions.iter().map(|d| (*d).into()));
+            let holding: Option<String> = conn.exec_first(
+                format!(
+                    "SELECT g.id FROM Godowns g
+                     JOIN Stock s ON s.godown_id = g.id
+                     WHERE g.org_id = ? AND s.description IN ({placeholders})
+                     ORDER BY g.name LIMIT 1"
+                ),
+                args,
+            )?;
+            if let Some(id) = holding {
+                return Uuid::parse_str(&id).map_err(|e| e.into());
+            }
+        }
+
+        let first: Option<String> = conn.exec_first(
+            "SELECT id FROM Godowns WHERE org_id = :org_id ORDER BY name LIMIT 1",
+            params! { "org_id" => self.org_id.to_string() },
+        )?;
+        first
+            .ok_or_else(|| {
+                "cannot record a return: the organization has no godown to receive the stock".into()
+            })
+            .and_then(|id| Uuid::parse_str(&id).map_err(|e| e.into()))
+    }
+
+    /// Add every line item's quantity back into `godown_id`: bump an existing
+    /// `Stock` row's quantity, or insert one (carrying the line item's
+    /// snapshotted `volume_in_size`) if the godown doesn't hold it yet.
+    fn credit_line_items_back(
+        &self,
+        conn: &mut mysql::PooledConn,
+        godown_id: Uuid,
+    ) -> Result<(), Box<dyn Error>> {
+        for item in &self.line_items {
+            let existing: Option<i64> = conn.exec_first(
+                "SELECT 1 FROM Stock WHERE godown_id = :godown_id AND description = :description",
+                params! {
+                    "godown_id" => godown_id.to_string(),
+                    "description" => &item.stock_description,
+                },
+            )?;
+            if existing.is_some() {
+                conn.exec_drop(
+                    "UPDATE Stock SET quantity = quantity + :delta
+                     WHERE godown_id = :godown_id AND description = :description",
+                    params! {
+                        "delta" => item.quantity,
+                        "godown_id" => godown_id.to_string(),
+                        "description" => &item.stock_description,
+                    },
+                )?;
+            } else {
+                conn.exec_drop(
+                    "INSERT INTO Stock (volume_in_size, quantity, description, reorder_threshold, godown_id)
+                     VALUES (:volume_in_size, :quantity, :description, NULL, :godown_id)",
+                    params! {
+                        "volume_in_size" => item.volume_in_size,
+                        "quantity" => item.quantity,
+                        "description" => &item.stock_description,
+                        "godown_id" => godown_id.to_string(),
+                    },
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -607,6 +725,9 @@ type DispatchRow = (String, String, String, String, String, i64);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logistics::godown::godown::Godown;
+    use crate::logistics::orgs::orgs::Organization;
+    use crate::logistics::stock::stock::Stock;
     use crate::logistics::test_support::TestDb;
     use DispatchStatus::*;
 
@@ -616,6 +737,41 @@ mod tests {
             quantity: qty,
             volume_in_size: 1,
         }
+    }
+
+    /// Whole quantity held for `description` across the whole org.
+    fn org_stock_qty(org_id: Uuid, description: &str) -> i64 {
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        conn.exec_first::<i64, _, _>(
+            "SELECT COALESCE(SUM(s.quantity), 0) FROM Stock s
+             JOIN Godowns g ON g.id = s.godown_id
+             WHERE g.org_id = :org_id AND s.description = :description",
+            params! { "org_id" => org_id.to_string(), "description" => description },
+        )
+        .unwrap()
+        .unwrap_or(0)
+    }
+
+    /// A saved IN_TRANSIT dispatch for a real org that has one godown stocked
+    /// with `Cement` (100 units). Sand is deliberately not stocked.
+    fn in_transit_order_with_godown() -> (Organization, Uuid, DispatchOrder) {
+        let org = Organization::create_organization("Return Co", "1 Depot Rd").expect("org");
+        let godown = Godown::create(org.id, "Main Godown", "MIDC", None).expect("godown");
+        Stock::new(1, 100, "Cement").add_to_godown(godown.id).expect("stock");
+
+        let mut order = DispatchOrder {
+            id: Uuid::new_v4(),
+            org_id: org.id,
+            customer_id: Uuid::new_v4(),
+            vehicle_registration_number: "RET-VH-1".to_string(),
+            line_items: vec![line("Cement", 30), line("Sand", 12)],
+            status: InTransit,
+            dispatched_at: 1_700_000_000,
+            status_history: Vec::new(),
+            proof_of_delivery: None,
+        };
+        order.save().expect("save dispatch");
+        (org, godown.id, order)
     }
 
     fn sample_order(status: DispatchStatus) -> DispatchOrder {
@@ -730,7 +886,7 @@ mod tests {
         order.save().expect("save");
 
         order
-            .transition_to(Confirmed, None)
+            .transition_to(Confirmed, None, None)
             .expect("PENDING -> CONFIRMED is legal");
         assert_eq!(order.status, Confirmed);
         assert_eq!(order.status_history.len(), 2);
@@ -749,7 +905,7 @@ mod tests {
         let mut order = sample_order(Pending);
         order.save().expect("save");
 
-        let result = order.transition_to(Delivered, Some(sample_proof()));
+        let result = order.transition_to(Delivered, Some(sample_proof()), None);
         assert!(result.is_err(), "PENDING -> DELIVERED should be rejected");
         assert_eq!(
             order.status, Pending,
@@ -772,8 +928,8 @@ mod tests {
         let mut order = sample_order(Cancelled);
         order.save().expect("save");
 
-        assert!(order.transition_to(Confirmed, None).is_err());
-        assert!(order.transition_to(Pending, None).is_err());
+        assert!(order.transition_to(Confirmed, None, None).is_err());
+        assert!(order.transition_to(Pending, None, None).is_err());
         assert_eq!(order.status, Cancelled);
     }
 
@@ -786,7 +942,7 @@ mod tests {
         for next in [Confirmed, Loaded, InTransit, Delivered] {
             let proof = (next == Delivered).then(sample_proof);
             order
-                .transition_to(next, proof)
+                .transition_to(next, proof, None)
                 .unwrap_or_else(|e| panic!("{} should be legal: {e}", next));
         }
         assert_eq!(order.status, Delivered);
@@ -797,6 +953,81 @@ mod tests {
             .as_ref()
             .expect("proof should be set");
         assert_eq!(proof.receiver_name, "Priya Sharma");
+    }
+
+    #[test]
+    fn test_return_credits_every_line_item_back_into_a_godown() {
+        let _db = TestDb::create();
+        let (org, godown_id, mut order) = in_transit_order_with_godown();
+
+        order
+            .transition_to(Returned, None, None)
+            .expect("IN_TRANSIT -> RETURNED is legal");
+        assert_eq!(order.status, Returned);
+        assert!(order.status.is_terminal());
+
+        // Cement was already stocked (100) -> topped up to 130.
+        assert_eq!(org_stock_qty(org.id, "Cement"), 130);
+        // Sand wasn't stocked -> a new row was inserted at the returned qty.
+        assert_eq!(org_stock_qty(org.id, "Sand"), 12);
+
+        // Both rows landed in the resolved godown.
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        let in_godown: i64 = conn
+            .exec_first(
+                "SELECT COUNT(*) FROM Stock WHERE godown_id = :g AND description IN ('Cement', 'Sand')",
+                params! { "g" => godown_id.to_string() },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(in_godown, 2);
+    }
+
+    #[test]
+    fn test_return_honours_an_explicit_destination_godown() {
+        let _db = TestDb::create();
+        let (org, main_godown, mut order) = in_transit_order_with_godown();
+        let other = Godown::create(org.id, "Returns Bay", "Dock 3", None).expect("second godown");
+
+        order
+            .transition_to(Returned, None, Some(other.id))
+            .expect("return to a chosen godown");
+
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        let in_other: i64 = conn
+            .exec_first(
+                "SELECT COUNT(*) FROM Stock WHERE godown_id = :g",
+                params! { "g" => other.id.to_string() },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(in_other, 2, "both returned lines go to the chosen godown");
+        // The main godown still only has its original Cement row.
+        let in_main: i64 = conn
+            .exec_first(
+                "SELECT COUNT(*) FROM Stock WHERE godown_id = :g",
+                params! { "g" => main_godown.to_string() },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(in_main, 1);
+    }
+
+    #[test]
+    fn test_return_rejects_a_godown_from_another_org_and_leaves_status_unchanged() {
+        let _db = TestDb::create();
+        let (_org, _godown, mut order) = in_transit_order_with_godown();
+        let outsider = Organization::create_organization("Outsider", "9 Rd").unwrap();
+        let foreign = Godown::create(outsider.id, "Not Yours", "elsewhere", None).unwrap();
+
+        let err = order
+            .transition_to(Returned, None, Some(foreign.id))
+            .expect_err("a foreign godown is rejected");
+        assert!(err.to_string().contains("organization"), "unexpected: {err}");
+        assert_eq!(order.status, InTransit, "status must not change on failure");
+
+        let reloaded = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
+        assert_eq!(reloaded.status, InTransit);
     }
 
     #[test]

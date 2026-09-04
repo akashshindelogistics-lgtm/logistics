@@ -347,4 +347,47 @@ test.describe('Dispatches', () => {
     await expect(page.getByText(/received by/i)).toBeVisible();
     await expect(page.getByText('Priya Sharma').last()).toBeVisible();
   });
+
+  test('marking a dispatch RETURNED credits its stock back into a godown', async ({ page }) => {
+    const org = await registerOrg(page, `Returns Flow ${uid()}`);
+    const custName = `Return Customer ${uid()}`;
+    const stockDesc = `Panels ${uid()}`;
+    const token = await page.evaluate(() => localStorage.getItem('logi_token'));
+
+    const vehReg = `RT${uid().toUpperCase().slice(0, 6)}`;
+    await page.request.post(`/api/orgs/${org.id}/vehicles`, {
+      data: { registration_number: vehReg, capacity: 100, unit: 'MetricTon' },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    await assignActiveDriver(page, org.id, vehReg);
+    await addStockViaApi(page, org.id, stockDesc, 60);
+    const custId = await createCustomerWithLocation(page, org.id, custName);
+
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Customer').selectOption({ value: custId });
+    await page.getByLabel('Stock Description').fill(stockDesc);
+    await page.getByLabel('Quantity', { exact: true }).fill('25');
+    await page.getByRole('button', { name: /dispatch stock/i }).click();
+    await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
+
+    // 60 - 25 = 35 left in the godown after the dispatch.
+    await expect(page.getByTestId('godown-card').filter({ hasText: stockDesc }).getByText('35')).toBeVisible({ timeout: 8000 });
+
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').filter({ hasText: stockDesc });
+    await row.getByRole('button', { name: 'Confirm' }).click();
+    await expect(row.getByText('CONFIRMED', { exact: true })).toBeVisible({ timeout: 8000 });
+    await row.getByRole('button', { name: 'Mark Loaded' }).click();
+    await expect(row.getByText('LOADED', { exact: true })).toBeVisible({ timeout: 8000 });
+    await row.getByRole('button', { name: 'Mark In Transit' }).click();
+    await expect(row.getByText('IN TRANSIT', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    await row.getByRole('button', { name: 'Mark Returned' }).click();
+    await page.getByRole('button', { name: /confirm return/i }).click();
+    await expect(row.getByText('RETURNED', { exact: true })).toBeVisible({ timeout: 8000 });
+
+    // The 25 units are back in the godown: 35 + 25 = 60.
+    await page.goto(`/orgs/${org.id}`);
+    await expect(page.getByTestId('godown-card').filter({ hasText: stockDesc }).getByText('60')).toBeVisible({ timeout: 8000 });
+  });
 });
