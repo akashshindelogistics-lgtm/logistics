@@ -189,12 +189,19 @@ test('full logistics workflow: register, login, warehouse, fleet, and a shipment
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByRole('link', { name: driverName }).click();
+    // Wait for the driver detail page to actually render (not just the URL to
+    // change) before touching its form — otherwise this can race the org
+    // dashboard's own "Driver Name" field, which briefly coexists mid-transition.
+    await expect(page.getByRole('heading', { level: 1, name: driverName })).toBeVisible();
     await page.getByLabel('Licence Number').fill(`DL-UPDATED-${uid()}`);
     await page.getByRole('button', { name: /^save$/i }).click();
     await expect(page.getByText(/driver updated/i)).toBeVisible({ timeout: 8000 });
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByRole('link', { name: godownB }).click();
+    // Same race as above: "Name" also matches the dashboard's "Godown Name"
+    // and "Driver Name" fields until the godown detail page has fully mounted.
+    await expect(page.getByRole('heading', { level: 1, name: godownB })).toBeVisible();
     await expect(page.getByLabel('Name')).toHaveValue(godownB);
     await page.getByLabel(/max capacity/i).fill('10000');
     await page.getByRole('button', { name: /^save$/i }).click();
