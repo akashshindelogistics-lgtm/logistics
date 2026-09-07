@@ -109,36 +109,28 @@ test('full logistics workflow: register, login, warehouse, fleet, and a shipment
     await expect(page.getByLabel(`Driver for ${vehicleReg}`)).toHaveValue(/.+/);
   });
 
-  const custId = await test.step('Create a customer and set their delivery location', async () => {
+  await test.step('Create a customer with a delivery location', async () => {
     await page.goto('/customers');
     await page.getByRole('button', { name: /new customer/i }).click();
     await page.getByLabel('Customer Name').fill(custName);
     await page.getByLabel('Address').fill('221 Market Road, Bengaluru');
+    // The create form now carries optional coordinates, so the delivery
+    // location is captured in the same step instead of a follow-up API call.
+    await page.getByLabel(/latitude/i).fill('12.9716');
+    await page.getByLabel(/longitude/i).fill('77.5946');
     await page.getByRole('button', { name: /^create customer$/i }).click();
-    await expect(page.getByText(custName)).toBeVisible({ timeout: 8000 });
 
-    // The dashboard has no location picker yet (todo.org still lists that as
-    // open work), so set it via the API the UI itself calls, using the same
-    // auth token the browser session holds.
-    const token = await page.evaluate(() => localStorage.getItem('logi_token'));
-    const listResp = await page.request.get('/api/customers', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const list = (await listResp.json()) as { data: Array<{ id: string; name: string }> };
-    const created = list.data.find(c => c.name === custName);
-    if (!created) throw new Error('created customer not found in listing');
-
-    await page.request.put(`/api/customers/${created.id}/location`, {
-      data: { latitude: 12.9716, longitude: 77.5946, address: '221 Market Road, Bengaluru' },
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    return created.id;
+    const custRow = page.getByRole('row', { name: new RegExp(custName) });
+    await expect(custRow).toBeVisible({ timeout: 8000 });
+    // The coordinates the form just captured show in the Location column
+    // (rounded to 4dp) and put the customer on the locations map.
+    await expect(custRow.getByText('12.9716, 77.5946')).toBeVisible();
+    await expect(page.getByText(/1 mapped/i)).toBeVisible();
   });
 
   await test.step('Dispatch a two-item shipment to the customer', async () => {
     await page.goto(`/orgs/${org.id}`);
-    await page.getByLabel('Customer').selectOption({ value: custId });
+    await page.getByLabel('Customer').selectOption({ label: custName });
     await page.getByLabel('Stock Description').fill(stockA);
     await page.getByLabel('Quantity', { exact: true }).fill('30');
     await page.getByRole('button', { name: /add another line/i }).click();
