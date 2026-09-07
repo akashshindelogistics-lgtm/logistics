@@ -109,6 +109,26 @@ test('full logistics workflow: register, login, warehouse, fleet, and a shipment
     await expect(page.getByLabel(`Driver for ${vehicleReg}`)).toHaveValue(/.+/);
   });
 
+  await test.step('A GPS tracker reports the vehicle’s live position', async () => {
+    // The vehicle detail page shows the device push URL (the tracker key is
+    // the whole credential — no login).
+    await page.goto('/vehicles');
+    await page.getByRole('link', { name: vehicleReg }).click();
+    const pushPath = await page.getByLabel(/tracker push url/i).inputValue();
+    expect(pushPath).toMatch(/^\/api\/track\/[0-9a-f-]{36}$/);
+
+    // A device on the truck POSTs its coordinates, unauthenticated.
+    const res = await page.request.post(pushPath, {
+      data: { latitude: 18.5204, longitude: 73.8567 },
+    });
+    expect(res.ok()).toBeTruthy();
+
+    // That position is now on the fleet list.
+    await page.goto('/vehicles');
+    const row = page.getByRole('row', { name: new RegExp(vehicleReg) });
+    await expect(row.getByText('18.52040')).toBeVisible({ timeout: 8000 });
+  });
+
   await test.step('Create a customer with a delivery location', async () => {
     await page.goto('/customers');
     await page.getByRole('button', { name: /new customer/i }).click();

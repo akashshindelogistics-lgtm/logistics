@@ -88,6 +88,63 @@ test.describe('Vehicles', () => {
     await expect(page.getByText(reg)).not.toBeVisible({ timeout: 8000 });
   });
 
+  test('a GPS tracker pushes the vehicle location using only its key', async ({ page }) => {
+    const org = await registerOrg(page, `Vehicle Track ${uid()}`);
+    const reg = `MH20GP${uid().toUpperCase().slice(0, 4)}`;
+
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Registration Number').fill(reg);
+    await page.getByLabel('Capacity (MT)').fill('10');
+    await page.getByRole('button', { name: /add vehicle/i }).click();
+    await expect(page.getByText(reg)).toBeVisible({ timeout: 8000 });
+
+    // Read the tracker push URL off the vehicle detail page.
+    await page.goto('/vehicles');
+    await page.getByRole('link', { name: reg }).click();
+    const urlField = page.getByLabel(/tracker push url/i);
+    await expect(urlField).toBeVisible();
+    const pushPath = await urlField.inputValue();
+    expect(pushPath).toMatch(/^\/api\/track\/[0-9a-f-]{36}$/);
+
+    // A device reports its position with no auth — the key is the credential.
+    const res = await page.request.post(pushPath, {
+      data: { latitude: 19.076, longitude: 72.8777 },
+    });
+    expect(res.ok()).toBeTruthy();
+
+    // The pushed position shows on the fleet list.
+    await page.goto('/vehicles');
+    const row = page.getByRole('row', { name: new RegExp(reg) });
+    await expect(row.getByText('19.07600')).toBeVisible({ timeout: 8000 });
+  });
+
+  test('regenerating the tracker key invalidates the old one', async ({ page }) => {
+    const org = await registerOrg(page, `Vehicle Rotate ${uid()}`);
+    const reg = `MH21GP${uid().toUpperCase().slice(0, 4)}`;
+
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Registration Number').fill(reg);
+    await page.getByLabel('Capacity (MT)').fill('10');
+    await page.getByRole('button', { name: /add vehicle/i }).click();
+    await expect(page.getByText(reg)).toBeVisible({ timeout: 8000 });
+
+    await page.goto('/vehicles');
+    await page.getByRole('link', { name: reg }).click();
+    const urlField = page.getByLabel(/tracker push url/i);
+    const before = await urlField.inputValue();
+
+    page.on('dialog', d => d.accept());
+    await page.getByRole('button', { name: /regenerate key/i }).click();
+    await expect(page.getByText(/new tracker key issued/i)).toBeVisible({ timeout: 8000 });
+
+    const after = await urlField.inputValue();
+    expect(after).not.toBe(before);
+
+    // The old key no longer resolves to a vehicle.
+    const stale = await page.request.post(before, { data: { latitude: 1, longitude: 1 } });
+    expect(stale.status()).toBe(404);
+  });
+
   test('add vehicle form requires both fields', async ({ page }) => {
     const org = await registerOrg(page, `Vehicle Validation ${uid()}`);
     await page.goto(`/orgs/${org.id}`);

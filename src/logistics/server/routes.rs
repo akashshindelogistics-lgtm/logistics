@@ -95,6 +95,19 @@ pub struct LocationPayload {
     pub address: Option<String>,
 }
 
+/// Body a GPS tracker device sends to `POST /api/track/{tracker_key}`. No
+/// address — a device only knows coordinates; the server stamps the time.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct TrackLocationPayload {
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+/// `true` when a coordinate pair is a real point on Earth.
+fn coordinates_in_range(latitude: f64, longitude: f64) -> bool {
+    (-90.0..=90.0).contains(&latitude) && (-180.0..=180.0).contains(&longitude)
+}
+
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateVehiclePayload {
     pub registration_number: String,
@@ -997,6 +1010,128 @@ pub async fn update_vehicle_location(
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to update vehicle location: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/track/{tracker_key}",
+    tag = "Vehicles",
+    params(("tracker_key" = Uuid, Path, description = "The vehicle's GPS tracker key")),
+    request_body = TrackLocationPayload,
+    responses(
+        (status = 200, description = "Location recorded", body = LocationResponse),
+        (status = 400, description = "Coordinates out of range", body = EmptyResponse),
+        (status = 404, description = "No vehicle has this tracker key", body = EmptyResponse)
+    )
+)]
+/// Automatic location push from a GPS tracker fitted to a vehicle. The
+/// `tracker_key` in the path is the whole credential — no bearer token —
+/// so a device can report without holding an org login. This is the
+/// unattended counterpart to `PUT /api/vehicles/{reg}/location`.
+#[post("/track/{tracker_key}")]
+pub async fn track_vehicle_location(
+    path: web::Path<Uuid>,
+    payload: web::Json<TrackLocationPayload>,
+) -> impl Responder {
+    if !coordinates_in_range(payload.latitude, payload.longitude) {
+        return HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: "latitude must be between -90 and 90 and longitude between -180 and 180"
+                .to_string(),
+            data: None,
+        });
+    }
+
+    let mut vehicle = match Vehicle::by_tracker_key(path.into_inner()) {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(ApiResponse::<String> {
+                success: false,
+                message: "No vehicle has this tracker key".to_string(),
+                data: None,
+            })
+        }
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to look up tracker key: {}", err),
+                data: None,
+            })
+        }
+    };
+
+    match vehicle.update_location(payload.latitude, payload.longitude, None::<String>) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Location recorded".to_string(),
+            data: vehicle.location,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to record location: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/vehicles/{reg}/tracker-key/rotate",
+    tag = "Vehicles",
+    security(("bearer_auth" = [])),
+    params(("reg" = String, Path, description = "Vehicle registration number")),
+    responses(
+        (status = 200, description = "A fresh tracker key was issued", body = VehicleResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Vehicle not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+/// Issue a new GPS tracker key for a vehicle, invalidating the previous one.
+/// Use this when a tracker device is lost or its key may have leaked — every
+/// device then has to be reconfigured with the new key.
+#[post("/vehicles/{reg}/tracker-key/rotate")]
+pub async fn rotate_vehicle_tracker_key(
+    path: web::Path<String>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let reg = path.into_inner();
+    if let Err(resp) = check_owned_vehicle(&reg, auth.org_id) {
+        return resp;
+    }
+
+    let mut vehicle = match Vehicle::list_by_org(auth.org_id) {
+        Ok(vehicles) => match vehicles.into_iter().find(|v| v.registration_number == reg) {
+            Some(v) => v,
+            None => {
+                return HttpResponse::NotFound().json(ApiResponse::<String> {
+                    success: false,
+                    message: "Vehicle not found".to_string(),
+                    data: None,
+                })
+            }
+        },
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle: {}", err),
+                data: None,
+            })
+        }
+    };
+
+    match vehicle.rotate_tracker_key() {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "A fresh tracker key was issued".to_string(),
+            data: Some(vehicle),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to rotate tracker key: {}", err),
             data: None,
         }),
     }
@@ -2779,6 +2914,8 @@ impl Modify for SecurityAddon {
         add_vehicle,
         edit_vehicle,
         update_vehicle_location,
+        track_vehicle_location,
+        rotate_vehicle_tracker_key,
         delete_vehicle,
         list_drivers,
         add_driver,
@@ -2820,7 +2957,7 @@ impl Modify for SecurityAddon {
         schemas(
             LoginPayload, LoginData,
             CreateOrgPayload, UpdateOrgPayload, LocationPayload,
-            CreateVehiclePayload, UpdateVehiclePayload, CreateStockPayload, UpdateStockPayload,
+            CreateVehiclePayload, UpdateVehiclePayload, TrackLocationPayload, CreateStockPayload, UpdateStockPayload,
             CreateGodownPayload, UpdateGodownPayload,
             CreateCustomerPayload, DispatchRequestPayload, DispatchLineItemPayload,
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
@@ -2875,6 +3012,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(add_vehicle)
             .service(edit_vehicle)
             .service(update_vehicle_location)
+            .service(track_vehicle_location)
+            .service(rotate_vehicle_tracker_key)
             .service(delete_vehicle)
             .service(list_drivers)
             .service(add_driver)
@@ -3589,6 +3728,135 @@ mod tests {
             .uri("/api/vehicles/OWNED-VH-1")
             .insert_header(("Authorization", other_auth))
             .set_json(&UpdateVehiclePayload { capacity: 999, unit: "MetricTon".to_string() })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    /// Register a vehicle under `org` via the API and return its full
+    /// response body (so the caller has the server-issued `tracker_key`).
+    async fn register_vehicle(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth: &str,
+        reg: &str,
+    ) -> Vehicle {
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vehicles", org_id))
+            .insert_header(("Authorization", auth.to_string()))
+            .set_json(&CreateVehiclePayload {
+                registration_number: reg.to_string(),
+                capacity: 50,
+                unit: "MetricTon".to_string(),
+            })
+            .to_request();
+        let resp = test::call_service(app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        test::read_body_json::<ApiResponse<Vehicle>, _>(resp).await.data.unwrap()
+    }
+
+    #[actix_web::test]
+    async fn test_track_endpoint_records_location_with_only_the_tracker_key() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Tracker Push Org").await;
+        let vehicle = register_vehicle(&app, org.id, &auth, "TRK-VH-1").await;
+
+        // No Authorization header — the key in the path is the whole credential.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/track/{}", vehicle.tracker_key))
+            .set_json(&TrackLocationPayload { latitude: 18.5204, longitude: 73.8567 })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<Location> = test::read_body_json(resp).await;
+        let loc = body.data.unwrap();
+        assert_eq!(loc.latitude, 18.5204);
+        assert_eq!(loc.longitude, 73.8567);
+        assert!(loc.timestamp > 0, "server stamps the time");
+
+        // The push is visible on the authenticated fleet list.
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let body: ApiResponse<Vec<Vehicle>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let stored = body.data.unwrap().into_iter().find(|v| v.registration_number == "TRK-VH-1").unwrap();
+        assert_eq!(stored.location.unwrap().latitude, 18.5204);
+    }
+
+    #[actix_web::test]
+    async fn test_track_endpoint_unknown_key_returns_404() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/track/{}", Uuid::new_v4()))
+            .set_json(&TrackLocationPayload { latitude: 1.0, longitude: 2.0 })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_track_endpoint_rejects_out_of_range_coordinates() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Tracker Range Org").await;
+        let vehicle = register_vehicle(&app, org.id, &auth, "TRK-VH-2").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/track/{}", vehicle.tracker_key))
+            .set_json(&TrackLocationPayload { latitude: 120.0, longitude: 73.0 })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_rotate_tracker_key_issues_a_new_key_and_invalidates_the_old() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Tracker Rotate Org").await;
+        let vehicle = register_vehicle(&app, org.id, &auth, "TRK-VH-3").await;
+        let old_key = vehicle.tracker_key;
+
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/TRK-VH-3/tracker-key/rotate")
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let new_key = test::read_body_json::<ApiResponse<Vehicle>, _>(resp).await.data.unwrap().tracker_key;
+        assert_ne!(new_key, old_key);
+
+        // Old key is dead, new key works.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/track/{}", old_key))
+            .set_json(&TrackLocationPayload { latitude: 1.0, longitude: 1.0 })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/track/{}", new_key))
+            .set_json(&TrackLocationPayload { latitude: 1.0, longitude: 1.0 })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+    }
+
+    #[actix_web::test]
+    async fn test_rotate_tracker_key_from_another_org_returns_403() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Rotate Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Rotate Attacker Org").await;
+        register_vehicle(&app, org.id, &auth, "TRK-VH-4").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/TRK-VH-4/tracker-key/rotate")
+            .insert_header(("Authorization", other_auth))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }

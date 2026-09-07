@@ -76,10 +76,12 @@ impl Organization {
                 longitude DOUBLE DEFAULT NULL,
                 last_updated_at BIGINT DEFAULT NULL,
                 location_address VARCHAR(255) DEFAULT NULL,
+                tracker_key VARCHAR(36) DEFAULT NULL,
                 CONSTRAINT fk_vehicle_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
             (),
         )?;
+        crate::logistics::vehicle::vehicle::ensure_tracker_key_column(conn)?;
         Godown::ensure_table(conn)?;
         Stock::ensure_table(conn)?;
         Ok(())
@@ -491,9 +493,9 @@ impl Organization {
 
         let vehicles: Vec<Vehicle> = conn
             .exec_map(
-                "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address FROM Vehicle WHERE org_id = :org_id",
+                "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle WHERE org_id = :org_id",
                 params! { "org_id" => &org_id_str },
-                |(reg, cap, unit_str, driver, v_lat, v_lng, v_ts, v_addr): (String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>)| {
+                |(reg, cap, unit_str, driver, v_lat, v_lng, v_ts, v_addr, tracker): (String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)| {
                     let v_location = v_lat.map(|latitude| Location {
                         latitude,
                         longitude: v_lng.unwrap_or(0.0),
@@ -506,6 +508,9 @@ impl Organization {
                         unit: Unit::from_str(&unit_str),
                         location: v_location,
                         assigned_driver_id: driver.and_then(|d| Uuid::parse_str(&d).ok()),
+                        tracker_key: tracker
+                            .and_then(|t| Uuid::parse_str(&t).ok())
+                            .unwrap_or_else(Uuid::new_v4),
                     }
                 },
             )?;

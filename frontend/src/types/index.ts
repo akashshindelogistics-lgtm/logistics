@@ -15,6 +15,13 @@ export interface Vehicle {
   unit: Unit;
   location?: Location;
   assigned_driver_id?: string | null;
+  /**
+   * Per-vehicle device credential. A GPS tracker POSTs coordinates to
+   * `/api/track/<tracker_key>` with no login. Rotate it if a device is lost.
+   * Always present on responses from the server; optional here only so the
+   * many partial test fixtures don't all have to spell it out.
+   */
+  tracker_key?: string;
 }
 
 export interface Driver {

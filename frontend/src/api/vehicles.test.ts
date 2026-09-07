@@ -5,6 +5,7 @@ import {
   addVehicle,
   updateVehicle,
   deleteVehicle,
+  rotateTrackerKey,
   listVehicleDocuments,
   listOrgVehicleDocuments,
   addVehicleDocument,
@@ -43,6 +44,15 @@ describe('vehicles api client', () => {
     const res = await updateVehicle('MH 01', 30, 'Box');
     expect(api.put).toHaveBeenCalledWith('/vehicles/MH%2001', { capacity: 30, unit: 'Box' });
     expect(res.data).toEqual({ registration_number: 'MH 01', capacity: 30, unit: 'Box' });
+  });
+
+  it('rotateTrackerKey POSTs to the URL-encoded tracker-key/rotate route and unwraps', async () => {
+    vi.mocked(api.post).mockResolvedValue(
+      envelope({ registration_number: 'MH 01', capacity: 1, unit: 'MetricTon', tracker_key: 'new' }),
+    );
+    const res = await rotateTrackerKey('MH 01');
+    expect(api.post).toHaveBeenCalledWith('/vehicles/MH%2001/tracker-key/rotate');
+    expect(res.data?.tracker_key).toBe('new');
   });
 
   it('deleteVehicle URL-encodes the registration number', async () => {

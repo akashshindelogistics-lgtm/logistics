@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { listVehicles, updateVehicle } from '../api/vehicles';
+import { listVehicles, updateVehicle, rotateTrackerKey } from '../api/vehicles';
 import { listDrivers } from '../api/drivers';
 import { IconTruck, IconChevron, IconCheck } from '../components/Icons';
 import type { Driver, Unit, Vehicle } from '../types';
@@ -18,6 +18,8 @@ export default function VehicleDetail() {
   const [unit, setUnit] = useState<Unit>('MetricTon');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [rotating, setRotating] = useState(false);
+  const [keyMsg, setKeyMsg] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([listVehicles(), listDrivers()])
@@ -73,6 +75,21 @@ export default function VehicleDetail() {
 
   const assignedDriver = drivers.find(d => d.id === vehicle.assigned_driver_id);
 
+  const handleRotateKey = async () => {
+    if (!window.confirm('Issue a new tracker key? Every GPS device on this vehicle must be reconfigured with the new key.')) return;
+    setRotating(true);
+    setKeyMsg(null);
+    try {
+      const res = await rotateTrackerKey(reg);
+      if (res.data) setVehicle(res.data);
+      setKeyMsg('New tracker key issued.');
+    } catch {
+      setKeyMsg('Could not rotate the key. Try again.');
+    } finally {
+      setRotating(false);
+    }
+  };
+
   return (
     <div className="page">
       <nav style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-3)', marginBottom: 18 }}>
@@ -124,6 +141,35 @@ export default function VehicleDetail() {
           <div><span className="muted">Location</span><div>{vehicle.location ? `${vehicle.location.latitude.toFixed(4)}, ${vehicle.location.longitude.toFixed(4)}` : <span className="muted">Not set</span>}</div></div>
         </div>
       </div>
+
+      {vehicle.tracker_key && (
+        <div className="form-panel" style={{ maxWidth: 460, marginTop: 18 }}>
+          <h2>GPS Tracker</h2>
+          <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>
+            A tracker device fitted to this vehicle reports its position automatically by
+            POSTing <code>{'{ latitude, longitude }'}</code> to the URL below — no login, the
+            key is the credential. Keep it secret; rotate it if a device is lost.
+          </p>
+          {keyMsg && (
+            <div className="successtxt" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <IconCheck size={14} />{keyMsg}
+            </div>
+          )}
+          <div className="field">
+            <label htmlFor="v-tracker">Tracker push URL</label>
+            <input
+              id="v-tracker"
+              readOnly
+              value={`/api/track/${vehicle.tracker_key}`}
+              onFocus={e => e.currentTarget.select()}
+              style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+            />
+          </div>
+          <button className="btn btn-ghost" type="button" onClick={handleRotateKey} disabled={rotating}>
+            {rotating ? 'Rotating…' : 'Regenerate key'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

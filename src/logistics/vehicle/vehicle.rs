@@ -68,6 +68,33 @@ pub struct Vehicle {
     /// is active. Managed through `PUT /api/vehicles/{reg}/driver`.
     #[serde(default)]
     pub assigned_driver_id: Option<Uuid>,
+    /// A per-vehicle device credential. A GPS tracker fitted to the vehicle
+    /// pushes coordinates to `POST /api/track/{tracker_key}` with no login —
+    /// the key alone identifies the vehicle. Rotate it with
+    /// `POST /api/vehicles/{reg}/tracker-key/rotate` if a device is lost.
+    #[serde(default = "Uuid::new_v4")]
+    pub tracker_key: Uuid,
+}
+
+/// Add the `tracker_key` column to a `Vehicle` table that predates it and
+/// give every existing row a key. Databases created since always have the
+/// column (it is in the `CREATE TABLE` statements); this is only for a
+/// long-lived local database from before GPS tracking landed. Cheap to call
+/// on every read/write path — the probe is a single `information_schema` read.
+pub(crate) fn ensure_tracker_key_column(
+    conn: &mut mysql::PooledConn,
+) -> Result<(), Box<dyn Error>> {
+    let has_column: Option<i64> = conn.exec_first(
+        "SELECT 1 FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'Vehicle'
+           AND column_name = 'tracker_key'",
+        (),
+    )?;
+    if has_column.is_none() {
+        conn.query_drop("ALTER TABLE Vehicle ADD COLUMN tracker_key VARCHAR(36) NULL")?;
+        conn.query_drop("UPDATE Vehicle SET tracker_key = UUID() WHERE tracker_key IS NULL")?;
+    }
+    Ok(())
 }
 
 impl Vehicle {
@@ -78,6 +105,67 @@ impl Vehicle {
             unit,
             location: None,
             assigned_driver_id: None,
+            tracker_key: Uuid::new_v4(),
+        }
+    }
+
+    /// Look up the vehicle a GPS tracker's key belongs to. Returns `None`
+    /// when no vehicle has that key (a stale or fabricated device key).
+    pub fn by_tracker_key(tracker_key: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        ensure_tracker_key_column(&mut conn)?;
+
+        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle WHERE tracker_key = :tracker_key LIMIT 1",
+            params! { "tracker_key" => tracker_key.to_string() },
+            |r| r,
+        )?;
+
+        Ok(rows.into_iter().next().map(Self::row_to_vehicle))
+    }
+
+    /// Issue a fresh tracker key, invalidating the old one. Used when a
+    /// device is lost or the key may have leaked.
+    pub fn rotate_tracker_key(&mut self) -> Result<Uuid, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        ensure_tracker_key_column(&mut conn)?;
+
+        let new_key = Uuid::new_v4();
+        conn.exec_drop(
+            "UPDATE Vehicle SET tracker_key = :tracker_key WHERE registration_number = :registration_number",
+            params! {
+                "registration_number" => &self.registration_number,
+                "tracker_key" => new_key.to_string(),
+            },
+        )?;
+        self.tracker_key = new_key;
+        Ok(new_key)
+    }
+
+    /// Build a `Vehicle` from a `SELECT registration_number, capacity, unit,
+    /// assigned_driver_id, latitude, longitude, last_updated_at,
+    /// location_address, tracker_key` row.
+    fn row_to_vehicle(
+        row: (String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>),
+    ) -> Self {
+        let (reg, cap, unit_str, driver, lat, lng, ts, addr, tracker) = row;
+        let location = lat.map(|latitude| Location {
+            latitude,
+            longitude: lng.unwrap_or(0.0),
+            timestamp: ts.unwrap_or(0),
+            address: addr,
+        });
+        Vehicle {
+            registration_number: reg,
+            capacity: cap,
+            unit: Unit::from_str(&unit_str),
+            location,
+            assigned_driver_id: driver.and_then(|d| Uuid::parse_str(&d).ok()),
+            tracker_key: tracker
+                .and_then(|t| Uuid::parse_str(&t).ok())
+                .unwrap_or_else(Uuid::new_v4),
         }
     }
 
@@ -116,10 +204,12 @@ impl Vehicle {
                 longitude DOUBLE DEFAULT NULL,
                 last_updated_at BIGINT DEFAULT NULL,
                 location_address VARCHAR(255) DEFAULT NULL,
+                tracker_key VARCHAR(36) DEFAULT NULL,
                 CONSTRAINT fk_vehicle_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
             (),
         )?;
+        ensure_tracker_key_column(&mut conn)?;
 
         let (lat, lng, ts, addr) = match &self.location {
             Some(loc) => (
@@ -131,10 +221,12 @@ impl Vehicle {
             None => (None, None, None, None),
         };
 
-        // Insert vehicle record into MySQL database
+        // Insert vehicle record into MySQL database. `tracker_key` is only set
+        // on insert — re-registering an existing registration number keeps the
+        // key its devices already use.
         conn.exec_drop(
-            "INSERT INTO Vehicle (registration_number, capacity, unit, org_id, latitude, longitude, last_updated_at, location_address) 
-             VALUES (:registration_number, :capacity, :unit, :org_id, :latitude, :longitude, :last_updated_at, :location_address)
+            "INSERT INTO Vehicle (registration_number, capacity, unit, org_id, latitude, longitude, last_updated_at, location_address, tracker_key)
+             VALUES (:registration_number, :capacity, :unit, :org_id, :latitude, :longitude, :last_updated_at, :location_address, :tracker_key)
              ON DUPLICATE KEY UPDATE capacity = VALUES(capacity), unit = VALUES(unit), org_id = VALUES(org_id), latitude = VALUES(latitude), longitude = VALUES(longitude), last_updated_at = VALUES(last_updated_at), location_address = VALUES(location_address)",
             params! {
                 "registration_number" => &self.registration_number,
@@ -145,6 +237,7 @@ impl Vehicle {
                 "longitude" => lng,
                 "last_updated_at" => ts,
                 "location_address" => addr,
+                "tracker_key" => self.tracker_key.to_string(),
             },
         )?;
 
@@ -166,6 +259,17 @@ impl Vehicle {
 
         self.capacity = capacity;
         self.unit = unit;
+
+        // Keep `tracker_key` on the returned struct honest: callers build a
+        // fresh `Vehicle` (with a throwaway generated key) before calling this,
+        // so read back the real one the row already holds.
+        let stored_key: Option<String> = conn.exec_first(
+            "SELECT tracker_key FROM Vehicle WHERE registration_number = :registration_number",
+            params! { "registration_number" => &self.registration_number },
+        )?;
+        if let Some(key) = stored_key.and_then(|s| Uuid::parse_str(&s).ok()) {
+            self.tracker_key = key;
+        }
         Ok(())
     }
 
@@ -239,67 +343,34 @@ impl Vehicle {
                 longitude DOUBLE DEFAULT NULL,
                 last_updated_at BIGINT DEFAULT NULL,
                 location_address VARCHAR(255) DEFAULT NULL,
+                tracker_key VARCHAR(36) DEFAULT NULL,
                 CONSTRAINT fk_vehicle_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
             (),
         )?;
+        ensure_tracker_key_column(&mut conn)?;
 
-        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address FROM Vehicle",
+        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle",
             (),
-            |(reg, cap, unit_str, driver, lat, lng, ts, addr)| (reg, cap, unit_str, driver, lat, lng, ts, addr),
+            |r| r,
         )?;
 
-        let vehicles = rows
-            .into_iter()
-            .map(|(reg, cap, unit_str, driver, lat, lng, ts, addr)| {
-                let location = lat.map(|latitude| Location {
-                    latitude,
-                    longitude: lng.unwrap_or(0.0),
-                    timestamp: ts.unwrap_or(0),
-                    address: addr,
-                });
-                Vehicle {
-                    registration_number: reg,
-                    capacity: cap,
-                    unit: Unit::from_str(&unit_str),
-                    location,
-                    assigned_driver_id: driver.and_then(|d| Uuid::parse_str(&d).ok()),
-                }
-            })
-            .collect();
-
-        Ok(vehicles)
+        Ok(rows.into_iter().map(Self::row_to_vehicle).collect())
     }
 
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
+        ensure_tracker_key_column(&mut conn)?;
 
-        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address FROM Vehicle WHERE org_id = :org_id",
+        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle WHERE org_id = :org_id",
             params! { "org_id" => org_id.to_string() },
-            |(reg, cap, unit_str, driver, lat, lng, ts, addr)| (reg, cap, unit_str, driver, lat, lng, ts, addr),
+            |r| r,
         )?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(reg, cap, unit_str, driver, lat, lng, ts, addr)| {
-                let location = lat.map(|latitude| Location {
-                    latitude,
-                    longitude: lng.unwrap_or(0.0),
-                    timestamp: ts.unwrap_or(0),
-                    address: addr,
-                });
-                Vehicle {
-                    registration_number: reg,
-                    capacity: cap,
-                    unit: Unit::from_str(&unit_str),
-                    location,
-                    assigned_driver_id: driver.and_then(|d| Uuid::parse_str(&d).ok()),
-                }
-            })
-            .collect())
+        Ok(rows.into_iter().map(Self::row_to_vehicle).collect())
     }
 
     pub fn remove_vehicle(&self) -> Result<(), Box<dyn Error>> {
@@ -321,6 +392,79 @@ impl Vehicle {
 mod tests {
     use super::*;
     use crate::logistics::test_support::TestDb;
+
+    #[test]
+    fn test_tracker_key_is_generated_and_round_trips() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Tracker Org", "1 Depot Rd").expect("create org");
+
+        let vehicle = Vehicle::new("MH14 GP 0001", 40, Unit::MetricTon);
+        let key = vehicle.tracker_key;
+        assert_ne!(key, Uuid::nil());
+        vehicle.add_new_vehicle_to_org(&org).expect("add vehicle");
+
+        // The stored key survives a reload via every read path.
+        let by_list = Vehicle::list_by_org(org.id).expect("list");
+        assert_eq!(by_list[0].tracker_key, key);
+
+        let by_key = Vehicle::by_tracker_key(key).expect("lookup").expect("found");
+        assert_eq!(by_key.registration_number, "MH14 GP 0001");
+
+        let on_org = Organization::get_by_id(org.id)
+            .expect("get org")
+            .expect("org")
+            .vehicles
+            .into_iter()
+            .next()
+            .expect("vehicle on org");
+        assert_eq!(on_org.tracker_key, key);
+    }
+
+    #[test]
+    fn test_by_tracker_key_returns_none_for_unknown_key() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Unknown Key Org", "2 Depot Rd").expect("org");
+        Vehicle::new("MH14 GP 0002", 40, Unit::MetricTon)
+            .add_new_vehicle_to_org(&org)
+            .expect("add vehicle");
+
+        assert!(Vehicle::by_tracker_key(Uuid::new_v4()).expect("lookup").is_none());
+    }
+
+    #[test]
+    fn test_rotate_tracker_key_replaces_the_old_one() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Rotate Org", "3 Depot Rd").expect("org");
+        let mut vehicle = Vehicle::new("MH14 GP 0003", 40, Unit::MetricTon);
+        let original = vehicle.tracker_key;
+        vehicle.add_new_vehicle_to_org(&org).expect("add vehicle");
+
+        let new_key = vehicle.rotate_tracker_key().expect("rotate");
+        assert_ne!(new_key, original);
+        assert_eq!(vehicle.tracker_key, new_key);
+
+        // The old key no longer resolves; the new one does.
+        assert!(Vehicle::by_tracker_key(original).expect("lookup old").is_none());
+        assert_eq!(
+            Vehicle::by_tracker_key(new_key).expect("lookup new").expect("found").registration_number,
+            "MH14 GP 0003",
+        );
+    }
+
+    #[test]
+    fn test_update_vehicle_keeps_the_real_tracker_key_on_the_returned_struct() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Edit Key Org", "4 Depot Rd").expect("org");
+        let created = Vehicle::new("MH14 GP 0004", 40, Unit::MetricTon);
+        let real_key = created.tracker_key;
+        created.add_new_vehicle_to_org(&org).expect("add vehicle");
+
+        // A caller edits capacity via a freshly built struct (throwaway key).
+        let mut editing = Vehicle::new("MH14 GP 0004", 99, Unit::Kg);
+        assert_ne!(editing.tracker_key, real_key);
+        editing.update_vehicle(99, Unit::Kg).expect("update");
+        assert_eq!(editing.tracker_key, real_key, "update_vehicle must read back the stored key");
+    }
 
     #[test]
     fn test_add_new_vehicle_to_org() {
