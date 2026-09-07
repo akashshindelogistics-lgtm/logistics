@@ -209,7 +209,7 @@ All routes are served under the `/api` prefix.
 | GET/POST | `/api/vehicles/{reg}/documents` | List / record a vehicle's compliance paperwork (insurance, RC, permit, PUC, fitness) |
 | PUT/DELETE | `/api/vehicle-documents/{id}` | Renew (update) or delete a compliance document |
 | GET | `/api/orgs/{id}/vehicle-documents` | Whole-fleet compliance list, soonest expiry first |
-| GET/POST | `/api/customers`, `/api/orgs/{id}/customers` | List the org's customers / add one |
+| GET/POST | `/api/customers`, `/api/orgs/{id}/customers` | List the org's customers / add one (optionally with an initial `latitude`/`longitude`) |
 | PUT/DELETE | `/api/customers/{id}/location`, `/api/customers/{id}` | Update a customer's location / delete the customer |
 | POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to one of its customers |
 | GET | `/api/dispatches` | List dispatch orders |

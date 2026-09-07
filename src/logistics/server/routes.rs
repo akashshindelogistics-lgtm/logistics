@@ -166,6 +166,17 @@ pub struct TransferStockPayload {
 pub struct CreateCustomerPayload {
     pub name: String,
     pub address: String,
+    /// Optional initial delivery location. When both `latitude` and
+    /// `longitude` are supplied the customer is created and then immediately
+    /// located, exactly as a follow-up `PUT /api/customers/{id}/location`
+    /// would. `location_address` is an optional human-readable label for the
+    /// pin; when omitted the customer's `address` is used.
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
+    #[serde(default)]
+    pub location_address: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -2103,11 +2114,26 @@ pub async fn add_customer(
         });
     }
     match Customer::create_customer(org_id, &payload.name, &payload.address) {
-        Ok(customer) => HttpResponse::Created().json(ApiResponse {
-            success: true,
-            message: "Customer created successfully".to_string(),
-            data: Some(customer),
-        }),
+        Ok(mut customer) => {
+            if let (Some(latitude), Some(longitude)) = (payload.latitude, payload.longitude) {
+                let label = payload
+                    .location_address
+                    .clone()
+                    .unwrap_or_else(|| payload.address.clone());
+                if let Err(err) = customer.update_location(latitude, longitude, Some(label)) {
+                    return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                        success: false,
+                        message: format!("Customer created but locating it failed: {}", err),
+                        data: None,
+                    });
+                }
+            }
+            HttpResponse::Created().json(ApiResponse {
+                success: true,
+                message: "Customer created successfully".to_string(),
+                data: Some(customer),
+            })
+        }
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to create customer: {}", err),
@@ -3699,6 +3725,9 @@ mod tests {
             .set_json(&CreateCustomerPayload {
                 name: format!("{} Customer", org_name),
                 address: "2 Test Lane".to_string(),
+                latitude: None,
+                longitude: None,
+                location_address: None,
             })
             .to_request();
         let body: ApiResponse<Customer> =
@@ -4327,6 +4356,9 @@ mod tests {
             .set_json(&CreateCustomerPayload {
                 name: name.to_string(),
                 address: format!("1 {name} Lane"),
+                latitude: None,
+                longitude: None,
+                location_address: None,
             })
             .to_request();
         let resp = test::call_service(app, req).await;
@@ -4360,9 +4392,73 @@ mod tests {
             .set_json(&CreateCustomerPayload {
                 name: "Poached".to_string(),
                 address: "x".to_string(),
+                latitude: None,
+                longitude: None,
+                location_address: None,
             })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_create_customer_with_location_locates_it() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Cust Create Loc Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/customers", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&CreateCustomerPayload {
+                name: "Geo Retail".to_string(),
+                address: "12 Dockyard Rd, Mumbai".to_string(),
+                latitude: Some(19.0760),
+                longitude: Some(72.8777),
+                location_address: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let customer = test::read_body_json::<ApiResponse<Customer>, _>(resp)
+            .await
+            .data
+            .unwrap();
+
+        let location = customer.location.expect("customer should be located on create");
+        assert_eq!(location.latitude, 19.0760);
+        assert_eq!(location.longitude, 72.8777);
+        // With no explicit label the customer's address is used for the pin.
+        assert_eq!(location.address.as_deref(), Some("12 Dockyard Rd, Mumbai"));
+
+        // The location was persisted, not just echoed back.
+        let fetched = Customer::get_by_id(customer.id).unwrap().unwrap();
+        assert_eq!(fetched.location.map(|l| l.longitude), Some(72.8777));
+    }
+
+    #[actix_web::test]
+    async fn test_create_customer_without_coordinates_has_no_location() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Cust Create No Loc Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/customers", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&CreateCustomerPayload {
+                name: "Plain Co".to_string(),
+                address: "no pin".to_string(),
+                latitude: Some(19.0),
+                longitude: None,
+                location_address: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let customer = test::read_body_json::<ApiResponse<Customer>, _>(resp)
+            .await
+            .data
+            .unwrap();
+        assert!(customer.location.is_none(), "a lone latitude must not locate the customer");
     }
 
     #[actix_web::test]
@@ -5711,6 +5807,9 @@ mod tests {
             .set_json(&CreateCustomerPayload {
                 name: "ND Customer".to_string(),
                 address: "2 ND Lane".to_string(),
+                latitude: None,
+                longitude: None,
+                location_address: None,
             })
             .to_request();
         let customer: ApiResponse<Customer> =

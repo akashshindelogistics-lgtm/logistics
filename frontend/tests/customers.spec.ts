@@ -41,6 +41,40 @@ test.describe('Customers', () => {
     await expect(page.getByText('456 Market Road, Pune').first()).toBeVisible();
   });
 
+  test('create a customer with latitude/longitude and see the pin in the table', async ({ page }) => {
+    await registerOrg(page, `Customer Geo ${uid()}`);
+    await page.goto('/customers');
+
+    const custName = `Geo Customer ${uid()}`;
+
+    await page.getByRole('button', { name: /new customer/i }).click();
+    await page.getByLabel('Customer Name').fill(custName);
+    await page.getByLabel('Address').fill('12 Dockyard Rd, Mumbai');
+    await page.getByLabel(/latitude/i).fill('19.0760');
+    await page.getByLabel(/longitude/i).fill('72.8777');
+    await page.getByRole('button', { name: /^create customer$/i }).click();
+
+    const row = page.getByRole('row', { name: new RegExp(custName) });
+    await expect(row).toBeVisible({ timeout: 8000 });
+    // Location column shows the coordinates rounded to 4dp, not "Not set".
+    await expect(row.getByText('19.0760, 72.8777')).toBeVisible();
+    // And the customer is plotted on the locations map.
+    await expect(page.getByText(/1 mapped/i)).toBeVisible();
+  });
+
+  test('rejects a customer with only one coordinate filled', async ({ page }) => {
+    await registerOrg(page, `Customer Half Geo ${uid()}`);
+    await page.goto('/customers');
+
+    await page.getByRole('button', { name: /new customer/i }).click();
+    await page.getByLabel('Customer Name').fill(`Half Geo ${uid()}`);
+    await page.getByLabel('Address').fill('1 Half Rd');
+    await page.getByLabel(/latitude/i).fill('19.0760');
+    await page.getByRole('button', { name: /^create customer$/i }).click();
+
+    await expect(page.getByText(/enter both latitude and longitude/i)).toBeVisible();
+  });
+
   test('create multiple customers and count badge updates', async ({ page }) => {
     await registerOrg(page, `Customer Count ${uid()}`);
     await page.goto('/customers');

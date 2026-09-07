@@ -18,7 +18,10 @@ export default function Customers() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [lat, setLat] = useState('');
+  const [lng, setLng] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
   const [balances, setBalances] = useState<Record<string, CustomerBalance>>({});
 
   const load = () => listCustomers().then(r => setCustomers(r.data ?? [])).finally(() => setLoading(false));
@@ -41,13 +44,44 @@ export default function Customers() {
 
   useEffect(() => { load(); loadBalances(); }, []);
 
+  const resetForm = () => {
+    setName(''); setAddress(''); setLat(''); setLng(''); setFormError('');
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     const orgId = getOrgId();
     if (!orgId) return;
+
+    // Latitude and longitude are optional, but if one is filled the other
+    // must be too — a half-set coordinate can't place a pin.
+    const hasLat = lat.trim() !== '';
+    const hasLng = lng.trim() !== '';
+    if (hasLat !== hasLng) {
+      setFormError('Enter both latitude and longitude, or leave both blank.');
+      return;
+    }
+    let location: { latitude: number; longitude: number; address?: string } | undefined;
+    if (hasLat && hasLng) {
+      const latitude = Number(lat);
+      const longitude = Number(lng);
+      if (Number.isNaN(latitude) || latitude < -90 || latitude > 90 || Number.isNaN(longitude) || longitude < -180 || longitude > 180) {
+        setFormError('Latitude must be between -90 and 90, longitude between -180 and 180.');
+        return;
+      }
+      location = { latitude, longitude, address: address || undefined };
+    }
+
     setSubmitting(true);
-    try { await createCustomer(orgId, name, address); setName(''); setAddress(''); setShowForm(false); load(); }
-    finally { setSubmitting(false); }
+    setFormError('');
+    try {
+      await createCustomer(orgId, name, address, location);
+      resetForm();
+      setShowForm(false);
+      load();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDelete = async (customer: Customer) => {
@@ -68,7 +102,7 @@ export default function Customers() {
           <h1>Customers</h1>
           <p>Delivery recipients for your organization &mdash; not shared with other orgs</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm(!showForm)}>
+        <button className="btn btn-primary" onClick={() => { if (showForm) resetForm(); setShowForm(!showForm); }}>
           {showForm ? <><IconX size={14} />Cancel</> : <><IconPlus size={14} />New Customer</>}
         </button>
       </div>
@@ -85,11 +119,25 @@ export default function Customers() {
               <label htmlFor="cust-address">Address</label>
               <input id="cust-address" placeholder="Street, City, State" value={address} onChange={e => setAddress(e.target.value)} required />
             </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label htmlFor="cust-lat">Latitude <span className="muted">(optional)</span></label>
+                <input id="cust-lat" type="number" step="any" inputMode="decimal" placeholder="e.g. 19.0760" value={lat} onChange={e => setLat(e.target.value)} />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label htmlFor="cust-lng">Longitude <span className="muted">(optional)</span></label>
+                <input id="cust-lng" type="number" step="any" inputMode="decimal" placeholder="e.g. 72.8777" value={lng} onChange={e => setLng(e.target.value)} />
+              </div>
+            </div>
+            <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>
+              Pin the customer's delivery location on the map. Leave blank to set it later.
+            </p>
+            {formError && <div className="errortxt" style={{ marginBottom: 12 }}>{formError}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" type="submit" disabled={submitting}>
                 {submitting ? 'Creating…' : 'Create Customer'}
               </button>
-              <button className="btn btn-ghost" type="button" onClick={() => setShowForm(false)}>Cancel</button>
+              <button className="btn btn-ghost" type="button" onClick={() => { resetForm(); setShowForm(false); }}>Cancel</button>
             </div>
           </form>
         </div>
