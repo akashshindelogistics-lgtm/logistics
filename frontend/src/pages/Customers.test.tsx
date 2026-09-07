@@ -68,8 +68,49 @@ describe('Customers page', () => {
     await user.type(screen.getByLabelText(/address/i), '1 New Rd');
     await user.click(screen.getByRole('button', { name: /^create customer$/i }));
 
-    expect(customersApi.createCustomer).toHaveBeenCalledWith('org1', 'Fresh Co', '1 New Rd');
+    expect(customersApi.createCustomer).toHaveBeenCalledWith('org1', 'Fresh Co', '1 New Rd', undefined);
     await waitFor(() => expect(screen.getByText('Fresh Co')).toBeInTheDocument());
+  });
+
+  it('passes latitude/longitude to createCustomer when the location fields are filled', async () => {
+    const user = userEvent.setup();
+    vi.mocked(customersApi.listCustomers)
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok([customer({ name: 'Geo Co' })]));
+    vi.mocked(customersApi.createCustomer).mockResolvedValue(ok(customer({ name: 'Geo Co' })));
+
+    render(<Customers />);
+    await screen.findByText(/no customers yet/i);
+
+    await user.click(screen.getByRole('button', { name: /new customer/i }));
+    await user.type(screen.getByLabelText(/customer name/i), 'Geo Co');
+    await user.type(screen.getByLabelText(/address/i), '9 Pin Rd');
+    await user.type(screen.getByLabelText(/latitude/i), '19.076');
+    await user.type(screen.getByLabelText(/longitude/i), '72.8777');
+    await user.click(screen.getByRole('button', { name: /^create customer$/i }));
+
+    expect(customersApi.createCustomer).toHaveBeenCalledWith('org1', 'Geo Co', '9 Pin Rd', {
+      latitude: 19.076,
+      longitude: 72.8777,
+      address: '9 Pin Rd',
+    });
+  });
+
+  it('rejects a half-filled coordinate and does not call createCustomer', async () => {
+    const user = userEvent.setup();
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([]));
+
+    render(<Customers />);
+    await screen.findByText(/no customers yet/i);
+
+    await user.click(screen.getByRole('button', { name: /new customer/i }));
+    await user.type(screen.getByLabelText(/customer name/i), 'Half Geo');
+    await user.type(screen.getByLabelText(/address/i), '1 Half Rd');
+    await user.type(screen.getByLabelText(/latitude/i), '19.076');
+    await user.click(screen.getByRole('button', { name: /^create customer$/i }));
+
+    expect(await screen.findByText(/enter both latitude and longitude/i)).toBeInTheDocument();
+    expect(customersApi.createCustomer).not.toHaveBeenCalled();
   });
 
   it('deletes a customer after confirmation and reloads the list', async () => {

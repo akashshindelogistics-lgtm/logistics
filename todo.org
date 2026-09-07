@@ -173,3 +173,23 @@
   tests, 4 new Playwright flows. Fleet displays now show the vehicle's real
   unit instead of a hardcoded "MT".
   Plan/context: [[file:docs/ui-editing.md]]
+* TODO UI dashboard doesn't have an option to add stock to the org. Stock can only be added by API at the moment
+* TODO finish up manual steps to deploy frontend and backend on hosted platform
+* TODO Add unit tests for rust backend
+* TODO Create release for the current state - Date [ 1-09-2026 ]
+* TODO Set ANTHROPIC_API_KEY on rust backend so that AI summery works
+* DONE Customer create UI should have option to add location details of customer.
+  The "Create Customer" form gained optional Latitude / Longitude number
+  fields (address was already there). The page requires both or neither and
+  range-checks them (-90..90 / -180..180) before submitting. `createCustomer`
+  takes an optional location arg and folds latitude/longitude/location_address
+  into the POST body. Backend: `CreateCustomerPayload` gained optional
+  latitude/longitude/location_address; `add_customer` creates the customer and,
+  when both coordinates are present, immediately calls `update_location` (a lone
+  coordinate is ignored), so the response already carries the pin. A customer
+  created with coordinates shows in the Location column and on the map right
+  away. 2 new Rust route tests, 3 new frontend api-client tests, 2 new Customers
+  page tests, 2 new Playwright flows. docs/customers.md + README updated.
+  Plan/context: [[file:docs/customers.md]]
+* TODO Update e2e demo flow as new changes + features are added to logistics system
+* TODO All CI workflows should run on push to branch.

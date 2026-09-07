@@ -28,6 +28,37 @@ describe('customers api client', () => {
     expect(res.data).toEqual({ id: 'c2' });
   });
 
+  it('createCustomer includes coordinates in the payload when a location is given', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({ id: 'c2' }));
+    await createCustomer('org1', 'TechHub', '5 Market St', {
+      latitude: 19.076,
+      longitude: 72.8777,
+    });
+    expect(api.post).toHaveBeenCalledWith('/orgs/org1/customers', {
+      name: 'TechHub',
+      address: '5 Market St',
+      latitude: 19.076,
+      longitude: 72.8777,
+      location_address: undefined,
+    });
+  });
+
+  it('createCustomer passes the pin label as location_address when provided', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({ id: 'c2' }));
+    await createCustomer('org1', 'TechHub', '5 Market St', {
+      latitude: 1,
+      longitude: 2,
+      address: 'Gate 3, Bandra',
+    });
+    expect(api.post).toHaveBeenCalledWith('/orgs/org1/customers', {
+      name: 'TechHub',
+      address: '5 Market St',
+      latitude: 1,
+      longitude: 2,
+      location_address: 'Gate 3, Bandra',
+    });
+  });
+
   it('deleteCustomer DELETEs /customers/{id}', async () => {
     vi.mocked(api.delete).mockResolvedValue(envelope(null));
     await deleteCustomer('c3');

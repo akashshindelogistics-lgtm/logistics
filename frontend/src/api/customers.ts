@@ -6,9 +6,31 @@ import type { ApiResponse, Customer } from '../types';
 export const listCustomers = () =>
   api.get<ApiResponse<Customer[]>>('/customers').then(r => r.data);
 
-export const createCustomer = (orgId: string, name: string, address: string) =>
+export interface CustomerLocationInput {
+  latitude: number;
+  longitude: number;
+  /** Optional label for the map pin. Defaults to the customer's address. */
+  address?: string;
+}
+
+export const createCustomer = (
+  orgId: string,
+  name: string,
+  address: string,
+  location?: CustomerLocationInput,
+) =>
   api
-    .post<ApiResponse<Customer>>(`/orgs/${orgId}/customers`, { name, address })
+    .post<ApiResponse<Customer>>(`/orgs/${orgId}/customers`, {
+      name,
+      address,
+      ...(location
+        ? {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            location_address: location.address,
+          }
+        : {}),
+    })
     .then(r => r.data);
 
 export const deleteCustomer = (customerId: string) =>

@@ -44,12 +44,28 @@ and rejects a `customer_id` that belongs to another org with `400 "Customer
 belongs to a different organization"` — an org can only dispatch to its own
 customers.
 
+## Location on create
+
+`POST /api/orgs/{id}/customers` accepts three optional fields alongside
+`name`/`address`: `latitude`, `longitude`, and `location_address` (a label for
+the map pin, defaulting to the customer's `address`). When **both** `latitude`
+and `longitude` are present the handler creates the customer and then calls
+`Customer::update_location`, so the response already carries a populated
+`location`. A lone `latitude` or `longitude` is ignored. Setting the location
+afterwards still goes through `PUT /api/customers/{id}/location` as before;
+this is purely a convenience so a customer can be pinned in one request.
+
 ## Frontend
 
 The Customers page lists only the logged-in org's customers, creates them
 under that org (`getOrgId()` from the stored auth), and has a per-row delete
-button. The dispatch form's customer dropdown is naturally scoped because it
-is fed by the same org-scoped list.
+button. The create form has optional **Latitude** / **Longitude** number
+fields; the page requires both or neither and range-checks them (−90..90,
+−180..180) before calling `createCustomer`, which folds them into the POST
+body. A customer created with coordinates shows its pin in the Location
+column and on the "Customer Locations" map immediately. The dispatch form's
+customer dropdown is naturally scoped because it is fed by the same
+org-scoped list.
 
 ## Schema migration
 
