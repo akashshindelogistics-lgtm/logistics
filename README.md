@@ -24,9 +24,11 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Organizations** — create and manage organizations, each with its own
   location, vehicles, stock, and customers.
 - **Vehicles** — register vehicles per organization and track their live
-  location. Record each vehicle's compliance paperwork (insurance, RC,
-  permit, PUC and fitness certificate) with expiry dates; the dashboard
-  flags documents that are expiring within 30 days or already expired.
+  location, updated by hand or pushed automatically by a GPS tracker fitted
+  to the vehicle (each vehicle carries its own tracker key). Record each
+  vehicle's compliance paperwork (insurance, RC, permit, PUC and fitness
+  certificate) with expiry dates; the dashboard flags documents that are
+  expiring within 30 days or already expired.
 - **Drivers** — keep driver records (name, licence number, phone) per
   organization and assign one to a vehicle from the dashboard. A vehicle
   needs an **active** assigned driver, spare capacity, and no trip already
@@ -202,7 +204,9 @@ All routes are served under the `/api` prefix.
 | POST | `/api/orgs/{id}/vehicles` | Add a vehicle to an organization |
 | GET/DELETE | `/api/vehicles`, `/api/vehicles/{reg}` | List vehicles / remove one |
 | PUT | `/api/vehicles/{reg}` | Update a vehicle's capacity and unit |
-| PUT | `/api/vehicles/{reg}/location` | Update a vehicle's location |
+| PUT | `/api/vehicles/{reg}/location` | Update a vehicle's location (org login) |
+| POST | `/api/track/{tracker_key}` | GPS device push: record `{latitude, longitude}` for the vehicle that key belongs to — no login |
+| POST | `/api/vehicles/{reg}/tracker-key/rotate` | Issue a fresh tracker key, invalidating the old one |
 | PUT | `/api/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
 | GET/POST | `/api/drivers`, `/api/orgs/{id}/drivers` | List / add drivers |
 | PUT/DELETE | `/api/drivers/{id}` | Update (incl. active flag) or remove a driver |

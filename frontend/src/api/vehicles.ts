@@ -21,6 +21,15 @@ export const addVehicle = (orgId: string, registrationNumber: string, capacity: 
 export const deleteVehicle = (reg: string) =>
   api.delete<ApiResponse<null>>(`/vehicles/${encodeURIComponent(reg)}`).then(r => r.data);
 
+/**
+ * Issue a fresh GPS tracker key for a vehicle, invalidating the previous one.
+ * Every tracker device on the vehicle must then be reconfigured with the new key.
+ */
+export const rotateTrackerKey = (reg: string) =>
+  api
+    .post<ApiResponse<Vehicle>>(`/vehicles/${encodeURIComponent(reg)}/tracker-key/rotate`)
+    .then(r => r.data);
+
 // ── Vehicle compliance documents ────────────────────────────────────────────
 
 export interface VehicleDocumentInput {

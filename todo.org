@@ -125,7 +125,20 @@
    1 new Playwright flow.
    Plan/context: [[file:docs/dispatch-lifecycle.md]]
 ** TODO Move from one login per org to role-scoped user accounts within an org (admin, dispatcher, warehouse staff) so more than one person at the same org can log in with different permissions
-** TODO Add an endpoint for GPS trackers to push vehicle location automatically, instead of only the manual `PUT .../location` call
+** DONE Add an endpoint for GPS trackers to push vehicle location automatically, instead of only the manual `PUT .../location` call
+   Every vehicle now carries a random `tracker_key` (UUID, generated at
+   registration, on every Vehicle response). A device POSTs
+   `{latitude, longitude}` to `POST /api/track/{tracker_key}` with no login —
+   the key is the whole credential (the only unauthenticated write in the
+   API). Coordinates are range-checked (400), unknown key is 404, the time is
+   server-stamped. `POST /api/vehicles/{reg}/tracker-key/rotate` (org bearer,
+   owned) reissues the key if a device is lost. Schema: Vehicle.tracker_key,
+   added to fresh DBs in CREATE TABLE and to old ones by a probe + ALTER +
+   UUID() backfill helper. Frontend: a "GPS Tracker" panel on the vehicle
+   detail page showing the push URL with a Regenerate button. 9 new Rust tests
+   (4 model, 5 route), 5 new frontend unit tests, 2 new Playwright flows plus a
+   demo-flow step. pages.yml expected-paths and README updated.
+   Plan/context: [[file:docs/gps-tracking.md]]
 ** TODO Support multi-stop routes so one vehicle's trip can serve several customer orders in a sequence, instead of one dispatch always meaning one vehicle to one customer
 ** DONE Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
    Unit enum gains Kg/Litre/Box/Pallet/Piece; Unit::from_str is now

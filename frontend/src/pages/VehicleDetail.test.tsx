@@ -59,4 +59,47 @@ describe('VehicleDetail page', () => {
     render(<VehicleDetail />, { wrapper: MemoryRouter });
     expect(await screen.findByText('Ravi Kumar')).toBeInTheDocument();
   });
+
+  it('shows the GPS tracker push URL built from the vehicle key', async () => {
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(
+      ok([{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon', tracker_key: 'key-abc-123' }]),
+    );
+    vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
+    render(<VehicleDetail />, { wrapper: MemoryRouter });
+
+    const field = await screen.findByLabelText(/tracker push url/i);
+    expect(field).toHaveValue('/api/track/key-abc-123');
+  });
+
+  it('regenerates the tracker key and shows the new URL', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(
+      ok([{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon', tracker_key: 'old-key' }]),
+    );
+    vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
+    vi.mocked(vehiclesApi.rotateTrackerKey).mockResolvedValue(
+      ok({ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon', tracker_key: 'fresh-key' }),
+    );
+
+    render(<VehicleDetail />, { wrapper: MemoryRouter });
+    await screen.findByLabelText(/tracker push url/i);
+
+    await user.click(screen.getByRole('button', { name: /regenerate key/i }));
+
+    expect(vehiclesApi.rotateTrackerKey).toHaveBeenCalledWith('MH01AB1234');
+    await waitFor(() =>
+      expect(screen.getByLabelText(/tracker push url/i)).toHaveValue('/api/track/fresh-key'),
+    );
+  });
+
+  it('does not show the tracker panel when the vehicle has no key', async () => {
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(
+      ok([{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }]),
+    );
+    vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
+    render(<VehicleDetail />, { wrapper: MemoryRouter });
+    await screen.findByLabelText(/capacity/i);
+    expect(screen.queryByLabelText(/tracker push url/i)).not.toBeInTheDocument();
+  });
 });
