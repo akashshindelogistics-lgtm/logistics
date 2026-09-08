@@ -177,9 +177,12 @@ npm run test:e2e
 
 # Watch the whole product run in a real browser window: register, login,
 # godowns/stock/transfer, fleet + compliance, driver, customer, a dispatch
-# carried through delivery, and entity edits. Starts the Vite dev server
-# and the Rust API itself if they aren't already running.
+# carried through delivery, billing, a return, and entity edits. Starts the
+# Vite dev server and the Rust API itself if they aren't already running.
 npm run test:e2e:demo
+
+# Or watch just one feature's flow, e.g. operations reporting:
+npm run test:e2e:demo:reports
 ```
 
 ## API overview
