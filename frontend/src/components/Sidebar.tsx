@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { IconGrid, IconBuilding, IconTruck, IconUsers, IconPackage, IconDispatch, IconX } from './Icons';
+import { IconGrid, IconBuilding, IconTruck, IconUsers, IconPackage, IconDispatch, IconChart, IconX } from './Icons';
 import { getOrgName, getOrgId, clearAuth, isLoggedIn } from '../api/auth';
 import './Sidebar.css';
 
@@ -9,6 +9,7 @@ const links = [
   { to: '/vehicles',   label: 'Vehicles',        Icon: IconTruck },
   { to: '/customers',  label: 'Customers',       Icon: IconUsers },
   { to: '/dispatches', label: 'Dispatches',      Icon: IconDispatch },
+  { to: '/reports',    label: 'Reports',         Icon: IconChart },
 ];
 
 export default function Sidebar() {

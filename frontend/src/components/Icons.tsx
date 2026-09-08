@@ -23,3 +23,4 @@ export const IconDispatch = i('M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z');
 export const IconCheck    = i('M20 6 9 17l-5-5');
 export const IconSearch   = i('M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z');
 export const IconClock    = i('M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 5v5l4 2');
+export const IconChart    = i('M3 3v18h18M7 15l3-4 3 3 4-6');

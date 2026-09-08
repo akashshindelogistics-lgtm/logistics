@@ -13,6 +13,9 @@ use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::godown::transfer::{StockTransfer, TransferError};
 use crate::logistics::orgs::orgs::Organization;
+use crate::logistics::reports::{
+    DeliveryPerformance, DispatchVolumePoint, GodownInventory, OpsReport, VehicleUtilization,
+};
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::document::{
     ComplianceDocType, ComplianceStatus, VehicleDocument, VehicleDocumentError,
@@ -417,6 +420,13 @@ pub struct CustomerBillingResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<CustomerBillingSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct OpsReportResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<OpsReport>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -2873,6 +2883,43 @@ pub async fn get_customer_billing(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/reports",
+    tag = "Reports",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "Operational report for the organization", body = OpsReportResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/reports")]
+pub async fn get_ops_report(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only view reports for your own organization"
+                .to_string(),
+            data: None,
+        });
+    }
+    match OpsReport::for_org(org_id) {
+        Ok(report) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Report generated".to_string(),
+            data: Some(report),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to build report: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── OpenAPI + routing ─────────────────────────────────────────────────────────
 
 struct SecurityAddon;
@@ -2952,6 +2999,7 @@ impl Modify for SecurityAddon {
         pay_invoice,
         list_org_invoices,
         get_customer_billing,
+        get_ops_report,
     ),
     components(
         schemas(
@@ -2968,6 +3016,7 @@ impl Modify for SecurityAddon {
             VehicleDocument, ComplianceDocType, ComplianceStatus,
             DispatchOrder, DispatchLineItem, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             Invoice, PaymentStatus, CustomerBillingSummary,
+            OpsReport, VehicleUtilization, DeliveryPerformance, GodownInventory, DispatchVolumePoint,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             VehicleDocumentResponse, VehicleDocumentListResponse,
@@ -2977,6 +3026,7 @@ impl Modify for SecurityAddon {
             DriverResponse, DriverListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
+            OpsReportResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
     ),
@@ -2991,6 +3041,7 @@ impl Modify for SecurityAddon {
         (name = "Customers", description = "Customer management"),
         (name = "Dispatch", description = "Stock dispatch"),
         (name = "Billing", description = "Freight invoices and customer payment status"),
+        (name = "Reports", description = "Operational reporting: fleet utilization, delivery performance, inventory, dispatch volume"),
     )
 )]
 pub struct ApiDoc;
@@ -3049,7 +3100,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(update_invoice)
             .service(pay_invoice)
             .service(list_org_invoices)
-            .service(get_customer_billing),
+            .service(get_customer_billing)
+            .service(get_ops_report),
     )
     .service(
         SwaggerUi::new("/swagger-ui/{_:.*}")
@@ -5849,6 +5901,49 @@ mod tests {
 
         let req = test::TestRequest::post()
             .uri(&format!("/api/invoices/{}/pay", inv_id))
+            .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    // ── Reports ─────────────────────────────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_ops_report_reflects_a_dispatch_and_its_vehicle() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, dispatch, auth) = setup_dispatch(&app, "Report Org").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/reports", org.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let report = test::read_body_json::<ApiResponse<OpsReport>, _>(resp)
+            .await
+            .data
+            .unwrap();
+
+        // The one dispatch is PENDING (non-terminal) so its vehicle is "on trip".
+        assert_eq!(report.vehicle_utilization.vehicles_on_active_trip, 1);
+        assert!(report.vehicle_utilization.total_vehicles >= 1);
+        assert_eq!(report.delivery_performance.delivered_count, 0);
+        assert_eq!(report.dispatch_volume.len(), 14);
+        assert_eq!(report.dispatch_volume[13].count, 1, "one dispatch today");
+        assert!(report.units_dispatched_recently >= 1);
+        let _ = dispatch;
+    }
+
+    #[actix_web::test]
+    async fn test_ops_report_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _auth) = setup_org(&app, "Report Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Report Intruder Org").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/reports", org.id))
             .insert_header(("Authorization", other_auth))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);

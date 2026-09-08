@@ -144,7 +144,20 @@
    Unit enum gains Kg/Litre/Box/Pallet/Piece; Unit::from_str is now
    case-insensitive with aliases and still falls back to MetricTon.
 ** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
-** TODO Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
+** DONE Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
+   New src/logistics/reports module + GET /api/orgs/{id}/reports (bearer, own
+   org only). All derived, no new tables — OpsReport::for_org folds the org's
+   dispatch / vehicle / godown lists into: fleet utilization (owned vehicles on
+   a non-terminal trip / total), delivery performance (delivered & returned
+   counts, mean hours to DELIVERED, on-time rate against a 72h target since
+   there is no promised-date field yet), per-godown inventory (units on hand,
+   distinct items, Σvolume vs max_capacity), units dispatched in the last 30
+   days, and a 14-day daily dispatch-volume series (zero-filled). Frontend: a
+   Reports page (/reports, sidebar link) with four stat tiles, a dependency-free
+   CSS bar chart, and a godown table. 8 new Rust tests (6 model, 2 route), 6 new
+   frontend unit tests, 2 new Playwright flows. pages.yml expected-paths + README
+   updated.
+   Plan/context: [[file:docs/reports.md]]
 * DONE Fix failing swagger ui doc generation github action - godown feature merge (PR #6) removed /api/orgs/{id}/stock* in favor of /api/orgs/{id}/godowns and /api/godowns/{gid}/..., but the workflow's expected-path list still checked for the old stock routes
 * DONE sync readme with updated apis
   The README "API overview" table listed every route without the `/api` prefix
