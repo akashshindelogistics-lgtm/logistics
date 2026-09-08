@@ -172,6 +172,30 @@ export interface CustomerBillingSummary {
   invoices: Invoice[];
 }
 
+// Mirrors OpsReport in src/logistics/reports/mod.rs.
+export interface OpsReport {
+  vehicle_utilization: {
+    total_vehicles: number;
+    vehicles_on_active_trip: number;
+    utilization_percent: number;
+  };
+  delivery_performance: {
+    delivered_count: number;
+    returned_count: number;
+    avg_hours_to_deliver: number | null;
+    on_time_rate_percent: number | null;
+  };
+  units_dispatched_recently: number;
+  godown_inventory: Array<{
+    godown_id: string;
+    godown_name: string;
+    units_on_hand: number;
+    distinct_items: number;
+    capacity_used_percent: number | null;
+  }>;
+  dispatch_volume: Array<{ date: string; count: number }>;
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   message: string;

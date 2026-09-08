@@ -48,6 +48,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Freight billing** — raise one invoice per dispatch with an amount and a
   due date; the dashboard tracks each invoice as paid / pending / overdue
   and rolls a customer's unpaid invoices up into an outstanding balance.
+- **Operational reporting** — a Reports page with fleet utilization, delivery
+  performance (count, average time to deliver, on-time rate), per-godown
+  inventory, and dispatch volume over the last 14 days.
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
 - **Authentication** — org-level login secured with JWTs and bcrypt-hashed
@@ -224,6 +227,7 @@ All routes are served under the `/api` prefix.
 | POST | `/api/invoices/{id}/pay` | Mark an invoice paid |
 | GET | `/api/orgs/{id}/invoices` | All freight invoices for the org |
 | GET | `/api/customers/{id}/billing` | A customer's payment standing (outstanding, overdue) |
+| GET | `/api/orgs/{id}/reports` | Operational report: fleet utilization, delivery performance, godown inventory, 14-day dispatch volume |
 | GET | `/api/health` | Health check |
 
 The published Swagger UI (see CI/CD below) has "Try it out" enabled and the

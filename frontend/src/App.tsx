@@ -10,6 +10,7 @@ import DriverDetail from './pages/DriverDetail';
 import GodownDetail from './pages/GodownDetail';
 import Customers from './pages/Customers';
 import Dispatches from './pages/Dispatches';
+import Reports from './pages/Reports';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import './App.css';
@@ -34,6 +35,7 @@ function AppShell() {
           <Route path="/godowns/:id" element={<ProtectedRoute><GodownDetail /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
           <Route path="/dispatches" element={<ProtectedRoute><Dispatches /></ProtectedRoute>} />
+          <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

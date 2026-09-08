@@ -49,6 +49,15 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /my organization/i })).toHaveAttribute('href', '/orgs/o1');
   });
 
+  it('has a Reports link pointing at /reports', () => {
+    vi.mocked(authApi.isLoggedIn).mockReturnValue(true);
+    vi.mocked(authApi.getOrgName).mockReturnValue('Express Freight');
+    vi.mocked(authApi.getOrgId).mockReturnValue('o1');
+    renderSidebar();
+
+    expect(screen.getByRole('link', { name: /reports/i })).toHaveAttribute('href', '/reports');
+  });
+
   it('falls back to /orgs for the organization link when no id is known', () => {
     vi.mocked(authApi.isLoggedIn).mockReturnValue(false);
     vi.mocked(authApi.getOrgName).mockReturnValue(null);

@@ -7,6 +7,7 @@ pub mod dispatch;
 pub mod driver;
 pub mod godown;
 pub mod orgs;
+pub mod reports;
 pub mod server;
 pub mod stock;
 pub mod vehicle;
