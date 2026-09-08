@@ -56,3 +56,11 @@ Dependency-free — no chart library. `frontend/src/api/reports.ts` exposes
 - Playwright (`reports.spec.ts`): a fresh org shows a zeroed report with the
   full 14-day axis; a dispatch then moves utilization to `100%`, adds today's
   volume bar, and shows the drawn-down godown inventory.
+
+## Watching it
+
+`npm run test:e2e:demo:reports` runs a narrated, headed, slowed-down walk
+through just this feature (`tests/reports.demo.ts`) — set up a 3-vehicle org,
+dispatch one shipment, then read the report. The `.demo.ts` suffix keeps it
+out of the headless `npm run test:e2e` suite. The full-workflow demo
+(`npm run test:e2e:demo`) also has a "check the operations report" step.

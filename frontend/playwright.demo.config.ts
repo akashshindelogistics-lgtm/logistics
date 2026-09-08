@@ -1,19 +1,23 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Config for the visual, headed "demo" run of the full logistics workflow
- * (registration -> login -> godowns -> fleet -> drivers -> customers ->
- * dispatch -> delivery). Unlike playwright.config.ts (headless, used for the
- * regular test suite), this always opens a real browser window, slowed down,
- * so a human can watch the whole flow happen instead of running it by hand.
+ * Config for the visual, headed "demo" runs. Unlike playwright.config.ts
+ * (headless, the regular suite) this always opens a real browser window,
+ * slowed down, so a human can watch the flow instead of running it by hand.
  *
- * Run with: npm run test:e2e:demo
+ * Matches the full-workflow demo (`e2e-full-flow.spec.ts`) and every focused
+ * per-feature demo (`*.demo.ts` — kept out of the headless suite by not
+ * ending in `.spec.ts`).
+ *
+ *   npm run test:e2e:demo          — the whole workflow
+ *   npm run test:e2e:demo:reports  — just the ops-reporting flow
+ *
  * It starts the Vite dev server and the Rust API itself if they aren't
  * already running (reusing them if they are), so this is a single command.
  */
 export default defineConfig({
   testDir: './tests',
-  testMatch: 'e2e-full-flow.spec.ts',
+  testMatch: /(e2e-full-flow\.spec|\.demo)\.ts$/,
   fullyParallel: false,
   retries: 0,
   workers: 1,

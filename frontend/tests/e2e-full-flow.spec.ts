@@ -4,9 +4,10 @@ import { registerOrg, loginOrg, uid } from './helpers';
 /**
  * A single, narrated walk through the whole product: register an org, sign
  * out and back in, build up a warehouse and fleet, dispatch a multi-item
- * shipment to a customer and carry it through its delivery lifecycle, raise
- * and pay a freight invoice, and dispatch + return a second shipment to see
- * its stock credited back into a godown.
+ * shipment to a customer, glance at the ops report while it's out, carry it
+ * through its delivery lifecycle, raise and pay a freight invoice, and
+ * dispatch + return a second shipment to see its stock credited back into a
+ * godown.
  *
  * This is meant to be watched, not just asserted on — run it with
  * `npm run test:e2e:demo` (playwright.demo.config.ts), which always opens a
@@ -23,7 +24,10 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
   const stockA = `Cement Bags ${uid()}`;
   const stockB = `Steel Rods ${uid()}`;
   const stockC = `Cable Reels ${uid()}`;
-  const vehicleReg = `MH12DM${uid().toUpperCase().slice(0, 4)}`;
+  // Full uid (not a 4-char slice) so a re-run never reuses a plate — a plate
+  // still tied to an unfinished dispatch from a previous run would leave this
+  // run's only vehicle "busy" and the dispatch step with nothing to send on.
+  const vehicleReg = `MH12DM${uid().toUpperCase()}`;
   const driverName = `Ramesh Kulkarni ${uid()}`;
   const custName = `Sunrise Traders ${uid()}`;
 
@@ -161,6 +165,29 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await page.getByLabel('Quantity 2').fill('15');
     await page.getByRole('button', { name: /dispatch stock/i }).click();
     await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
+  });
+
+  await test.step('Check the operations report while the shipment is out', async () => {
+    await page.goto('/reports');
+    await expect(page.getByRole('heading', { level: 1, name: 'Reports' })).toBeVisible();
+
+    // The shipment we just created is still PENDING, so the one vehicle is on
+    // a trip: 1 of 1 = 100% fleet utilization.
+    const util = page.locator('.stat-card', { hasText: 'Fleet utilization' });
+    await expect(util.getByText('100.0%')).toBeVisible({ timeout: 8000 });
+    await expect(util.getByText('1 of 1 on a trip')).toBeVisible();
+
+    // Nothing delivered yet.
+    await expect(
+      page.locator('.stat-card', { hasText: 'Delivered' }).getByText('0', { exact: true }),
+    ).toBeVisible();
+
+    // Today's dispatch is the only bar on the 14-day volume chart with a count.
+    await expect(page.getByTitle(/^\d{4}-\d{2}-\d{2}: 1$/)).toBeVisible();
+
+    // Both godowns show in the inventory table.
+    await expect(page.getByRole('row', { name: new RegExp(godownA) })).toBeVisible();
+    await expect(page.getByRole('row', { name: new RegExp(godownB) })).toBeVisible();
   });
 
   await test.step('Carry the dispatch through its delivery lifecycle', async () => {
