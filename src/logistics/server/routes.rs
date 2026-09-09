@@ -1,5 +1,5 @@
 use crate::logistics::auth::auth::{
-    decode_token, generate_token, OrgCredentials, OrgSummary,
+    decode_token, generate_token, generate_user_token, OrgCredentials, OrgSummary,
 };
 use crate::logistics::billing::invoice::{
     CustomerBillingSummary, Invoice, InvoiceError, PaymentStatus,
@@ -17,6 +17,7 @@ use crate::logistics::reports::{
     DeliveryPerformance, DispatchVolumePoint, GodownInventory, OpsReport, VehicleUtilization,
 };
 use crate::logistics::stock::stock::Stock;
+use crate::logistics::user::user::{OrgRole, OrgUser, UserError};
 use crate::logistics::vehicle::document::{
     ComplianceDocType, ComplianceStatus, VehicleDocument, VehicleDocumentError,
 };
@@ -34,6 +35,39 @@ use uuid::Uuid;
 pub struct AuthenticatedOrg {
     pub org_id: Uuid,
     pub org_name: String,
+    /// The caller's role: `Admin` for the org-owner login, or the team
+    /// member's role for a `POST /api/auth/user-login` token.
+    pub role: OrgRole,
+    /// The team member's id, when the token came from user-login.
+    pub user_id: Option<Uuid>,
+}
+
+/// Roles allowed to run and bill dispatches, and to manage customers.
+const DISPATCH_ROLES: [OrgRole; 2] = [OrgRole::Admin, OrgRole::Dispatcher];
+/// Roles allowed to manage godowns and their stock.
+const WAREHOUSE_ROLES: [OrgRole; 2] = [OrgRole::Admin, OrgRole::WarehouseStaff];
+/// Admin-only.
+const ADMIN_ONLY: [OrgRole; 1] = [OrgRole::Admin];
+
+impl AuthenticatedOrg {
+    /// `Ok(())` when the caller's role is in `allowed`, otherwise the `403`
+    /// response to return. Every role may read; this gates writes.
+    fn require_role(&self, allowed: &[OrgRole]) -> Result<(), HttpResponse> {
+        if allowed.contains(&self.role) {
+            Ok(())
+        } else {
+            let names: Vec<&str> = allowed.iter().map(|r| r.as_str()).collect();
+            Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+                success: false,
+                message: format!(
+                    "Your role ({}) is not allowed to do this — needs one of: {}",
+                    self.role.as_str(),
+                    names.join(", ")
+                ),
+                data: None,
+            }))
+        }
+    }
 }
 
 impl FromRequest for AuthenticatedOrg {
@@ -64,6 +98,8 @@ impl FromRequest for AuthenticatedOrg {
                 Ok(org_id) => ready(Ok(AuthenticatedOrg {
                     org_id,
                     org_name: claims.org_name,
+                    role: OrgRole::from_str(&claims.role),
+                    user_id: claims.user_id.as_deref().and_then(|u| Uuid::parse_str(u).ok()),
                 })),
                 Err(_) => ready(Err(actix_web::error::ErrorUnauthorized(
                     "Invalid org_id in token",
@@ -287,11 +323,44 @@ pub struct LoginPayload {
     pub password: String,
 }
 
+/// Body for `POST /api/auth/user-login` — a team member signs in with the
+/// email + password an Admin set for them.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct UserLoginPayload {
+    pub email: String,
+    pub password: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct LoginData {
     pub token: String,
     pub org_id: String,
     pub org_name: String,
+    /// `ADMIN` for the org-owner login, else the team member's role.
+    #[serde(default = "default_admin_role_string")]
+    pub role: String,
+    /// The team member's display name, when this was a user-login.
+    #[serde(default)]
+    pub user_name: Option<String>,
+}
+
+fn default_admin_role_string() -> String {
+    "ADMIN".to_string()
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct CreateUserPayload {
+    pub name: String,
+    pub email: String,
+    pub password: String,
+    pub role: OrgRole,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct UpdateUserPayload {
+    pub name: String,
+    pub role: OrgRole,
+    pub is_active: bool,
 }
 
 // ── Response types ────────────────────────────────────────────────────────────
@@ -430,6 +499,20 @@ pub struct OpsReportResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UserResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<OrgUser>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UserListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<OrgUser>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct EmptyResponse {
     pub success: bool,
     pub message: String,
@@ -518,6 +601,8 @@ pub async fn auth_login(payload: web::Json<LoginPayload>) -> impl Responder {
                         token,
                         org_id: payload.org_id.to_string(),
                         org_name,
+                        role: "ADMIN".to_string(),
+                        user_name: None,
                     }),
                 }),
                 Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
@@ -535,6 +620,62 @@ pub async fn auth_login(payload: web::Json<LoginPayload>) -> impl Responder {
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Authentication error: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/user-login",
+    tag = "Auth",
+    request_body = UserLoginPayload,
+    responses(
+        (status = 200, description = "Login successful, returns a role-scoped JWT", body = OrgResponse),
+        (status = 401, description = "Invalid credentials or inactive account", body = EmptyResponse)
+    )
+)]
+#[post("/auth/user-login")]
+pub async fn user_login(payload: web::Json<UserLoginPayload>) -> impl Responder {
+    let user = match OrgUser::verify_login(&payload.email, &payload.password) {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return HttpResponse::Unauthorized().json(ApiResponse::<String> {
+                success: false,
+                message: "Invalid email or password, or the account is inactive".to_string(),
+                data: None,
+            })
+        }
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Authentication error: {}", err),
+                data: None,
+            })
+        }
+    };
+
+    let org_name = Organization::get_by_id(user.org_id)
+        .ok()
+        .flatten()
+        .map(|o| o.name)
+        .unwrap_or_default();
+
+    match generate_user_token(user.org_id, &org_name, Some(user.id), user.role.as_str()) {
+        Ok(token) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Login successful".to_string(),
+            data: Some(LoginData {
+                token,
+                org_id: user.org_id.to_string(),
+                org_name,
+                role: user.role.as_str().to_string(),
+                user_name: Some(user.name),
+            }),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to generate token: {}", err),
             data: None,
         }),
     }
@@ -815,6 +956,9 @@ pub async fn update_org_location(
 )]
 #[delete("/orgs/{id}")]
 pub async fn delete_org(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    if let Err(resp) = auth.require_role(&ADMIN_ONLY) {
+        return resp;
+    }
     let org_id = path.into_inner();
     if org_id != auth.org_id {
         return HttpResponse::Forbidden().json(ApiResponse::<String> {
@@ -1771,6 +1915,9 @@ pub async fn create_godown(
     payload: web::Json<CreateGodownPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&WAREHOUSE_ROLES) {
+        return resp;
+    }
     let org_id = path.into_inner();
     if org_id != auth.org_id {
         return HttpResponse::Forbidden().json(ApiResponse::<String> {
@@ -1839,6 +1986,9 @@ pub async fn update_godown(
     payload: web::Json<UpdateGodownPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&WAREHOUSE_ROLES) {
+        return resp;
+    }
     let mut godown = match load_owned_godown(path.into_inner(), auth.org_id) {
         Ok(g) => g,
         Err(resp) => return resp,
@@ -1872,6 +2022,9 @@ pub async fn update_godown(
 )]
 #[delete("/godowns/{gid}")]
 pub async fn delete_godown(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    if let Err(resp) = auth.require_role(&WAREHOUSE_ROLES) {
+        return resp;
+    }
     let godown = match load_owned_godown(path.into_inner(), auth.org_id) {
         Ok(g) => g,
         Err(resp) => return resp,
@@ -1949,6 +2102,9 @@ pub async fn add_godown_stock(
     payload: web::Json<CreateStockPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&WAREHOUSE_ROLES) {
+        return resp;
+    }
     let godown = match load_owned_godown(path.into_inner(), auth.org_id) {
         Ok(g) => g,
         Err(resp) => return resp,
@@ -2005,6 +2161,9 @@ pub async fn update_godown_stock(
     payload: web::Json<UpdateStockPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&WAREHOUSE_ROLES) {
+        return resp;
+    }
     let godown = match load_owned_godown(path.into_inner(), auth.org_id) {
         Ok(g) => g,
         Err(resp) => return resp,
@@ -2060,6 +2219,9 @@ pub async fn delete_godown_stock(
     path: web::Path<(Uuid, String)>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&WAREHOUSE_ROLES) {
+        return resp;
+    }
     let (godown_id, desc) = path.into_inner();
     let godown = match load_owned_godown(godown_id, auth.org_id) {
         Ok(g) => g,
@@ -2102,6 +2264,9 @@ pub async fn transfer_godown_stock(
     payload: web::Json<TransferStockPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&WAREHOUSE_ROLES) {
+        return resp;
+    }
     let from = match load_owned_godown(path.into_inner(), auth.org_id) {
         Ok(g) => g,
         Err(resp) => return resp,
@@ -2435,6 +2600,9 @@ pub async fn dispatch_stock(
     payload: web::Json<DispatchRequestPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
     let org_id = path.into_inner();
     if org_id != auth.org_id {
         return HttpResponse::Forbidden().json(ApiResponse::<String> {
@@ -2521,6 +2689,9 @@ pub async fn update_dispatch_status(
     payload: web::Json<UpdateDispatchStatusPayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
     let mut dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
         Ok(d) => d,
         Err(resp) => return resp,
@@ -2681,6 +2852,9 @@ pub async fn create_dispatch_invoice(
     payload: web::Json<InvoicePayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
     let dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
         Ok(d) => d,
         Err(resp) => return resp,
@@ -2764,6 +2938,9 @@ pub async fn update_invoice(
     payload: web::Json<InvoicePayload>,
     auth: AuthenticatedOrg,
 ) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
     let mut inv = match load_owned_invoice(path.into_inner(), auth.org_id) {
         Ok(i) => i,
         Err(resp) => return resp,
@@ -2793,6 +2970,9 @@ pub async fn update_invoice(
 )]
 #[post("/invoices/{id}/pay")]
 pub async fn pay_invoice(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
     let mut inv = match load_owned_invoice(path.into_inner(), auth.org_id) {
         Ok(i) => i,
         Err(resp) => return resp,
@@ -2920,6 +3100,218 @@ pub async fn get_ops_report(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> im
     }
 }
 
+// ── Team members (role-scoped users) ─────────────────────────────────────────
+
+/// Load a user and confirm it belongs to `auth_org_id`, or return the
+/// 403/404/500 response to bail out with.
+fn load_owned_user(user_id: Uuid, auth_org_id: Uuid) -> Result<OrgUser, HttpResponse> {
+    match OrgUser::get_by_id(user_id) {
+        Ok(Some(u)) if u.org_id == auth_org_id => Ok(u),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "That user belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "User not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch user: {}", err),
+            data: None,
+        })),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/users",
+    tag = "Users",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "The org's team members", body = UserListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/users")]
+pub async fn list_org_users(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    if let Err(resp) = auth.require_role(&[OrgRole::Admin]) {
+        return resp;
+    }
+    match OrgUser::list_by_org(org_id) {
+        Ok(users) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} team members", users.len()),
+            data: Some(users),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list team members: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/orgs/{id}/users",
+    tag = "Users",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    request_body = CreateUserPayload,
+    responses(
+        (status = 201, description = "Team member created", body = UserResponse),
+        (status = 409, description = "Email already registered", body = EmptyResponse),
+        (status = 400, description = "Invalid email or password", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/orgs/{id}/users")]
+pub async fn add_org_user(
+    path: web::Path<Uuid>,
+    payload: web::Json<CreateUserPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    if let Err(resp) = auth.require_role(&[OrgRole::Admin]) {
+        return resp;
+    }
+
+    match OrgUser::create(
+        org_id,
+        &payload.name,
+        &payload.email,
+        &payload.password,
+        payload.role,
+    ) {
+        Ok(user) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: "Team member created".to_string(),
+            data: Some(user),
+        }),
+        Err(UserError::EmailTaken) => HttpResponse::Conflict().json(ApiResponse::<String> {
+            success: false,
+            message: "That email address is already registered".to_string(),
+            data: None,
+        }),
+        Err(UserError::InvalidInput(why)) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: why.to_string(),
+            data: None,
+        }),
+        Err(UserError::Db(err)) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to create team member: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/users/{id}",
+    tag = "Users",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "User UUID")),
+    request_body = UpdateUserPayload,
+    responses(
+        (status = 200, description = "Team member updated", body = UserResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "User not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/users/{id}")]
+pub async fn update_org_user(
+    path: web::Path<Uuid>,
+    payload: web::Json<UpdateUserPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    if let Err(resp) = auth.require_role(&[OrgRole::Admin]) {
+        return resp;
+    }
+    let mut user = match load_owned_user(path.into_inner(), auth.org_id) {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    match user.update(&payload.name, payload.role, payload.is_active) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Team member updated".to_string(),
+            data: Some(user),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to update team member: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/users/{id}",
+    tag = "Users",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "User UUID")),
+    responses(
+        (status = 200, description = "Team member removed", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "User not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[delete("/users/{id}")]
+pub async fn delete_org_user(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    if let Err(resp) = auth.require_role(&[OrgRole::Admin]) {
+        return resp;
+    }
+    let user_id = path.into_inner();
+    if auth.user_id == Some(user_id) {
+        return HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: "You can't delete your own account".to_string(),
+            data: None,
+        });
+    }
+    let user = match load_owned_user(user_id, auth.org_id) {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    match user.delete() {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::<String> {
+            success: true,
+            message: "Team member removed".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to remove team member: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── OpenAPI + routing ─────────────────────────────────────────────────────────
 
 struct SecurityAddon;
@@ -2950,7 +3342,12 @@ impl Modify for SecurityAddon {
         health_check,
         auth_orgs,
         auth_login,
+        user_login,
         auth_me,
+        list_org_users,
+        add_org_user,
+        update_org_user,
+        delete_org_user,
         list_orgs,
         get_org,
         create_org,
@@ -3003,7 +3400,8 @@ impl Modify for SecurityAddon {
     ),
     components(
         schemas(
-            LoginPayload, LoginData,
+            LoginPayload, LoginData, UserLoginPayload, CreateUserPayload, UpdateUserPayload,
+            OrgUser, OrgRole,
             CreateOrgPayload, UpdateOrgPayload, LocationPayload,
             CreateVehiclePayload, UpdateVehiclePayload, TrackLocationPayload, CreateStockPayload, UpdateStockPayload,
             CreateGodownPayload, UpdateGodownPayload,
@@ -3026,13 +3424,14 @@ impl Modify for SecurityAddon {
             DriverResponse, DriverListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
-            OpsReportResponse,
+            OpsReportResponse, UserResponse, UserListResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
     ),
     tags(
         (name = "Health", description = "Health check"),
         (name = "Auth", description = "Authentication endpoints"),
+        (name = "Users", description = "Role-scoped team members within an organization"),
         (name = "Organizations", description = "Organization management"),
         (name = "Vehicles", description = "Vehicle fleet management"),
         (name = "Drivers", description = "Driver records and vehicle assignment"),
@@ -3052,7 +3451,12 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(health_check)
             .service(auth_orgs)
             .service(auth_login)
+            .service(user_login)
             .service(auth_me)
+            .service(list_org_users)
+            .service(add_org_user)
+            .service(update_org_user)
+            .service(delete_org_user)
             .service(list_orgs)
             .service(get_org)
             .service(create_org)
@@ -5945,6 +6349,227 @@ mod tests {
         let req = test::TestRequest::get()
             .uri(&format!("/api/orgs/{}/reports", org.id))
             .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    // ── Users / roles ───────────────────────────────────────────────────────
+
+    /// As Admin `admin_auth`, create a team member in `org_id` with `role`,
+    /// then log in as them and return their `Bearer …` header.
+    async fn add_user_and_login(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        admin_auth: &str,
+        email: &str,
+        role: OrgRole,
+    ) -> String {
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{org_id}/users"))
+            .insert_header(("Authorization", admin_auth.to_string()))
+            .set_json(&CreateUserPayload {
+                name: format!("User {email}"),
+                email: email.to_string(),
+                password: "team-member-pw".to_string(),
+                role,
+            })
+            .to_request();
+        assert_eq!(test::call_service(app, req).await.status().as_u16(), 201);
+
+        let req = test::TestRequest::post()
+            .uri("/api/auth/user-login")
+            .set_json(&UserLoginPayload {
+                email: email.to_string(),
+                password: "team-member-pw".to_string(),
+            })
+            .to_request();
+        let resp = test::call_service(app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let data = test::read_body_json::<ApiResponse<LoginData>, _>(resp).await.data.unwrap();
+        assert_eq!(data.role, role.as_str());
+        format!("Bearer {}", data.token)
+    }
+
+    #[actix_web::test]
+    async fn test_user_login_rejects_wrong_password_and_inactive_account() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, admin) = setup_org(&app, "User Login Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/users", org.id))
+            .insert_header(("Authorization", admin.clone()))
+            .set_json(&CreateUserPayload {
+                name: "Dana".to_string(),
+                email: "dana@example.com".to_string(),
+                password: "dana-password".to_string(),
+                role: OrgRole::Dispatcher,
+            })
+            .to_request();
+        let user = test::read_body_json::<ApiResponse<OrgUser>, _>(test::call_service(&app, req).await)
+            .await
+            .data
+            .unwrap();
+
+        let bad = test::TestRequest::post()
+            .uri("/api/auth/user-login")
+            .set_json(&UserLoginPayload { email: "dana@example.com".into(), password: "nope".into() })
+            .to_request();
+        assert_eq!(test::call_service(&app, bad).await.status().as_u16(), 401);
+
+        // Deactivate, then a correct password still fails.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/users/{}", user.id))
+            .insert_header(("Authorization", admin))
+            .set_json(&UpdateUserPayload { name: "Dana".into(), role: OrgRole::Dispatcher, is_active: false })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let after = test::TestRequest::post()
+            .uri("/api/auth/user-login")
+            .set_json(&UserLoginPayload { email: "dana@example.com".into(), password: "dana-password".into() })
+            .to_request();
+        assert_eq!(test::call_service(&app, after).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_only_admin_manages_users_and_email_is_unique() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, admin) = setup_org(&app, "User Mgmt Org").await;
+
+        let dispatcher = add_user_and_login(&app, org.id, &admin, "disp@example.com", OrgRole::Dispatcher).await;
+
+        // A dispatcher cannot list or create users.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/users", org.id))
+            .insert_header(("Authorization", dispatcher.clone()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/users", org.id))
+            .insert_header(("Authorization", dispatcher))
+            .set_json(&CreateUserPayload {
+                name: "Nope".into(), email: "nope@example.com".into(),
+                password: "password1".into(), role: OrgRole::Admin,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        // Admin listing sees the dispatcher; a duplicate email is 409.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/users", org.id))
+            .insert_header(("Authorization", admin.clone()))
+            .to_request();
+        let users = test::read_body_json::<ApiResponse<Vec<OrgUser>>, _>(test::call_service(&app, req).await)
+            .await.data.unwrap();
+        assert_eq!(users.len(), 1);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/users", org.id))
+            .insert_header(("Authorization", admin))
+            .set_json(&CreateUserPayload {
+                name: "Dup".into(), email: "DISP@example.com".into(),
+                password: "password1".into(), role: OrgRole::WarehouseStaff,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
+    }
+
+    #[actix_web::test]
+    async fn test_dispatcher_can_dispatch_but_warehouse_staff_cannot() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, dispatch, admin) = setup_dispatch(&app, "Role Dispatch Org").await;
+        let customer_id = dispatch.customer_id;
+
+        // setup_dispatch already put the one vehicle on a PENDING trip; cancel
+        // it (as Admin) so a fresh dispatch has a free vehicle to pick.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", dispatch.id))
+            .insert_header(("Authorization", admin.clone()))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Cancelled,
+                proof_of_delivery: None,
+                return_to_godown_id: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let dispatcher = add_user_and_login(&app, org.id, &admin, "d@example.com", OrgRole::Dispatcher).await;
+        let warehouse = add_user_and_login(&app, org.id, &admin, "w@example.com", OrgRole::WarehouseStaff).await;
+
+        let body = DispatchRequestPayload {
+            customer_id,
+            line_items: vec![DispatchLineItemPayload {
+                stock_description: "Dispatch Test Goods".to_string(),
+                requested_quantity: 1,
+            }],
+        };
+
+        // Warehouse staff: 403.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", warehouse))
+            .set_json(&body)
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        // Dispatcher: allowed (200 — the setup org has stock + a free vehicle).
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", dispatcher))
+            .set_json(&body)
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+    }
+
+    #[actix_web::test]
+    async fn test_warehouse_staff_can_add_stock_but_dispatcher_cannot() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, godown, admin) = setup_org_with_godown(&app, "Role Stock Org", "Shed").await;
+
+        let dispatcher = add_user_and_login(&app, org.id, &admin, "d2@example.com", OrgRole::Dispatcher).await;
+        let warehouse = add_user_and_login(&app, org.id, &admin, "w2@example.com", OrgRole::WarehouseStaff).await;
+
+        let stock = CreateStockPayload {
+            description: "Pallets".to_string(),
+            quantity: 10,
+            volume_in_size: 1,
+            reorder_threshold: None,
+        };
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", dispatcher))
+            .set_json(&stock)
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", warehouse))
+            .set_json(&stock)
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+    }
+
+    #[actix_web::test]
+    async fn test_delete_org_requires_admin() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, admin) = setup_org(&app, "Delete Guard Org").await;
+        let dispatcher = add_user_and_login(&app, org.id, &admin, "dd@example.com", OrgRole::Dispatcher).await;
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/orgs/{}", org.id))
+            .insert_header(("Authorization", dispatcher))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }

@@ -164,6 +164,24 @@ export interface Invoice {
   status: PaymentStatus;
 }
 
+// Mirrors OrgRole in src/logistics/user/user.rs.
+export type OrgRole = 'ADMIN' | 'DISPATCHER' | 'WAREHOUSE_STAFF';
+export const ORG_ROLES: OrgRole[] = ['ADMIN', 'DISPATCHER', 'WAREHOUSE_STAFF'];
+export const ROLE_LABELS: Record<OrgRole, string> = {
+  ADMIN: 'Admin',
+  DISPATCHER: 'Dispatcher',
+  WAREHOUSE_STAFF: 'Warehouse staff',
+};
+
+export interface OrgUser {
+  id: string;
+  org_id: string;
+  name: string;
+  email: string;
+  role: OrgRole;
+  is_active: boolean;
+}
+
 export interface CustomerBillingSummary {
   customer_id: string;
   invoice_count: number;

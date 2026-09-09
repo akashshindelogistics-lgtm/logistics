@@ -58,7 +58,9 @@ jobs:
           paths = spec.get('paths', {})
           print(f'OpenAPI {spec[\"openapi\"]} — {len(paths)} paths')
           expected = [
-              '/api/health', '/api/orgs', '/api/orgs/{id}', '/api/orgs/{id}/location',
+              '/api/health', '/api/auth/login', '/api/auth/user-login',
+              '/api/orgs/{id}/users', '/api/users/{id}',
+              '/api/orgs', '/api/orgs/{id}', '/api/orgs/{id}/location',
               '/api/orgs/{id}/vehicles', '/api/orgs/{id}/godowns', '/api/godowns/{gid}',
               '/api/godowns/{gid}/location', '/api/godowns/{gid}/stock',
               '/api/godowns/{gid}/stock/{desc}', '/api/godowns/{gid}/transfer',

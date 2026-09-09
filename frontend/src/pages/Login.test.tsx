@@ -65,6 +65,27 @@ describe('Login page', () => {
     expect(navigateMock).toHaveBeenCalledWith('/orgs/o1', { replace: true });
   });
 
+  it('switches to team-member mode and signs in by email', async () => {
+    const user = userEvent.setup();
+    vi.mocked(authApi.listAuthOrgs).mockResolvedValue(orgList as never);
+    vi.mocked(authApi.userLogin).mockResolvedValue({
+      data: { success: true, data: { token: 't', org_id: 'o1', org_name: 'Express Freight', role: 'DISPATCHER', user_name: 'Dee' } },
+    } as never);
+
+    render(<Login />);
+    await screen.findByRole('option', { name: 'Express Freight' });
+
+    await user.click(screen.getByRole('tab', { name: /team member/i }));
+    // The org dropdown is gone; an email field replaces it.
+    expect(screen.queryByLabelText(/organization/i)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText(/email/i), 'dee@example.com');
+    await user.type(screen.getByLabelText(/password/i), 'pw12345678');
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+    expect(authApi.userLogin).toHaveBeenCalledWith('dee@example.com', 'pw12345678');
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/orgs/o1', { replace: true }));
+  });
+
   it('shows an invalid-credentials error when the login call rejects', async () => {
     const user = userEvent.setup();
     vi.mocked(authApi.listAuthOrgs).mockResolvedValue(orgList as never);

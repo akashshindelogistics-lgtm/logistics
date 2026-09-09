@@ -53,8 +53,11 @@ operations, live location maps, and AI-generated dispatch summaries.
   inventory, and dispatch volume over the last 14 days.
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
-- **Authentication** — org-level login secured with JWTs and bcrypt-hashed
-  passwords.
+- **Authentication & roles** — JWT + bcrypt login. The organization password
+  is the **Admin**; an Admin can add team members who each sign in with their
+  own email and one of three roles — **Admin**, **Dispatcher** (runs dispatches
+  and billing, manages customers/drivers/vehicles), or **Warehouse staff**
+  (manages godowns and stock). Every role can read everything in its org.
 - **Interactive API docs** — a Swagger UI generated from the API with
   `utoipa`, auto-deployed to
   [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/api-docs/)
@@ -181,8 +184,9 @@ npm run test:e2e
 # Vite dev server and the Rust API itself if they aren't already running.
 npm run test:e2e:demo
 
-# Or watch just one feature's flow, e.g. operations reporting:
-npm run test:e2e:demo:reports
+# Or watch just one feature's flow:
+npm run test:e2e:demo:reports   # operations reporting
+npm run test:e2e:demo:roles     # role-scoped team members
 ```
 
 ## API overview
@@ -195,9 +199,12 @@ All routes are served under the `/api` prefix.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/auth/login` | Log in to an organization |
+| POST | `/api/auth/login` | Log in to an organization (org-owner password — always Admin) |
+| POST | `/api/auth/user-login` | Log in as a team member with email + password |
 | GET | `/api/auth/me` | Get the authenticated organization |
 | GET | `/api/auth/orgs` | List organizations available for login |
+| GET/POST | `/api/orgs/{id}/users` | List / add team members (Admin only) |
+| PUT/DELETE | `/api/users/{id}` | Change a member's name/role/active flag, or remove them (Admin only) |
 | GET/POST | `/api/orgs` | List / create organizations |
 | GET/PUT/DELETE | `/api/orgs/{id}` | Get, update, or delete an organization |
 | PUT | `/api/orgs/{id}/location` | Update an organization's location |

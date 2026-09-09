@@ -1,9 +1,9 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { IconGrid, IconBuilding, IconTruck, IconUsers, IconPackage, IconDispatch, IconChart, IconX } from './Icons';
-import { getOrgName, getOrgId, clearAuth, isLoggedIn } from '../api/auth';
+import { getOrgName, getOrgId, clearAuth, isLoggedIn, isAdmin } from '../api/auth';
 import './Sidebar.css';
 
-const links = [
+const baseLinks = [
   { to: '/',           label: 'Dashboard',      Icon: IconGrid },
   { to: '/orgs',       label: 'My Organization', Icon: IconBuilding },
   { to: '/vehicles',   label: 'Vehicles',        Icon: IconTruck },
@@ -11,12 +11,16 @@ const links = [
   { to: '/dispatches', label: 'Dispatches',      Icon: IconDispatch },
   { to: '/reports',    label: 'Reports',         Icon: IconChart },
 ];
+const adminLinks = [
+  { to: '/team',       label: 'Team',            Icon: IconUsers },
+];
 
 export default function Sidebar() {
   const navigate = useNavigate();
   const loggedIn = isLoggedIn();
   const orgName = getOrgName();
   const orgId = getOrgId();
+  const links = [...baseLinks, ...(loggedIn && isAdmin() ? adminLinks : [])];
 
   const handleLogout = () => {
     clearAuth();

@@ -45,6 +45,19 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await expect(page).toHaveURL(`/orgs/${org.id}`);
   });
 
+  await test.step('Add a Dispatcher team member', async () => {
+    await page.getByRole('link', { name: /team/i }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Team' })).toBeVisible();
+    await page.getByRole('button', { name: /add member/i }).click();
+    await page.getByLabel('Name').fill(`Dispatcher ${uid()}`);
+    await page.getByLabel('Email').fill(`dispatcher-${uid()}@example.com`);
+    await page.getByLabel(/temporary password/i).fill('team-member-pw');
+    await page.getByLabel('Role', { exact: true }).selectOption('DISPATCHER');
+    await page.getByRole('button', { name: /^add member$/i }).click();
+    await expect(page.locator('.table-toolbar .badge')).toHaveText('1', { timeout: 8000 });
+    await page.goto(`/orgs/${org.id}`);
+  });
+
   await test.step('Create two godowns', async () => {
     await page.getByLabel('Godown Name').fill(godownA);
     await page.getByLabel('Address').fill('Plot 5, MIDC Industrial Area, Pune');

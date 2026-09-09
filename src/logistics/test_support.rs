@@ -282,6 +282,20 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
         )",
     )
     .expect("migrate: create OrgCredentials");
+
+    conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS OrgUsers (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            email VARCHAR(255) NOT NULL UNIQUE,
+            password_hash VARCHAR(255) NOT NULL,
+            role VARCHAR(32) NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            CONSTRAINT fk_org_user_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create OrgUsers");
 }
 
 /// A private, uniquely-named MySQL database scoped to exactly one test.

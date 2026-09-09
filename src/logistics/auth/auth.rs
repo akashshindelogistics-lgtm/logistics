@@ -44,11 +44,24 @@ pub fn ensure_jwt_secret_configured() {
     let _ = jwt_secret();
 }
 
+fn default_admin_role() -> String {
+    "ADMIN".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub org_id: String,
     pub org_name: String,
     pub exp: usize,
+    /// The team member this token belongs to, if it was issued by
+    /// `POST /api/auth/user-login`. Absent for the org-owner login, which is
+    /// always treated as `Admin`.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// `ADMIN` / `DISPATCHER` / `WAREHOUSE_STAFF`. Older tokens predate this
+    /// field and decode as `ADMIN`.
+    #[serde(default = "default_admin_role")]
+    pub role: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -133,7 +146,18 @@ impl OrgCredentials {
     }
 }
 
+/// Token for the org-owner login: no `user_id`, `Admin` role.
 pub fn generate_token(org_id: Uuid, org_name: &str) -> Result<String, Box<dyn Error>> {
+    generate_user_token(org_id, org_name, None, "ADMIN")
+}
+
+/// Token for a specific team member (`POST /api/auth/user-login`).
+pub fn generate_user_token(
+    org_id: Uuid,
+    org_name: &str,
+    user_id: Option<Uuid>,
+    role: &str,
+) -> Result<String, Box<dyn Error>> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -143,6 +167,8 @@ pub fn generate_token(org_id: Uuid, org_name: &str) -> Result<String, Box<dyn Er
         org_id: org_id.to_string(),
         org_name: org_name.to_string(),
         exp: (now + TOKEN_EXPIRY_SECS) as usize,
+        user_id: user_id.map(|u| u.to_string()),
+        role: role.to_string(),
     };
 
     let token = encode(
