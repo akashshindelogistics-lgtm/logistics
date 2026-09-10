@@ -158,6 +158,8 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     // location is captured in the same step instead of a follow-up API call.
     await page.getByLabel(/latitude/i).fill('12.9716');
     await page.getByLabel(/longitude/i).fill('77.5946');
+    // Contact details so the customer gets dispatch notifications.
+    await page.getByLabel(/email/i).fill(`sunrise-${uid()}@example.com`);
     await page.getByRole('button', { name: /^create customer$/i }).click();
 
     const custRow = page.getByRole('row', { name: new RegExp(custName) });
@@ -178,6 +180,15 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await page.getByLabel('Quantity 2').fill('15');
     await page.getByRole('button', { name: /dispatch stock/i }).click();
     await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
+  });
+
+  await test.step('The customer and driver were notified', async () => {
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').filter({ hasText: stockA });
+    await expect(row).toBeVisible({ timeout: 8000 });
+    await row.getByRole('button', { name: /notifications for/i }).click();
+    await expect(page.getByText(/on its way/i)).toBeVisible({ timeout: 8000 });
+    await expect(page.getByText('QUEUED').first()).toBeVisible();
   });
 
   await test.step('Check the operations report while the shipment is out', async () => {

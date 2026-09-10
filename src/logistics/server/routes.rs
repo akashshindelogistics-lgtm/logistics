@@ -12,6 +12,9 @@ use crate::logistics::dispatch::dispatch::{
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::godown::transfer::{StockTransfer, TransferError};
+use crate::logistics::notification::notification::{
+    Notification, NotificationChannel, NotificationEvent, NotificationStatus,
+};
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::reports::{
     DeliveryPerformance, DispatchVolumePoint, GodownInventory, OpsReport, VehicleUtilization,
@@ -229,6 +232,12 @@ pub struct CreateCustomerPayload {
     pub longitude: Option<f64>,
     #[serde(default)]
     pub location_address: Option<String>,
+    /// Optional contact details. Dispatch notifications go to the email if
+    /// set, otherwise the phone. Either can be left out.
+    #[serde(default)]
+    pub phone: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -510,6 +519,13 @@ pub struct UserListResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Vec<OrgUser>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct NotificationListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<Notification>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -2438,6 +2454,15 @@ pub async fn add_customer(
                     });
                 }
             }
+            if payload.phone.is_some() || payload.email.is_some() {
+                if let Err(err) = customer.set_contact(payload.phone.clone(), payload.email.clone()) {
+                    return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                        success: false,
+                        message: format!("Customer created but saving contact details failed: {}", err),
+                        data: None,
+                    });
+                }
+            }
             HttpResponse::Created().json(ApiResponse {
                 success: true,
                 message: "Customer created successfully".to_string(),
@@ -2655,17 +2680,38 @@ pub async fn dispatch_stock(
         .collect();
 
     match org.dispatch_stock_to_customer(&customer, &line_items) {
-        Ok(order) => HttpResponse::Ok().json(ApiResponse {
-            success: true,
-            message: "Stock dispatched successfully".to_string(),
-            data: Some(order),
-        }),
+        Ok(order) => {
+            // Best-effort: tell the customer and the assigned driver. A
+            // recording failure must not fail the dispatch itself.
+            let driver_phone = driver_phone_for_vehicle(&order.vehicle_registration_number, org_id);
+            let _ = Notification::record_dispatch_created(
+                org_id,
+                order.id,
+                &customer,
+                driver_phone.as_deref(),
+            );
+            HttpResponse::Ok().json(ApiResponse {
+                success: true,
+                message: "Stock dispatched successfully".to_string(),
+                data: Some(order),
+            })
+        }
         Err(err) => HttpResponse::BadRequest().json(ApiResponse::<String> {
             success: false,
             message: format!("Dispatch failed: {}", err),
             data: None,
         }),
     }
+}
+
+/// The phone number of the active driver assigned to `reg`, if any.
+fn driver_phone_for_vehicle(reg: &str, org_id: Uuid) -> Option<String> {
+    let vehicle = Vehicle::list_by_org(org_id)
+        .ok()?
+        .into_iter()
+        .find(|v| v.registration_number == reg)?;
+    let driver_id = vehicle.assigned_driver_id?;
+    Driver::get_by_id(driver_id).ok().flatten().map(|d| d.phone)
 }
 
 #[utoipa::path(
@@ -2706,11 +2752,22 @@ pub async fn update_dispatch_status(
         });
 
     match dispatch.transition_to(payload.status, proof, payload.return_to_godown_id) {
-        Ok(()) => HttpResponse::Ok().json(ApiResponse {
-            success: true,
-            message: format!("Dispatch status updated to {}", dispatch.status),
-            data: Some(dispatch),
-        }),
+        Ok(()) => {
+            if dispatch.status == DispatchStatus::Delivered {
+                if let Ok(Some(customer)) = Customer::get_by_id(dispatch.customer_id) {
+                    let _ = Notification::record_dispatch_delivered(
+                        auth.org_id,
+                        dispatch.id,
+                        &customer,
+                    );
+                }
+            }
+            HttpResponse::Ok().json(ApiResponse {
+                success: true,
+                message: format!("Dispatch status updated to {}", dispatch.status),
+                data: Some(dispatch),
+            })
+        }
         Err(err) => HttpResponse::BadRequest().json(ApiResponse::<String> {
             success: false,
             message: format!("Status update failed: {}", err),
@@ -3100,6 +3157,78 @@ pub async fn get_ops_report(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> im
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/dispatches/{id}/notifications",
+    tag = "Notifications",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Dispatch order UUID")),
+    responses(
+        (status = 200, description = "Notifications recorded for this dispatch", body = NotificationListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Dispatch not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/dispatches/{id}/notifications")]
+pub async fn list_dispatch_notifications(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match Notification::list_by_dispatch(dispatch.id) {
+        Ok(notifications) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} notifications", notifications.len()),
+            data: Some(notifications),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list notifications: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/notifications",
+    tag = "Notifications",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "The org's 100 most recent notifications", body = NotificationListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/notifications")]
+pub async fn list_org_notifications(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match Notification::list_by_org(org_id, 100) {
+        Ok(notifications) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} notifications", notifications.len()),
+            data: Some(notifications),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list notifications: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── Team members (role-scoped users) ─────────────────────────────────────────
 
 /// Load a user and confirm it belongs to `auth_org_id`, or return the
@@ -3397,6 +3526,8 @@ impl Modify for SecurityAddon {
         list_org_invoices,
         get_customer_billing,
         get_ops_report,
+        list_dispatch_notifications,
+        list_org_notifications,
     ),
     components(
         schemas(
@@ -3415,6 +3546,7 @@ impl Modify for SecurityAddon {
             DispatchOrder, DispatchLineItem, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             Invoice, PaymentStatus, CustomerBillingSummary,
             OpsReport, VehicleUtilization, DeliveryPerformance, GodownInventory, DispatchVolumePoint,
+            Notification, NotificationEvent, NotificationChannel, NotificationStatus,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             VehicleDocumentResponse, VehicleDocumentListResponse,
@@ -3424,7 +3556,7 @@ impl Modify for SecurityAddon {
             DriverResponse, DriverListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
-            OpsReportResponse, UserResponse, UserListResponse,
+            OpsReportResponse, UserResponse, UserListResponse, NotificationListResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
     ),
@@ -3441,6 +3573,7 @@ impl Modify for SecurityAddon {
         (name = "Dispatch", description = "Stock dispatch"),
         (name = "Billing", description = "Freight invoices and customer payment status"),
         (name = "Reports", description = "Operational reporting: fleet utilization, delivery performance, inventory, dispatch volume"),
+        (name = "Notifications", description = "Customer and driver notifications recorded for each dispatch"),
     )
 )]
 pub struct ApiDoc;
@@ -3505,7 +3638,9 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(pay_invoice)
             .service(list_org_invoices)
             .service(get_customer_billing)
-            .service(get_ops_report),
+            .service(get_ops_report)
+            .service(list_dispatch_notifications)
+            .service(list_org_notifications),
     )
     .service(
         SwaggerUi::new("/swagger-ui/{_:.*}")
@@ -4452,6 +4587,8 @@ mod tests {
                 latitude: None,
                 longitude: None,
                 location_address: None,
+                phone: None,
+                email: None,
             })
             .to_request();
         let body: ApiResponse<Customer> =
@@ -5083,6 +5220,8 @@ mod tests {
                 latitude: None,
                 longitude: None,
                 location_address: None,
+                phone: None,
+                email: None,
             })
             .to_request();
         let resp = test::call_service(app, req).await;
@@ -5119,6 +5258,8 @@ mod tests {
                 latitude: None,
                 longitude: None,
                 location_address: None,
+                phone: None,
+                email: None,
             })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
@@ -5139,6 +5280,8 @@ mod tests {
                 latitude: Some(19.0760),
                 longitude: Some(72.8777),
                 location_address: None,
+                phone: None,
+                email: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -5174,6 +5317,8 @@ mod tests {
                 latitude: Some(19.0),
                 longitude: None,
                 location_address: None,
+                phone: None,
+                email: None,
             })
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -6353,6 +6498,129 @@ mod tests {
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
 
+    // ── Notifications ───────────────────────────────────────────────────────
+
+    async fn dispatch_notifications(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        dispatch_id: Uuid,
+        auth: &str,
+    ) -> Vec<Notification> {
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/dispatches/{}/notifications", dispatch_id))
+            .insert_header(("Authorization", auth.to_string()))
+            .to_request();
+        let resp = test::call_service(app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        test::read_body_json::<ApiResponse<Vec<Notification>>, _>(resp).await.data.unwrap()
+    }
+
+    #[actix_web::test]
+    async fn test_creating_a_dispatch_records_customer_and_driver_notifications() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, dispatch, auth) = setup_dispatch(&app, "Notify Create Org").await;
+
+        let notifs = dispatch_notifications(&app, dispatch.id, &auth).await;
+        assert_eq!(notifs.len(), 2);
+        assert!(notifs.iter().all(|n| n.event == NotificationEvent::DispatchCreated));
+
+        // setup_dispatch's customer has no contact details → SKIPPED.
+        let customer = notifs.iter().find(|n| n.recipient_kind == "customer").unwrap();
+        assert_eq!(customer.status, NotificationStatus::Skipped);
+
+        // The assigned driver has a phone → a QUEUED SMS.
+        let driver = notifs.iter().find(|n| n.recipient_kind == "driver").unwrap();
+        assert_eq!(driver.status, NotificationStatus::Queued);
+        assert_eq!(driver.channel, NotificationChannel::Sms);
+    }
+
+    #[actix_web::test]
+    async fn test_delivering_a_dispatch_records_a_delivered_notification() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (dispatch_id, auth) = advance_to_in_transit(&app, "Notify Deliver Org").await;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", dispatch_id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Delivered,
+                proof_of_delivery: Some(ProofOfDeliveryPayload {
+                    receiver_name: "R".to_string(),
+                    signature_or_photo_url: "https://x/y.png".to_string(),
+                }),
+                return_to_godown_id: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let notifs = dispatch_notifications(&app, dispatch_id, &auth).await;
+        let delivered: Vec<_> = notifs
+            .iter()
+            .filter(|n| n.event == NotificationEvent::DispatchDelivered)
+            .collect();
+        assert_eq!(delivered.len(), 1);
+        assert_eq!(delivered[0].recipient_kind, "customer");
+        assert!(delivered[0].body.contains("delivered"));
+    }
+
+    #[actix_web::test]
+    async fn test_org_notifications_feed_is_scoped_to_the_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _d, auth) = setup_dispatch(&app, "Notify Feed Org").await;
+        let (_other, other_auth) = setup_org(&app, "Notify Feed Intruder").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/notifications", org.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let feed = test::read_body_json::<ApiResponse<Vec<Notification>>, _>(
+            test::call_service(&app, req).await,
+        )
+        .await
+        .data
+        .unwrap();
+        assert_eq!(feed.len(), 2);
+        assert!(feed.iter().all(|n| n.org_id == org.id));
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/notifications", org.id))
+            .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_create_customer_with_contact_details() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Contact Cust Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/customers", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&CreateCustomerPayload {
+                name: "Reachable Retail".to_string(),
+                address: "1 Contact Rd".to_string(),
+                latitude: None,
+                longitude: None,
+                location_address: None,
+                phone: Some("+91 90000 00000".to_string()),
+                email: Some("ops@reachable.example".to_string()),
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let customer = test::read_body_json::<ApiResponse<Customer>, _>(resp).await.data.unwrap();
+        assert_eq!(customer.phone.as_deref(), Some("+91 90000 00000"));
+        assert_eq!(customer.email.as_deref(), Some("ops@reachable.example"));
+    }
+
     // ── Users / roles ───────────────────────────────────────────────────────
 
     /// As Admin `admin_auth`, create a team member in `org_id` with `role`,
@@ -6798,6 +7066,8 @@ mod tests {
                 latitude: None,
                 longitude: None,
                 location_address: None,
+                phone: None,
+                email: None,
             })
             .to_request();
         let customer: ApiResponse<Customer> =

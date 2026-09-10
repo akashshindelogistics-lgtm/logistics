@@ -161,7 +161,22 @@
 ** DONE Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
    Unit enum gains Kg/Litre/Box/Pallet/Piece; Unit::from_str is now
    case-insensitive with aliases and still falls back to MetricTon.
-** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
+** DONE Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
+   New src/logistics/notification module + Notifications table. On dispatch
+   create → a notification for the customer and the assigned driver; on
+   IN_TRANSIT→DELIVERED → one for the customer. Each row lands QUEUED (a
+   message ready for a provider to send) or SKIPPED (no contact on file);
+   nothing actually talks to Twilio/SMTP — that's a deploy-time integration,
+   noted in the doc. Customer gained optional phone + email (settable on
+   POST /api/orgs/{id}/customers, or Customer::set_contact); channel is email
+   if set else SMS. Reads: GET /api/dispatches/{id}/notifications and
+   GET /api/orgs/{id}/notifications (any org member). Frontend: Phone/Email
+   fields on the customer form, and a 🔔 Notifications column on the Dispatches
+   page that expands the recorded log per order. 11 new Rust tests (6 model,
+   4 route, 1 customer-contact), 4 frontend unit, 1 Playwright flow, a
+   full-flow demo step, and `npm run test:e2e:demo:notifications`. pages.yml +
+   README updated.
+   Plan/context: [[file:docs/notifications.md]]
 ** DONE Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
    New src/logistics/reports module + GET /api/orgs/{id}/reports (bearer, own
    org only). All derived, no new tables — OpsReport::for_org folds the org's

@@ -6,6 +6,7 @@ pub mod db;
 pub mod dispatch;
 pub mod driver;
 pub mod godown;
+pub mod notification;
 pub mod orgs;
 pub mod reports;
 pub mod server;

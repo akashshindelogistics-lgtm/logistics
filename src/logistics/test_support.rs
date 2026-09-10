@@ -194,10 +194,30 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             longitude DOUBLE DEFAULT NULL,
             last_updated_at BIGINT DEFAULT NULL,
             location_address VARCHAR(255) DEFAULT NULL,
+            phone VARCHAR(255) DEFAULT NULL,
+            email VARCHAR(255) DEFAULT NULL,
             CONSTRAINT fk_customer_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
         )",
     )
     .expect("migrate: create Customers");
+
+    conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS Notifications (
+            id VARCHAR(36) PRIMARY KEY,
+            seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE,
+            org_id VARCHAR(36) NOT NULL,
+            dispatch_id VARCHAR(36) NOT NULL,
+            event VARCHAR(32) NOT NULL,
+            channel VARCHAR(16) NOT NULL,
+            recipient_kind VARCHAR(16) NOT NULL,
+            recipient VARCHAR(255) NOT NULL,
+            body TEXT NOT NULL,
+            status VARCHAR(16) NOT NULL,
+            created_at BIGINT NOT NULL,
+            CONSTRAINT fk_notification_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create Notifications");
 
     // Transitional: a dispatch used to carry exactly one stock line
     // (`Dispatches.stock_description` + `quantity`); it now carries a list of

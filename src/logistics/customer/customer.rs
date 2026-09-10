@@ -18,6 +18,46 @@ pub struct Customer {
     pub name: String,
     pub address: String,
     pub location: Option<Location>,
+    /// Contact details used to notify the customer about their dispatches
+    /// (see `crate::logistics::notification`). Both optional; set on
+    /// `POST /api/orgs/{id}/customers`.
+    #[serde(default)]
+    pub phone: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// `SELECT id, org_id, name, address, latitude, longitude, last_updated_at,
+/// location_address, phone, email` as it comes back from MySQL.
+type CustomerRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<f64>,
+    Option<f64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// Add the `phone` / `email` columns to a `Customers` table that predates
+/// them. Fresh databases get the columns in `CREATE TABLE`; this is only for
+/// a long-lived local database from before dispatch notifications landed.
+fn ensure_contact_columns(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    for col in ["phone", "email"] {
+        let present: Option<i64> = conn.exec_first(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'Customers'
+               AND column_name = :col",
+            params! { "col" => col },
+        )?;
+        if present.is_none() {
+            conn.query_drop(format!("ALTER TABLE Customers ADD COLUMN {col} VARCHAR(255) DEFAULT NULL"))?;
+        }
+    }
+    Ok(())
 }
 
 impl Customer {
@@ -57,9 +97,12 @@ impl Customer {
                 longitude DOUBLE DEFAULT NULL,
                 last_updated_at BIGINT DEFAULT NULL,
                 location_address VARCHAR(255) DEFAULT NULL,
+                phone VARCHAR(255) DEFAULT NULL,
+                email VARCHAR(255) DEFAULT NULL,
                 CONSTRAINT fk_customer_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
         )?;
+        ensure_contact_columns(conn)?;
         Ok(())
     }
 
@@ -78,6 +121,8 @@ impl Customer {
             name: name.into(),
             address: address.into(),
             location: None,
+            phone: None,
+            email: None,
         };
 
         conn.exec_drop(
@@ -91,6 +136,33 @@ impl Customer {
         )?;
 
         Ok(customer)
+    }
+
+    /// Set (or clear, with `None`) the customer's phone and email — the
+    /// contact details dispatch notifications are sent to. Blank strings are
+    /// treated as `None`.
+    pub fn set_contact(
+        &mut self,
+        phone: Option<String>,
+        email: Option<String>,
+    ) -> Result<(), Box<dyn Error>> {
+        let clean = |s: Option<String>| s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let phone = clean(phone);
+        let email = clean(email);
+
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        conn.exec_drop(
+            "UPDATE Customers SET phone = :phone, email = :email WHERE id = :id",
+            params! {
+                "id" => self.id.to_string(),
+                "phone" => &phone,
+                "email" => &email,
+            },
+        )?;
+        self.phone = phone;
+        self.email = email;
+        Ok(())
     }
 
     pub fn update_location(
@@ -135,14 +207,7 @@ impl Customer {
     }
 
     fn row_to_customer(
-        id_str: String,
-        org_id_str: String,
-        name: String,
-        address: String,
-        lat: Option<f64>,
-        lng: Option<f64>,
-        ts: Option<i64>,
-        addr: Option<String>,
+        (id_str, org_id_str, name, address, lat, lng, ts, addr, phone, email): CustomerRow,
     ) -> Self {
         let location = lat.map(|latitude| Location {
             latitude,
@@ -156,6 +221,8 @@ impl Customer {
             name,
             address,
             location,
+            phone,
+            email,
         }
     }
 
@@ -164,15 +231,12 @@ impl Customer {
         let mut conn = db_connection.get_connection()?;
         Self::ensure_table(&mut conn)?;
 
-        let row: Option<(String, String, String, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn
-            .exec_first(
-                "SELECT id, org_id, name, address, latitude, longitude, last_updated_at, location_address FROM Customers WHERE id = :id",
-                params! { "id" => id.to_string() },
-            )?;
+        let row: Option<CustomerRow> = conn.exec_first(
+            "SELECT id, org_id, name, address, latitude, longitude, last_updated_at, location_address, phone, email FROM Customers WHERE id = :id",
+            params! { "id" => id.to_string() },
+        )?;
 
-        Ok(row.map(|(id, org_id, name, address, lat, lng, ts, addr)| {
-            Self::row_to_customer(id, org_id, name, address, lat, lng, ts, addr)
-        }))
+        Ok(row.map(Self::row_to_customer))
     }
 
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
@@ -180,18 +244,12 @@ impl Customer {
         let mut conn = db_connection.get_connection()?;
         Self::ensure_table(&mut conn)?;
 
-        let rows: Vec<(String, String, String, String, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
-            "SELECT id, org_id, name, address, latitude, longitude, last_updated_at, location_address FROM Customers WHERE org_id = :org_id ORDER BY name",
+        let rows: Vec<CustomerRow> = conn.exec(
+            "SELECT id, org_id, name, address, latitude, longitude, last_updated_at, location_address, phone, email FROM Customers WHERE org_id = :org_id ORDER BY name",
             params! { "org_id" => org_id.to_string() },
-            |(id, org_id, name, address, lat, lng, ts, addr)| (id, org_id, name, address, lat, lng, ts, addr),
         )?;
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, org_id, name, address, lat, lng, ts, addr)| {
-                Self::row_to_customer(id, org_id, name, address, lat, lng, ts, addr)
-            })
-            .collect())
+        Ok(rows.into_iter().map(Self::row_to_customer).collect())
     }
 
     pub fn delete(&self) -> Result<(), Box<dyn Error>> {
@@ -261,6 +319,23 @@ mod tests {
         let b = Customer::list_by_org(org_b.id).expect("list b");
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].name, "Gamma Stores");
+    }
+
+    #[test]
+    fn test_set_contact_normalises_and_round_trips() {
+        let _db = TestDb::create();
+        let org = make_org("Contact Org");
+        let mut customer = Customer::create_customer(org.id, "Reachable Co", "5 St").expect("create");
+        assert_eq!(customer.phone, None);
+        assert_eq!(customer.email, None);
+
+        customer.set_contact(Some("  +91 90000 00000 ".into()), Some("  ".into())).expect("set");
+        assert_eq!(customer.phone.as_deref(), Some("+91 90000 00000"));
+        assert_eq!(customer.email, None, "a blank string is stored as None");
+
+        let fetched = Customer::get_by_id(customer.id).expect("get").expect("exists");
+        assert_eq!(fetched.phone.as_deref(), Some("+91 90000 00000"));
+        assert_eq!(fetched.email, None);
     }
 
     #[test]

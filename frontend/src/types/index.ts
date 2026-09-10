@@ -103,6 +103,26 @@ export interface Customer {
   name: string;
   address: string;
   location?: Location;
+  phone?: string | null;
+  email?: string | null;
+}
+
+// Mirrors src/logistics/notification/notification.rs.
+export type NotificationEvent = 'DISPATCH_CREATED' | 'DISPATCH_DELIVERED';
+export type NotificationChannel = 'SMS' | 'EMAIL';
+export type NotificationStatus = 'QUEUED' | 'SKIPPED';
+
+export interface Notification {
+  id: string;
+  org_id: string;
+  dispatch_id: string;
+  event: NotificationEvent;
+  channel: NotificationChannel;
+  recipient_kind: string;
+  recipient: string;
+  body: string;
+  status: NotificationStatus;
+  created_at: number;
 }
 
 // Mirrors DispatchStatus in src/logistics/dispatch/dispatch.rs. Keep in sync

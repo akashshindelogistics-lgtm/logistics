@@ -51,6 +51,10 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Operational reporting** — a Reports page with fleet utilization, delivery
   performance (count, average time to deliver, on-time rate), per-godown
   inventory, and dispatch volume over the last 14 days.
+- **Dispatch notifications** — when a dispatch is created or delivered, a
+  notification is recorded for the customer (email or SMS, whichever is on
+  file) and the driver (SMS). The Dispatches page shows the log per order.
+  Actual SMS/email sending is left to a provider integration.
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
 - **Authentication & roles** — JWT + bcrypt login. The organization password
@@ -185,8 +189,9 @@ npm run test:e2e
 npm run test:e2e:demo
 
 # Or watch just one feature's flow:
-npm run test:e2e:demo:reports   # operations reporting
-npm run test:e2e:demo:roles     # role-scoped team members
+npm run test:e2e:demo:reports        # operations reporting
+npm run test:e2e:demo:roles          # role-scoped team members
+npm run test:e2e:demo:notifications  # dispatch notifications
 ```
 
 ## API overview
@@ -232,6 +237,8 @@ All routes are served under the `/api` prefix.
 | GET | `/api/dispatches` | List dispatch orders |
 | PUT | `/api/dispatches/{id}/status` | Advance a dispatch's lifecycle status |
 | GET | `/api/dispatches/{id}/summary` | AI-generated summary of a dispatch |
+| GET | `/api/dispatches/{id}/notifications` | Customer + driver notifications recorded for a dispatch |
+| GET | `/api/orgs/{id}/notifications` | The org's 100 most recent notifications |
 | GET/POST | `/api/dispatches/{id}/invoice` | Get / raise the freight invoice for a dispatch |
 | PUT | `/api/invoices/{id}` | Amend an unpaid invoice's amount or due date |
 | POST | `/api/invoices/{id}/pay` | Mark an invoice paid |
