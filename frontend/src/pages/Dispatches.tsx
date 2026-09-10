@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { listDispatches, getDispatchSummary, updateDispatchStatus } from '../api/dispatches';
 import { getOrg } from '../api/orgs';
 import { listOrgInvoices, createDispatchInvoice, payInvoice } from '../api/billing';
+import { listDispatchNotifications } from '../api/notifications';
 import { getOrgId } from '../api/auth';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, type NextAction } from '../lib/dispatchLifecycle';
-import type { DispatchOrder, Invoice, PaymentStatus } from '../types';
+import type { DispatchOrder, Invoice, Notification, PaymentStatus } from '../types';
 import './page.css';
 
 const PAYMENT_TAG_CLASS: Record<PaymentStatus, string> = {
@@ -37,6 +38,23 @@ export default function Dispatches() {
   const [invDue, setInvDue] = useState('');
   const [invBusyId, setInvBusyId] = useState<string | null>(null);
   const [invError, setInvError] = useState<Record<string, string>>({});
+
+  const [notifsOpenId, setNotifsOpenId] = useState<string | null>(null);
+  const [notifs, setNotifs] = useState<Record<string, Notification[]>>({});
+  const [notifsLoadingId, setNotifsLoadingId] = useState<string | null>(null);
+
+  const toggleNotifs = async (id: string) => {
+    if (notifsOpenId === id) { setNotifsOpenId(null); return; }
+    setNotifsOpenId(id);
+    // Always refetch on open — notifications get added as a dispatch progresses.
+    setNotifsLoadingId(id);
+    try {
+      const res = await listDispatchNotifications(id);
+      setNotifs(prev => ({ ...prev, [id]: res.data ?? [] }));
+    } finally {
+      setNotifsLoadingId(null);
+    }
+  };
 
   useEffect(() => {
     listDispatches()
@@ -211,6 +229,7 @@ export default function Dispatches() {
                   <th>Billing</th>
                   <th>Actions</th>
                   <th>Dispatched At</th>
+                  <th>Notifications</th>
                   <th>AI Status</th>
                 </tr>
               </thead>
@@ -302,6 +321,20 @@ export default function Dispatches() {
                       </td>
                       <td>
                         <button
+                          className={`btn btn-sm ${notifsOpenId === o.id ? 'btn-ghost' : 'btn-ghost'}`}
+                          onClick={() => toggleNotifs(o.id)}
+                          aria-label={`Notifications for ${o.id.slice(0, 8)}`}
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          {notifsLoadingId === o.id
+                            ? '…'
+                            : notifsOpenId === o.id
+                              ? 'Hide'
+                              : `🔔 ${notifs[o.id] ? notifs[o.id].length : ''}`.trim()}
+                        </button>
+                      </td>
+                      <td>
+                        <button
                           className={`btn btn-sm ${openId === o.id ? 'btn-ghost' : 'btn-ai'}`}
                           onClick={() => handleAiStatus(o.id)}
                           disabled={loadingId === o.id}
@@ -317,7 +350,7 @@ export default function Dispatches() {
                     </tr>
                     {invoiceDraftId === o.id && (
                       <tr key={`${o.id}-invoice`}>
-                        <td colSpan={9} style={{ padding: '0 16px 14px' }}>
+                        <td colSpan={10} style={{ padding: '0 16px 14px' }}>
                           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', padding: 12, background: 'var(--surface)', borderRadius: 8 }}>
                             <div className="field" style={{ marginBottom: 0 }}>
                               <label htmlFor={`inv-amount-${o.id}`}>Freight Amount</label>
@@ -354,7 +387,7 @@ export default function Dispatches() {
                     )}
                     {podDraft?.order.id === o.id && (
                       <tr key={`${o.id}-pod`}>
-                        <td colSpan={9} style={{ padding: '0 16px 14px' }}>
+                        <td colSpan={10} style={{ padding: '0 16px 14px' }}>
                           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', padding: 12, background: 'var(--surface)', borderRadius: 8 }}>
                             <div className="field" style={{ marginBottom: 0 }}>
                               <label htmlFor={`pod-receiver-${o.id}`}>Receiver Name</label>
@@ -390,7 +423,7 @@ export default function Dispatches() {
                     )}
                     {returnDraft?.order.id === o.id && (
                       <tr key={`${o.id}-return`}>
-                        <td colSpan={9} style={{ padding: '0 16px 14px' }}>
+                        <td colSpan={10} style={{ padding: '0 16px 14px' }}>
                           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', padding: 12, background: 'var(--surface)', borderRadius: 8 }}>
                             <div className="field" style={{ marginBottom: 0 }}>
                               <label htmlFor={`return-godown-${o.id}`}>Return stock to</label>
@@ -424,7 +457,7 @@ export default function Dispatches() {
                     )}
                     {openId === o.id && (
                       <tr key={`${o.id}-summary`}>
-                        <td colSpan={9} style={{ padding: '0 16px 14px', background: 'var(--ai-summary-bg, var(--surface))' }}>
+                        <td colSpan={10} style={{ padding: '0 16px 14px', background: 'var(--ai-summary-bg, var(--surface))' }}>
                           <div className="ai-summary-card">
                             {o.status_history.length > 0 && (
                               <div style={{ marginBottom: 12 }}>
@@ -462,6 +495,33 @@ export default function Dispatches() {
                               </div>
                             ) : (
                               <p className="ai-summary-text">{summaries[o.id]}</p>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {notifsOpenId === o.id && (
+                      <tr key={`${o.id}-notifs`}>
+                        <td colSpan={10} style={{ padding: '0 16px 14px' }}>
+                          <div style={{ padding: 12, background: 'var(--surface)', borderRadius: 8 }}>
+                            <h4 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-3)', marginBottom: 8 }}>
+                              Notifications
+                            </h4>
+                            {notifsLoadingId === o.id ? (
+                              <span className="muted">Loading…</span>
+                            ) : (notifs[o.id]?.length ?? 0) === 0 ? (
+                              <span className="muted">No notifications recorded for this dispatch.</span>
+                            ) : (
+                              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {notifs[o.id].map(n => (
+                                  <li key={n.id} style={{ fontSize: 13, display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                                    <span className={`status-tag ${n.status === 'QUEUED' ? 'tag-blue' : ''}`}>{n.status}</span>
+                                    <span className="badge">{n.recipient_kind}</span>
+                                    <span className="muted">{n.channel} → {n.recipient}</span>
+                                    <span>{n.body}</span>
+                                  </li>
+                                ))}
+                              </ul>
                             )}
                           </div>
                         </td>

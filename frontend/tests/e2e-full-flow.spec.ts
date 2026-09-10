@@ -45,6 +45,19 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await expect(page).toHaveURL(`/orgs/${org.id}`);
   });
 
+  await test.step('Add a Dispatcher team member', async () => {
+    await page.getByRole('link', { name: /team/i }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Team' })).toBeVisible();
+    await page.getByRole('button', { name: /add member/i }).click();
+    await page.getByLabel('Name').fill(`Dispatcher ${uid()}`);
+    await page.getByLabel('Email').fill(`dispatcher-${uid()}@example.com`);
+    await page.getByLabel(/temporary password/i).fill('team-member-pw');
+    await page.getByLabel('Role', { exact: true }).selectOption('DISPATCHER');
+    await page.getByRole('button', { name: /^add member$/i }).click();
+    await expect(page.locator('.table-toolbar .badge')).toHaveText('1', { timeout: 8000 });
+    await page.goto(`/orgs/${org.id}`);
+  });
+
   await test.step('Create two godowns', async () => {
     await page.getByLabel('Godown Name').fill(godownA);
     await page.getByLabel('Address').fill('Plot 5, MIDC Industrial Area, Pune');
@@ -145,6 +158,8 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     // location is captured in the same step instead of a follow-up API call.
     await page.getByLabel(/latitude/i).fill('12.9716');
     await page.getByLabel(/longitude/i).fill('77.5946');
+    // Contact details so the customer gets dispatch notifications.
+    await page.getByLabel(/email/i).fill(`sunrise-${uid()}@example.com`);
     await page.getByRole('button', { name: /^create customer$/i }).click();
 
     const custRow = page.getByRole('row', { name: new RegExp(custName) });
@@ -165,6 +180,15 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await page.getByLabel('Quantity 2').fill('15');
     await page.getByRole('button', { name: /dispatch stock/i }).click();
     await expect(page.getByText(/dispatch successful/i)).toBeVisible({ timeout: 10000 });
+  });
+
+  await test.step('The customer and driver were notified', async () => {
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').filter({ hasText: stockA });
+    await expect(row).toBeVisible({ timeout: 8000 });
+    await row.getByRole('button', { name: /notifications for/i }).click();
+    await expect(page.getByText(/on its way/i)).toBeVisible({ timeout: 8000 });
+    await expect(page.getByText('QUEUED').first()).toBeVisible();
   });
 
   await test.step('Check the operations report while the shipment is out', async () => {

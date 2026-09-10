@@ -6,12 +6,14 @@ import { STATUS_TAG_CLASS } from '../lib/dispatchLifecycle';
 import * as dispatchesApi from '../api/dispatches';
 import * as orgsApi from '../api/orgs';
 import * as billingApi from '../api/billing';
+import * as notificationsApi from '../api/notifications';
 import * as authApi from '../api/auth';
 import type { DispatchOrder, Invoice } from '../types';
 
 vi.mock('../api/dispatches');
 vi.mock('../api/orgs');
 vi.mock('../api/billing');
+vi.mock('../api/notifications');
 vi.mock('../api/auth');
 
 function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
@@ -60,6 +62,7 @@ describe('Dispatches page', () => {
       },
     });
     vi.mocked(billingApi.listOrgInvoices).mockResolvedValue({ success: true, message: '', data: [] });
+    vi.mocked(notificationsApi.listDispatchNotifications).mockResolvedValue({ success: true, message: '', data: [] });
   });
 
   it('shows an empty state when there are no orders', async () => {
@@ -285,5 +288,28 @@ describe('Dispatches page', () => {
     expect(billingApi.payInvoice).toHaveBeenCalledWith('inv-1');
     await waitFor(() => expect(screen.getByText('PAID')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /mark paid/i })).not.toBeInTheDocument();
+  });
+
+  it('loads and shows a dispatch\'s notifications when the bell is toggled', async () => {
+    const user = userEvent.setup();
+    const order = makeOrder();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+    vi.mocked(notificationsApi.listDispatchNotifications).mockResolvedValue({
+      success: true, message: '', data: [
+        { id: 'n1', org_id: 'org-1', dispatch_id: order.id, event: 'DISPATCH_CREATED', channel: 'EMAIL',
+          recipient_kind: 'customer', recipient: 'asha@example.com', body: 'Your order is on its way.', status: 'QUEUED', created_at: 1_700_000_100 },
+        { id: 'n2', org_id: 'org-1', dispatch_id: order.id, event: 'DISPATCH_CREATED', channel: 'SMS',
+          recipient_kind: 'driver', recipient: '(no contact on file)', body: 'New trip assigned.', status: 'SKIPPED', created_at: 1_700_000_100 },
+      ],
+    });
+
+    render(<Dispatches />);
+    const bell = await screen.findByRole('button', { name: /notifications for order-1/i });
+    await user.click(bell);
+
+    expect(notificationsApi.listDispatchNotifications).toHaveBeenCalledWith('order-1');
+    expect(await screen.findByText('Your order is on its way.')).toBeInTheDocument();
+    expect(screen.getByText('asha@example.com', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('New trip assigned.')).toBeInTheDocument();
   });
 });

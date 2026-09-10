@@ -20,6 +20,8 @@ export default function Customers() {
   const [address, setAddress] = useState('');
   const [lat, setLat] = useState('');
   const [lng, setLng] = useState('');
+  const [phone, setPhone] = useState('');
+  const [emailAddr, setEmailAddr] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [balances, setBalances] = useState<Record<string, CustomerBalance>>({});
@@ -45,7 +47,7 @@ export default function Customers() {
   useEffect(() => { load(); loadBalances(); }, []);
 
   const resetForm = () => {
-    setName(''); setAddress(''); setLat(''); setLng(''); setFormError('');
+    setName(''); setAddress(''); setLat(''); setLng(''); setPhone(''); setEmailAddr(''); setFormError('');
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -72,10 +74,14 @@ export default function Customers() {
       location = { latitude, longitude, address: address || undefined };
     }
 
+    const contact = (phone.trim() || emailAddr.trim())
+      ? { phone: phone.trim() || undefined, email: emailAddr.trim() || undefined }
+      : undefined;
+
     setSubmitting(true);
     setFormError('');
     try {
-      await createCustomer(orgId, name, address, location);
+      await createCustomer(orgId, name, address, location, contact);
       resetForm();
       setShowForm(false);
       load();
@@ -131,6 +137,19 @@ export default function Customers() {
             </div>
             <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>
               Pin the customer's delivery location on the map. Leave blank to set it later.
+            </p>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label htmlFor="cust-phone">Phone <span className="muted">(optional)</span></label>
+                <input id="cust-phone" type="tel" placeholder="+91 90000 00000" value={phone} onChange={e => setPhone(e.target.value)} />
+              </div>
+              <div className="field" style={{ flex: 1 }}>
+                <label htmlFor="cust-email">Email <span className="muted">(optional)</span></label>
+                <input id="cust-email" type="email" placeholder="ops@customer.example" value={emailAddr} onChange={e => setEmailAddr(e.target.value)} />
+              </div>
+            </div>
+            <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>
+              Dispatch notifications go to the email if set, otherwise the phone.
             </p>
             {formError && <div className="errortxt" style={{ marginBottom: 12 }}>{formError}</div>}
             <div style={{ display: 'flex', gap: 8 }}>

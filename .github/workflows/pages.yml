@@ -58,7 +58,9 @@ jobs:
           paths = spec.get('paths', {})
           print(f'OpenAPI {spec[\"openapi\"]} — {len(paths)} paths')
           expected = [
-              '/api/health', '/api/orgs', '/api/orgs/{id}', '/api/orgs/{id}/location',
+              '/api/health', '/api/auth/login', '/api/auth/user-login',
+              '/api/orgs/{id}/users', '/api/users/{id}',
+              '/api/orgs', '/api/orgs/{id}', '/api/orgs/{id}/location',
               '/api/orgs/{id}/vehicles', '/api/orgs/{id}/godowns', '/api/godowns/{gid}',
               '/api/godowns/{gid}/location', '/api/godowns/{gid}/stock',
               '/api/godowns/{gid}/stock/{desc}', '/api/godowns/{gid}/transfer',
@@ -74,6 +76,7 @@ jobs:
               '/api/dispatches/{id}/invoice', '/api/invoices/{id}',
               '/api/invoices/{id}/pay', '/api/orgs/{id}/invoices',
               '/api/orgs/{id}/reports',
+              '/api/dispatches/{id}/notifications', '/api/orgs/{id}/notifications',
           ]
           missing = [p for p in expected if p not in paths]
           if missing:

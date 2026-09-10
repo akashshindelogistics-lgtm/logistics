@@ -124,7 +124,25 @@
    existing lifecycle tests updated for the new arg), 3 new frontend unit tests,
    1 new Playwright flow.
    Plan/context: [[file:docs/dispatch-lifecycle.md]]
-** TODO Move from one login per org to role-scoped user accounts within an org (admin, dispatcher, warehouse staff) so more than one person at the same org can log in with different permissions
+** DONE Move from one login per org to role-scoped user accounts within an org (admin, dispatcher, warehouse staff) so more than one person at the same org can log in with different permissions
+   Additive: the org password stays and is the Admin. New src/logistics/user
+   module — OrgUser (email-unique, bcrypt, is_active) with an OrgRole enum
+   (ADMIN / DISPATCHER / WAREHOUSE_STAFF; from_str falls back to least
+   privilege). POST /api/auth/user-login issues a role-scoped JWT (Claims
+   gained user_id + role, serde-defaulted so old tokens still decode as
+   Admin). AuthenticatedOrg carries the role; require_role() 403s gate user
+   management + DELETE org (Admin), dispatch/dispatch-status/invoice
+   create·amend·pay (Admin|Dispatcher), and godown + stock writes
+   (Admin|Warehouse). Every role still reads everything. Admin-only user CRUD:
+   GET/POST /api/orgs/{id}/users, PUT/DELETE /api/users/{id}. Frontend: a
+   Login "Organization / Team member" tab switch (email login), a Team page
+   (/team, Admin-only sidebar link) to add/edit/deactivate/remove members
+   with inline role + status controls. 12 new Rust tests (7 model, 5 route),
+   14 new frontend unit tests, 3 new Playwright flows, a demo-flow step, and a
+   standalone `npm run test:e2e:demo:roles`. pages.yml + README updated.
+   Follow-ups noted in the doc: no self-serve invite/reset, and only the ~8
+   highest-impact write routes are gated.
+   Plan/context: [[file:docs/roles.md]]
 ** DONE Add an endpoint for GPS trackers to push vehicle location automatically, instead of only the manual `PUT .../location` call
    Every vehicle now carries a random `tracker_key` (UUID, generated at
    registration, on every Vehicle response). A device POSTs
@@ -143,7 +161,22 @@
 ** DONE Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
    Unit enum gains Kg/Litre/Box/Pallet/Piece; Unit::from_str is now
    case-insensitive with aliases and still falls back to MetricTon.
-** TODO Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
+** DONE Send notifications (SMS/email) to the customer and driver when a dispatch is created and when it's delivered
+   New src/logistics/notification module + Notifications table. On dispatch
+   create → a notification for the customer and the assigned driver; on
+   IN_TRANSIT→DELIVERED → one for the customer. Each row lands QUEUED (a
+   message ready for a provider to send) or SKIPPED (no contact on file);
+   nothing actually talks to Twilio/SMTP — that's a deploy-time integration,
+   noted in the doc. Customer gained optional phone + email (settable on
+   POST /api/orgs/{id}/customers, or Customer::set_contact); channel is email
+   if set else SMS. Reads: GET /api/dispatches/{id}/notifications and
+   GET /api/orgs/{id}/notifications (any org member). Frontend: Phone/Email
+   fields on the customer form, and a 🔔 Notifications column on the Dispatches
+   page that expands the recorded log per order. 11 new Rust tests (6 model,
+   4 route, 1 customer-contact), 4 frontend unit, 1 Playwright flow, a
+   full-flow demo step, and `npm run test:e2e:demo:notifications`. pages.yml +
+   README updated.
+   Plan/context: [[file:docs/notifications.md]]
 ** DONE Build basic ops reporting: vehicle utilization %, on-time delivery rate, stock turnover per godown, dispatch volume over time
    New src/logistics/reports module + GET /api/orgs/{id}/reports (bearer, own
    org only). All derived, no new tables — OpsReport::for_org folds the org's

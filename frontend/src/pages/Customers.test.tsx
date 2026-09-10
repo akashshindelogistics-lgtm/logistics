@@ -68,7 +68,7 @@ describe('Customers page', () => {
     await user.type(screen.getByLabelText(/address/i), '1 New Rd');
     await user.click(screen.getByRole('button', { name: /^create customer$/i }));
 
-    expect(customersApi.createCustomer).toHaveBeenCalledWith('org1', 'Fresh Co', '1 New Rd', undefined);
+    expect(customersApi.createCustomer).toHaveBeenCalledWith('org1', 'Fresh Co', '1 New Rd', undefined, undefined);
     await waitFor(() => expect(screen.getByText('Fresh Co')).toBeInTheDocument());
   });
 
@@ -93,6 +93,29 @@ describe('Customers page', () => {
       latitude: 19.076,
       longitude: 72.8777,
       address: '9 Pin Rd',
+    }, undefined);
+  });
+
+  it('passes phone/email as contact details when those fields are filled', async () => {
+    const user = userEvent.setup();
+    vi.mocked(customersApi.listCustomers)
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok([customer({ name: 'Reach Co' })]));
+    vi.mocked(customersApi.createCustomer).mockResolvedValue(ok(customer({ name: 'Reach Co' })));
+
+    render(<Customers />);
+    await screen.findByText(/no customers yet/i);
+
+    await user.click(screen.getByRole('button', { name: /new customer/i }));
+    await user.type(screen.getByLabelText(/customer name/i), 'Reach Co');
+    await user.type(screen.getByLabelText(/address/i), '2 Reach Rd');
+    await user.type(screen.getByLabelText(/phone/i), '+91 90000 00000');
+    await user.type(screen.getByLabelText(/email/i), 'ops@reach.example');
+    await user.click(screen.getByRole('button', { name: /^create customer$/i }));
+
+    expect(customersApi.createCustomer).toHaveBeenCalledWith('org1', 'Reach Co', '2 Reach Rd', undefined, {
+      phone: '+91 90000 00000',
+      email: 'ops@reach.example',
     });
   });
 

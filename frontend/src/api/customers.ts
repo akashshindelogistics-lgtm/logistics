@@ -13,11 +13,17 @@ export interface CustomerLocationInput {
   address?: string;
 }
 
+export interface CustomerContactInput {
+  phone?: string;
+  email?: string;
+}
+
 export const createCustomer = (
   orgId: string,
   name: string,
   address: string,
   location?: CustomerLocationInput,
+  contact?: CustomerContactInput,
 ) =>
   api
     .post<ApiResponse<Customer>>(`/orgs/${orgId}/customers`, {
@@ -30,6 +36,8 @@ export const createCustomer = (
             location_address: location.address,
           }
         : {}),
+      ...(contact?.phone ? { phone: contact.phone } : {}),
+      ...(contact?.email ? { email: contact.email } : {}),
     })
     .then(r => r.data);
 

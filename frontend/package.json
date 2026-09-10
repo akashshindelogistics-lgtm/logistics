@@ -14,7 +14,9 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
     "test:e2e:demo": "playwright test --config=playwright.demo.config.ts e2e-full-flow",
-    "test:e2e:demo:reports": "playwright test --config=playwright.demo.config.ts reports.demo"
+    "test:e2e:demo:reports": "playwright test --config=playwright.demo.config.ts reports.demo",
+    "test:e2e:demo:roles": "playwright test --config=playwright.demo.config.ts roles.demo",
+    "test:e2e:demo:notifications": "playwright test --config=playwright.demo.config.ts notifications.demo"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.22",

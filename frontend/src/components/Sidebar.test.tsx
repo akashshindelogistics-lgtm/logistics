@@ -58,6 +58,21 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /reports/i })).toHaveAttribute('href', '/reports');
   });
 
+  it('shows the Team link only to an admin', () => {
+    vi.mocked(authApi.isLoggedIn).mockReturnValue(true);
+    vi.mocked(authApi.getOrgName).mockReturnValue('Express Freight');
+    vi.mocked(authApi.getOrgId).mockReturnValue('o1');
+
+    vi.mocked(authApi.isAdmin).mockReturnValue(false);
+    const { unmount } = renderSidebar();
+    expect(screen.queryByRole('link', { name: /team/i })).not.toBeInTheDocument();
+    unmount();
+
+    vi.mocked(authApi.isAdmin).mockReturnValue(true);
+    renderSidebar();
+    expect(screen.getByRole('link', { name: /team/i })).toHaveAttribute('href', '/team');
+  });
+
   it('falls back to /orgs for the organization link when no id is known', () => {
     vi.mocked(authApi.isLoggedIn).mockReturnValue(false);
     vi.mocked(authApi.getOrgName).mockReturnValue(null);

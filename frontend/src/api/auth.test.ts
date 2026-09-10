@@ -4,10 +4,14 @@ import {
   getToken,
   getOrgId,
   getOrgName,
+  getRole,
+  getUserName,
+  isAdmin,
   isLoggedIn,
   storeAuth,
   clearAuth,
   login,
+  userLogin,
   listAuthOrgs,
 } from './auth';
 
@@ -48,6 +52,24 @@ describe('auth token/org storage helpers', () => {
     expect(getOrgId()).toBeNull();
     expect(getOrgName()).toBeNull();
   });
+
+  it('defaults the role to ADMIN and stores a team member role + name', () => {
+    storeAuth({ token: 't', org_id: 'o', org_name: 'Acme' });
+    expect(getRole()).toBe('ADMIN');
+    expect(isAdmin()).toBe(true);
+
+    storeAuth({ token: 't', org_id: 'o', org_name: 'Acme', role: 'WAREHOUSE_STAFF', user_name: 'Sam' });
+    expect(getRole()).toBe('WAREHOUSE_STAFF');
+    expect(isAdmin()).toBe(false);
+    expect(getUserName()).toBe('Sam');
+  });
+
+  it('clearAuth also drops the role and user name', () => {
+    storeAuth({ token: 't', org_id: 'o', org_name: 'Acme', role: 'DISPATCHER', user_name: 'Dee' });
+    clearAuth();
+    expect(getRole()).toBe('ADMIN');
+    expect(getUserName()).toBeNull();
+  });
 });
 
 describe('auth api calls', () => {
@@ -59,6 +81,15 @@ describe('auth api calls', () => {
     expect(api.post).toHaveBeenCalledWith('/auth/login', {
       org_id: 'org-7',
       password: 's3cret',
+    });
+  });
+
+  it('userLogin POSTs email + password to /auth/user-login', () => {
+    vi.mocked(api.post).mockResolvedValue({ data: {} });
+    userLogin('sam@example.com', 'pw123456');
+    expect(api.post).toHaveBeenCalledWith('/auth/user-login', {
+      email: 'sam@example.com',
+      password: 'pw123456',
     });
   });
 

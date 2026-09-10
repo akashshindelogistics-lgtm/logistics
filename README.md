@@ -51,10 +51,17 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Operational reporting** — a Reports page with fleet utilization, delivery
   performance (count, average time to deliver, on-time rate), per-godown
   inventory, and dispatch volume over the last 14 days.
+- **Dispatch notifications** — when a dispatch is created or delivered, a
+  notification is recorded for the customer (email or SMS, whichever is on
+  file) and the driver (SMS). The Dispatches page shows the log per order.
+  Actual SMS/email sending is left to a provider integration.
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
-- **Authentication** — org-level login secured with JWTs and bcrypt-hashed
-  passwords.
+- **Authentication & roles** — JWT + bcrypt login. The organization password
+  is the **Admin**; an Admin can add team members who each sign in with their
+  own email and one of three roles — **Admin**, **Dispatcher** (runs dispatches
+  and billing, manages customers/drivers/vehicles), or **Warehouse staff**
+  (manages godowns and stock). Every role can read everything in its org.
 - **Interactive API docs** — a Swagger UI generated from the API with
   `utoipa`, auto-deployed to
   [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/api-docs/)
@@ -181,8 +188,10 @@ npm run test:e2e
 # Vite dev server and the Rust API itself if they aren't already running.
 npm run test:e2e:demo
 
-# Or watch just one feature's flow, e.g. operations reporting:
-npm run test:e2e:demo:reports
+# Or watch just one feature's flow:
+npm run test:e2e:demo:reports        # operations reporting
+npm run test:e2e:demo:roles          # role-scoped team members
+npm run test:e2e:demo:notifications  # dispatch notifications
 ```
 
 ## API overview
@@ -195,9 +204,12 @@ All routes are served under the `/api` prefix.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/auth/login` | Log in to an organization |
+| POST | `/api/auth/login` | Log in to an organization (org-owner password — always Admin) |
+| POST | `/api/auth/user-login` | Log in as a team member with email + password |
 | GET | `/api/auth/me` | Get the authenticated organization |
 | GET | `/api/auth/orgs` | List organizations available for login |
+| GET/POST | `/api/orgs/{id}/users` | List / add team members (Admin only) |
+| PUT/DELETE | `/api/users/{id}` | Change a member's name/role/active flag, or remove them (Admin only) |
 | GET/POST | `/api/orgs` | List / create organizations |
 | GET/PUT/DELETE | `/api/orgs/{id}` | Get, update, or delete an organization |
 | PUT | `/api/orgs/{id}/location` | Update an organization's location |
@@ -225,6 +237,8 @@ All routes are served under the `/api` prefix.
 | GET | `/api/dispatches` | List dispatch orders |
 | PUT | `/api/dispatches/{id}/status` | Advance a dispatch's lifecycle status |
 | GET | `/api/dispatches/{id}/summary` | AI-generated summary of a dispatch |
+| GET | `/api/dispatches/{id}/notifications` | Customer + driver notifications recorded for a dispatch |
+| GET | `/api/orgs/{id}/notifications` | The org's 100 most recent notifications |
 | GET/POST | `/api/dispatches/{id}/invoice` | Get / raise the freight invoice for a dispatch |
 | PUT | `/api/invoices/{id}` | Amend an unpaid invoice's amount or due date |
 | POST | `/api/invoices/{id}/pay` | Mark an invoice paid |
