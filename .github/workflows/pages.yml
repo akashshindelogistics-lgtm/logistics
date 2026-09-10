@@ -7,9 +7,13 @@ name: Pages — Deploy Frontend + Swagger UI
 # Replaces the old swagger-only workflow. GitHub Pages must be set to
 # "GitHub Actions" as its source once: Repo → Settings → Pages.
 
+# The OpenAPI-spec validation and the frontend build run as CI on a push to
+# ANY branch, so spec drift or a broken build is caught before a pull request.
+# The `deploy` job is still gated to main/master — a feature branch never
+# publishes to the live Pages site.
 on:
   push:
-    branches: [main, master]
+    branches: ['**']
   workflow_dispatch:
 
 permissions:
@@ -141,6 +145,9 @@ jobs:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
     needs: [validate-swagger, build-frontend]
+    # Only the default branches publish to the live site; other branches stop
+    # after validate-swagger + build-frontend have run as CI checks.
+    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

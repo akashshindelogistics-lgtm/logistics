@@ -273,10 +273,25 @@ and a GitHub Release — optionally rolling the Oracle VM to that version. See
 
 GitHub Actions workflows in `.github/workflows/`:
 
-- **pages.yml** — builds the React dashboard, validates the OpenAPI spec, and
-  deploys both to
-  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/)
-  (app at `/`, Swagger UI at `/api-docs/`) on push to `main`/`master`.
+**CI — runs on a push to _any_ branch** (so a feature branch gets full test
+feedback before, and without, a pull request; the `pull_request` trigger is
+kept only for fork PRs, which can't fire `push` on this repo):
+
+- **frontend-unit-tests.yml** — type-checks the frontend and runs its Vitest
+  unit suite. No backend or database needed, so it's the fastest signal on a
+  frontend change.
+- **frontend-integration.yml** — runs the Playwright end-to-end suite against a
+  MySQL service container.
+- **periodic-tests.yml** — runs the Cargo test suite. Also on a 2-hourly
+  schedule.
+- **pages.yml** — the *validate the OpenAPI spec* and *build the React
+  dashboard* jobs run as CI on every branch; the **deploy to
+  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/)** job
+  (app at `/`, Swagger UI at `/api-docs/`) only runs on `main`/`master`.
+
+**Release / deploy — deliberately _not_ run on branch pushes** (they publish
+artifacts or touch production):
+
 - **release-please.yml** — maintains the release PR (version bump +
   `CHANGELOG.md`) on push to `master`.
 - **release.yml** — on a `vX.Y.Z` tag: builds + pushes the API image, publishes
@@ -284,13 +299,6 @@ GitHub Actions workflows in `.github/workflows/`:
   VM.
 - **deploy-backend.yml** — manual (`workflow_dispatch`): pin the VM to any
   existing GHCR image tag — redeploy or rollback.
-- **frontend-unit-tests.yml** — type-checks the frontend and runs its Vitest
-  unit suite. No backend or database needed, so it's the fastest signal on a
-  frontend change.
-- **frontend-integration.yml** — runs the Playwright end-to-end suite against a
-  MySQL service container.
-- **periodic-tests.yml** — runs the Cargo test suite on a schedule and on every
-  push/PR.
 
 ## Contributing
 

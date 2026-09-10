@@ -251,4 +251,17 @@
   page tests, 2 new Playwright flows. docs/customers.md + README updated.
   Plan/context: [[file:docs/customers.md]]
 * TODO Update e2e demo flow as new changes + features are added to logistics system
-* TODO All CI workflows should run on push to branch.
+* DONE All CI workflows should run on push to branch.
+  The three test workflows (frontend-unit-tests, frontend-integration,
+  periodic-tests) triggered only on push to main/master, so a feature branch
+  got no CI until a PR was opened. Their push trigger is now branches: ['**']
+  (any branch); periodic-tests keeps its 2-hourly schedule. pages.yml also
+  widened to every branch, but its deploy job is gated to main/master with an
+  `if` so a branch runs only the validate-OpenAPI + build-frontend checks and
+  never republishes the live Pages site. Duplicate push+pull_request runs for
+  same-repo branches are avoided by a per-job `if` that lets the pull_request
+  event through only for forks, plus a per-(workflow, event, branch)
+  concurrency group with cancel-in-progress. release-please.yml / release.yml /
+  deploy-backend.yml are release/deploy automation, not CI, and are left on
+  master / tag / manual triggers. All four edited workflows pass actionlint.
+  Plan/context: [[file:docs/ci-on-branch-push.md]]
