@@ -334,6 +334,33 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await expect(page.getByText(/godown updated/i)).toBeVisible({ timeout: 8000 });
   });
 
+  await test.step('Plan a multi-stop trip to two customers', async () => {
+    // A second located customer, then one truck for both stops. By now the
+    // fleet vehicle's earlier dispatches are all terminal, so it's free.
+    const token = await page.evaluate(() => localStorage.getItem('logi_token'));
+    const auth = { Authorization: `Bearer ${token}` };
+    const second = `Moonlight Depot ${uid()}`;
+    await page.request.post(`/api/orgs/${org.id}/customers`, {
+      data: { name: second, address: '9 Ring Rd', latitude: 12.99, longitude: 77.61 },
+      headers: auth,
+    });
+
+    await page.goto('/trips');
+    await page.getByRole('button', { name: /plan a trip/i }).click();
+    await page.getByLabel(/stop 1 — customer/i).selectOption({ label: custName });
+    await page.getByLabel(/stock item/i).first().fill(stockA);
+    await page.getByLabel(/quantity/i).first().fill('10');
+    await page.getByLabel(/stop 2 — customer/i).selectOption({ label: second });
+    await page.getByLabel(/stock item/i).nth(1).fill(stockA);
+    await page.getByLabel(/quantity/i).nth(1).fill('8');
+    await page.getByRole('button', { name: /^plan trip$/i }).click();
+
+    const card = page.locator('.section-card', { hasText: vehicleReg });
+    await expect(card).toBeVisible({ timeout: 8000 });
+    await expect(card.getByText(custName)).toBeVisible();
+    await expect(card.getByText(second)).toBeVisible();
+  });
+
   await test.step('Confirm everything shows up on the fleet, customer and dashboard views', async () => {
     await page.goto('/vehicles');
     await expect(page.getByText(vehicleReg)).toBeVisible({ timeout: 8000 });

@@ -234,10 +234,23 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             customer_id VARCHAR(36) NOT NULL,
             vehicle_registration_number VARCHAR(255) NOT NULL,
             status VARCHAR(50) NOT NULL,
-            dispatched_at BIGINT NOT NULL
+            dispatched_at BIGINT NOT NULL,
+            trip_id VARCHAR(36) DEFAULT NULL,
+            stop_sequence BIGINT DEFAULT NULL
         )",
     )
     .expect("migrate: create Dispatches");
+
+    conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS Trips (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            vehicle_registration_number VARCHAR(255) NOT NULL,
+            created_at BIGINT NOT NULL,
+            CONSTRAINT fk_trip_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create Trips");
 
     conn.query_drop(
         "CREATE TABLE IF NOT EXISTS DispatchLineItems (

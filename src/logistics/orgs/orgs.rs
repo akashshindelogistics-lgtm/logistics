@@ -3,6 +3,7 @@ use crate::logistics::db::connection::DbConnection;
 use crate::logistics::dispatch::dispatch::{
     DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus,
 };
+use crate::logistics::dispatch::trip::Trip;
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::stock::stock::Stock;
@@ -13,6 +14,13 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
 
 fn haversine_distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let r = 6371.0;
@@ -31,7 +39,8 @@ struct LineItemPlan {
     description: String,
     quantity: i64,
     volume_in_size: i64,
-    /// `(godown_id, quantity_held)`, largest holding first.
+    /// `(godown_id, quantity_to_draw_from_it)` — the exact per-godown draw
+    /// this line needs, largest source first.
     holdings: Vec<(Uuid, i64)>,
 }
 
@@ -202,10 +211,156 @@ impl Organization {
         customer: &Customer,
         line_items: &[DispatchLineItemInput],
     ) -> Result<DispatchOrder, Box<dyn Error>> {
-        let db_connection = DbConnection::from_env();
-        let mut conn = db_connection.get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
+        let godowns = Godown::list_by_org(self.id)?;
 
-        // 0. Basic shape checks on the requested lines.
+        let mut remaining = Self::stock_snapshot(&godowns);
+        let (plans, required_volume) =
+            self.plan_stock_draw(&godowns, &mut remaining, line_items)?;
+        let vehicle_reg = self.select_free_vehicle(&mut conn, required_volume, customer)?;
+        let order_line_items = Self::draw_down_plans(&mut conn, plans)?;
+
+        let mut dispatch_order = DispatchOrder {
+            id: Uuid::new_v4(),
+            org_id: self.id,
+            customer_id: customer.id,
+            vehicle_registration_number: vehicle_reg,
+            line_items: order_line_items,
+            status: DispatchStatus::Pending,
+            dispatched_at: now_secs(),
+            status_history: Vec::new(),
+            proof_of_delivery: None,
+            trip_id: None,
+            stop_sequence: None,
+        };
+        dispatch_order.save()?;
+        Ok(dispatch_order)
+    }
+
+    /// Send one vehicle on a **multi-stop trip**: several customers' orders,
+    /// each drawn from the org's stock, all carried on the same truck in the
+    /// given sequence. All-or-nothing — every stop is validated (shape, stock,
+    /// customer location) and the combined shipment is fit to a single free
+    /// vehicle before any stock is drawn down.
+    ///
+    /// Each stop becomes a normal `DispatchOrder` (its own PENDING → …
+    /// lifecycle, its own invoice, its own proof of delivery), linked by
+    /// `trip_id` and ordered by `stop_sequence`.
+    pub fn dispatch_trip_to_customers(
+        &self,
+        stops: &[(&Customer, &[DispatchLineItemInput])],
+    ) -> Result<Trip, Box<dyn Error>> {
+        if stops.len() < 2 {
+            return Err(
+                "A trip needs at least two stops; use a single dispatch for one customer".into(),
+            );
+        }
+        {
+            let mut seen = std::collections::HashSet::new();
+            for (c, _) in stops {
+                if !seen.insert(c.id) {
+                    return Err("The same customer appears twice in the trip".into());
+                }
+            }
+        }
+
+        let mut conn = DbConnection::from_env().get_connection()?;
+        let godowns = Godown::list_by_org(self.id)?;
+
+        // Plan every stop against a shared, decrementing stock snapshot so two
+        // stops can't over-commit the same item, and sum the volume the truck
+        // must carry for the whole trip.
+        let mut remaining = Self::stock_snapshot(&godowns);
+        let mut stop_plans: Vec<(&Customer, Vec<LineItemPlan>)> = Vec::with_capacity(stops.len());
+        let mut trip_volume: i64 = 0;
+        for (idx, (customer, line_items)) in stops.iter().enumerate() {
+            if customer.location.is_none() {
+                return Err(format!(
+                    "Stop {}: customer '{}' has no delivery location set",
+                    idx + 1,
+                    customer.name
+                )
+                .into());
+            }
+            let (plans, volume) = self
+                .plan_stock_draw(&godowns, &mut remaining, line_items)
+                .map_err(|e| -> Box<dyn Error> { format!("Stop {}: {e}", idx + 1).into() })?;
+            trip_volume = trip_volume.saturating_add(volume);
+            stop_plans.push((customer, plans));
+        }
+
+        // One vehicle for the whole trip — nearest to the first stop.
+        let vehicle_reg = self.select_free_vehicle(&mut conn, trip_volume, stops[0].0)?;
+
+        let now = now_secs();
+        let trip_id = Uuid::new_v4();
+        conn.exec_drop(
+            "INSERT INTO Trips (id, org_id, vehicle_registration_number, created_at)
+             VALUES (:id, :org_id, :veh, :created_at)",
+            params! {
+                "id" => trip_id.to_string(),
+                "org_id" => self.id.to_string(),
+                "veh" => &vehicle_reg,
+                "created_at" => now,
+            },
+        )?;
+
+        let mut trip_stops = Vec::with_capacity(stop_plans.len());
+        for (i, (customer, plans)) in stop_plans.into_iter().enumerate() {
+            let order_line_items = Self::draw_down_plans(&mut conn, plans)?;
+            let mut order = DispatchOrder {
+                id: Uuid::new_v4(),
+                org_id: self.id,
+                customer_id: customer.id,
+                vehicle_registration_number: vehicle_reg.clone(),
+                line_items: order_line_items,
+                status: DispatchStatus::Pending,
+                dispatched_at: now,
+                status_history: Vec::new(),
+                proof_of_delivery: None,
+                trip_id: Some(trip_id),
+                stop_sequence: Some(i as i64 + 1),
+            };
+            order.save()?;
+            trip_stops.push(order);
+        }
+
+        let status = Trip::compute_status(&trip_stops);
+        Ok(Trip {
+            id: trip_id,
+            org_id: self.id,
+            vehicle_registration_number: vehicle_reg,
+            created_at: now,
+            status,
+            stops: trip_stops,
+        })
+    }
+
+    // ── shared dispatch helpers ─────────────────────────────────────────────
+
+    /// Every godown's holding of every stock item, keyed by
+    /// `(godown_id, description)` → quantity on hand. Planning a draw
+    /// decrements this in place so a multi-stop trip can't over-commit stock.
+    fn stock_snapshot(godowns: &[Godown]) -> std::collections::HashMap<(Uuid, String), i64> {
+        let mut m = std::collections::HashMap::new();
+        for g in godowns {
+            for s in &g.stock {
+                m.insert((g.id, s.description.clone()), s.quantity);
+            }
+        }
+        m
+    }
+
+    /// Validate one customer's requested line items against `remaining` (a
+    /// mutable stock snapshot). On success `remaining` is decremented by the
+    /// planned draw and the per-line plan plus the total volume it needs are
+    /// returned; on failure `remaining` is left untouched.
+    fn plan_stock_draw(
+        &self,
+        godowns: &[Godown],
+        remaining: &mut std::collections::HashMap<(Uuid, String), i64>,
+        line_items: &[DispatchLineItemInput],
+    ) -> Result<(Vec<LineItemPlan>, i64), Box<dyn Error>> {
         if line_items.is_empty() {
             return Err("A dispatch must carry at least one stock line item".into());
         }
@@ -223,33 +378,36 @@ impl Organization {
             }
         }
 
-        // 1. Verify stock availability across all of the org's godowns, for
-        //    every line item. A stock item can be split across several godowns;
-        //    the requested quantity is checked against — and later drawn from —
-        //    the combined holding. Nothing is drawn down until every line has
-        //    been validated.
-        let godowns = Godown::list_by_org(self.id)?;
+        // Scratch copy so a mid-loop failure leaves `remaining` untouched.
+        let mut scratch = remaining.clone();
         let mut plans: Vec<LineItemPlan> = Vec::new();
         let mut required_volume: i64 = 0;
+
         for li in line_items {
-            let mut holdings: Vec<(Uuid, i64)> = Vec::new();
             let mut volume_in_size: Option<i64> = None;
-            for g in &godowns {
+            let mut holdings: Vec<(Uuid, i64)> = Vec::new();
+            for g in godowns {
                 if let Some(s) = g.stock.iter().find(|s| s.description == li.stock_description) {
-                    holdings.push((g.id, s.quantity));
                     volume_in_size.get_or_insert(s.volume_in_size);
+                    let have = scratch
+                        .get(&(g.id, li.stock_description.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    if have > 0 {
+                        holdings.push((g.id, have));
+                    }
                 }
             }
 
-            if holdings.is_empty() {
+            let Some(volume_in_size) = volume_in_size else {
                 return Err(format!(
                     "Stock '{}' was not found in any of the organization's godowns",
                     li.stock_description
                 )
                 .into());
-            }
+            };
 
-            let total_available: i64 = holdings.iter().map(|(_, qty)| qty).sum();
+            let total_available: i64 = holdings.iter().map(|(_, q)| q).sum();
             if total_available < li.requested_quantity {
                 return Err(format!(
                     "Insufficient stock for '{}'. Available: {}, Requested: {}",
@@ -258,30 +416,79 @@ impl Organization {
                 .into());
             }
 
-            let volume_in_size = volume_in_size.unwrap_or(0);
-            required_volume =
-                required_volume.saturating_add(volume_in_size.saturating_mul(li.requested_quantity));
+            required_volume = required_volume
+                .saturating_add(volume_in_size.saturating_mul(li.requested_quantity));
 
             // Largest holding first, so the drawdown touches the fewest rows.
-            holdings.sort_by_key(|&(_, qty)| std::cmp::Reverse(qty));
+            holdings.sort_by_key(|&(_, q)| std::cmp::Reverse(q));
+            let mut take_from: Vec<(Uuid, i64)> = Vec::new();
+            let mut want = li.requested_quantity;
+            for (gid, have) in &holdings {
+                if want <= 0 {
+                    break;
+                }
+                let take = want.min(*have);
+                take_from.push((*gid, take));
+                if let Some(v) = scratch.get_mut(&(*gid, li.stock_description.clone())) {
+                    *v -= take;
+                }
+                want -= take;
+            }
+
             plans.push(LineItemPlan {
                 description: li.stock_description.clone(),
                 quantity: li.requested_quantity,
                 volume_in_size,
-                holdings,
+                holdings: take_from,
             });
         }
 
-        // 2. Fetch this org's vehicles that can actually take this trip:
-        //    - an *active* driver is assigned (Vehicle.assigned_driver_id ->
-        //      an is_active Driver row),
-        //    - the vehicle's rated `capacity` covers `required_volume`, and
-        //    - the vehicle is not already on an active (non-terminal) trip,
-        //      so the same truck can't be double-booked onto two orders.
-        Driver::ensure_table(&mut conn)?;
-        crate::logistics::dispatch::dispatch::ensure_tables(&mut conn)?;
-        let vehicle_rows: Vec<(String, i64, String, Option<f64>, Option<f64>)> = conn.exec_map(
-            "SELECT v.registration_number, v.capacity, v.unit, v.latitude, v.longitude
+        *remaining = scratch;
+        Ok((plans, required_volume))
+    }
+
+    /// Apply a set of planned draws to `Stock` and return the resulting
+    /// [`DispatchLineItem`]s (with `volume_in_size` snapshotted).
+    fn draw_down_plans(
+        conn: &mut mysql::PooledConn,
+        plans: Vec<LineItemPlan>,
+    ) -> Result<Vec<DispatchLineItem>, Box<dyn Error>> {
+        let mut items = Vec::with_capacity(plans.len());
+        for plan in plans {
+            for (godown_id, take) in &plan.holdings {
+                conn.exec_drop(
+                    "UPDATE Stock SET quantity = quantity - :take
+                     WHERE godown_id = :godown_id AND description = :desc",
+                    params! {
+                        "take" => take,
+                        "godown_id" => godown_id.to_string(),
+                        "desc" => &plan.description,
+                    },
+                )?;
+            }
+            items.push(DispatchLineItem {
+                stock_description: plan.description,
+                quantity: plan.quantity,
+                volume_in_size: plan.volume_in_size,
+            });
+        }
+        Ok(items)
+    }
+
+    /// Pick the vehicle to carry a shipment of `required_volume`: one of this
+    /// org's vehicles with an active assigned driver, spare capacity, and no
+    /// trip already in progress — the closest such vehicle to `customer`.
+    fn select_free_vehicle(
+        &self,
+        conn: &mut mysql::PooledConn,
+        required_volume: i64,
+        customer: &Customer,
+    ) -> Result<String, Box<dyn Error>> {
+        Driver::ensure_table(conn)?;
+        crate::logistics::dispatch::dispatch::ensure_tables(conn)?;
+
+        let vehicle_rows: Vec<(String, Option<f64>, Option<f64>)> = conn.exec_map(
+            "SELECT v.registration_number, v.latitude, v.longitude
              FROM Vehicle v
              JOIN Drivers d ON d.id = v.assigned_driver_id AND d.is_active = TRUE
              WHERE v.org_id = :org_id
@@ -295,7 +502,7 @@ impl Organization {
                 "org_id" => self.id.to_string(),
                 "required_volume" => required_volume,
             },
-            |(reg, cap, unit, lat, lng)| (reg, cap, unit, lat, lng),
+            |(reg, lat, lng)| (reg, lat, lng),
         )?;
 
         if vehicle_rows.is_empty() {
@@ -325,96 +532,30 @@ impl Organization {
             });
         }
 
-        // Customer target coordinates
         let (cust_lat, cust_lng) = match &customer.location {
             Some(loc) => (loc.latitude, loc.longitude),
             None => return Err("Customer location is not set for dispatch".into()),
         };
-
-        // Fallback organization coordinates if vehicle location is unset
         let (org_lat, org_lng) = match &self.location {
             Some(loc) => (loc.latitude, loc.longitude),
             None => (0.0, 0.0),
         };
 
-        // 3. Find nearest vehicle based on Haversine distance
-        let mut nearest_vehicle_reg: Option<String> = None;
+        let mut nearest: Option<String> = None;
         let mut min_distance = f64::MAX;
-
-        for (reg, _cap, _unit, v_lat_opt, v_lng_opt) in vehicle_rows {
-            let v_lat = v_lat_opt.unwrap_or(org_lat);
-            let v_lng = v_lng_opt.unwrap_or(org_lng);
-
-            let dist = haversine_distance_km(v_lat, v_lng, cust_lat, cust_lng);
+        for (reg, v_lat, v_lng) in vehicle_rows {
+            let dist = haversine_distance_km(
+                v_lat.unwrap_or(org_lat),
+                v_lng.unwrap_or(org_lng),
+                cust_lat,
+                cust_lng,
+            );
             if dist < min_distance {
                 min_distance = dist;
-                nearest_vehicle_reg = Some(reg);
+                nearest = Some(reg);
             }
         }
-
-        let selected_vehicle_reg =
-            nearest_vehicle_reg.ok_or("Failed to select vehicle for dispatch")?;
-
-        // 4. Draw each line item's quantity down from its godowns, largest
-        //    holding first, until the request is satisfied. Every line was
-        //    validated as satisfiable in step 1.
-        let mut order_line_items: Vec<DispatchLineItem> = Vec::with_capacity(plans.len());
-        for LineItemPlan {
-            description,
-            quantity,
-            volume_in_size,
-            holdings,
-        } in plans
-        {
-            let mut remaining = quantity;
-            for (godown_id, available) in holdings {
-                if remaining <= 0 {
-                    break;
-                }
-                let taken = remaining.min(available);
-                conn.exec_drop(
-                    "UPDATE Stock SET quantity = :quantity WHERE godown_id = :godown_id AND description = :desc",
-                    params! {
-                        "quantity" => available - taken,
-                        "godown_id" => godown_id.to_string(),
-                        "desc" => &description,
-                    },
-                )?;
-                remaining -= taken;
-            }
-            order_line_items.push(DispatchLineItem {
-                stock_description: description,
-                quantity,
-                volume_in_size,
-            });
-        }
-
-        // 5. Create and save DispatchOrder
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-
-        // Stock is reserved and a vehicle is already picked at this point,
-        // but nothing has physically moved — the dispatch starts its
-        // lifecycle at PENDING and advances via DispatchOrder::transition_to
-        // (PUT /api/dispatches/{id}/status). See DispatchStatus's docs for
-        // the full state machine.
-        let mut dispatch_order = DispatchOrder {
-            id: Uuid::new_v4(),
-            org_id: self.id,
-            customer_id: customer.id,
-            vehicle_registration_number: selected_vehicle_reg,
-            line_items: order_line_items,
-            status: DispatchStatus::Pending,
-            dispatched_at: now,
-            status_history: Vec::new(),
-            proof_of_delivery: None,
-        };
-
-        dispatch_order.save()?;
-
-        Ok(dispatch_order)
+        nearest.ok_or_else(|| "Failed to select vehicle for dispatch".into())
     }
 
     pub fn list_all() -> Result<Vec<Self>, Box<dyn Error>> {
@@ -1019,5 +1160,140 @@ mod tests {
             .expect("Failed to query database for deleted organization");
 
         assert!(row.is_none(), "Organization record should be deleted from database");
+    }
+
+    // ── Multi-stop trips ────────────────────────────────────────────────────
+
+    /// An org at Pune with one big truck + active driver and a godown stocked
+    /// with plenty of Cement, plus `n` located customers.
+    fn trip_ready_org(n: usize) -> (Organization, Vec<Customer>) {
+        let mut org = Organization::create_organization("Trip Co", "Pune HQ").expect("org");
+        org.update_location(18.52, 73.85, Some("Pune")).expect("org loc");
+        let g = Godown::create(org.id, "G", "MIDC", None).expect("godown");
+        Stock::new(1, 10_000, "Cement").add_to_godown(g.id).expect("stock");
+        let driver = Driver::create(org.id, "Trip Driver", "LIC-T", "0").expect("driver");
+        let mut v = Vehicle::new("MH14 TR 0001", 100_000, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("vehicle");
+        v.update_location(18.52, 73.85, Some("Pune")).expect("v loc");
+        v.assign_driver(Some(driver.id)).expect("assign");
+
+        let customers = (0..n)
+            .map(|i| {
+                let mut c = Customer::create_customer(org.id, format!("Buyer {i}"), format!("{i} St"))
+                    .expect("customer");
+                c.update_location(18.5 + i as f64 * 0.01, 73.8, Some("loc")).expect("loc");
+                c
+            })
+            .collect();
+        (org, customers)
+    }
+
+    #[test]
+    fn test_trip_needs_at_least_two_distinct_stops() {
+        let _db = TestDb::create();
+        let (org, customers) = trip_ready_org(1);
+        let err = org
+            .dispatch_trip_to_customers(&[(&customers[0], &[line("Cement", 1)][..])])
+            .unwrap_err();
+        assert!(err.to_string().contains("at least two stops"));
+
+        let (org2, customers2) = trip_ready_org(1);
+        let dup = &customers2[0];
+        let err = org2
+            .dispatch_trip_to_customers(&[
+                (dup, &[line("Cement", 1)][..]),
+                (dup, &[line("Cement", 1)][..]),
+            ])
+            .unwrap_err();
+        assert!(err.to_string().contains("same customer"));
+    }
+
+    #[test]
+    fn test_trip_puts_every_stop_on_one_vehicle_and_draws_stock_down() {
+        let _db = TestDb::create();
+        let (org, customers) = trip_ready_org(3);
+
+        let trip = org
+            .dispatch_trip_to_customers(&[
+                (&customers[0], &[line("Cement", 10)][..]),
+                (&customers[1], &[line("Cement", 20)][..]),
+                (&customers[2], &[line("Cement", 5)][..]),
+            ])
+            .expect("trip");
+
+        assert_eq!(trip.stops.len(), 3);
+        // One truck for the whole trip.
+        assert!(trip.stops.iter().all(|s| s.vehicle_registration_number == trip.vehicle_registration_number));
+        // Sequenced 1, 2, 3 and all linked to the trip.
+        assert_eq!(
+            trip.stops.iter().filter_map(|s| s.stop_sequence).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert!(trip.stops.iter().all(|s| s.trip_id == Some(trip.id)));
+
+        // 35 units drawn: 10_000 - 35 = 9_965.
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        let left: Option<i64> = conn
+            .exec_first(
+                "SELECT SUM(quantity) FROM Stock WHERE description = 'Cement'",
+                (),
+            )
+            .unwrap();
+        assert_eq!(left, Some(9_965));
+
+        // Reload via Trip::get_by_id — status starts PLANNED.
+        let reloaded = Trip::get_by_id(trip.id).expect("get").expect("exists");
+        assert_eq!(reloaded.stops.len(), 3);
+        assert_eq!(reloaded.status, crate::logistics::dispatch::trip::TripStatus::Planned);
+    }
+
+    #[test]
+    fn test_trip_is_all_or_nothing_when_a_later_stop_is_short() {
+        let _db = TestDb::create();
+        let (org, customers) = trip_ready_org(2);
+
+        let err = org
+            .dispatch_trip_to_customers(&[
+                (&customers[0], &[line("Cement", 10)][..]),
+                (&customers[1], &[line("Cement", 99_999)][..]), // can't be met
+            ])
+            .unwrap_err();
+        assert!(err.to_string().contains("Stop 2"));
+
+        // Nothing was drawn and no trip / dispatches were created.
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        let left: Option<i64> = conn
+            .exec_first("SELECT SUM(quantity) FROM Stock WHERE description = 'Cement'", ())
+            .unwrap();
+        assert_eq!(left, Some(10_000));
+        assert!(Trip::list_by_org(org.id).expect("list").is_empty());
+        assert!(DispatchOrder::list_by_org(org.id).expect("list").is_empty());
+    }
+
+    #[test]
+    fn test_trip_rejected_when_no_vehicle_fits_the_combined_load() {
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("Small Truck Co", "HQ").expect("org");
+        org.update_location(18.5, 73.8, Some("x")).expect("loc");
+        let g = Godown::create(org.id, "G", "A", None).expect("g");
+        // volume 10 each — two stops of 5 units = 100 combined volume.
+        Stock::new(10, 1000, "Rebar").add_to_godown(g.id).expect("stock");
+        let d = Driver::create(org.id, "D", "L", "0").expect("d");
+        let mut v = Vehicle::new("SM 0001", 60, Unit::MetricTon); // fits one stop (50), not both (100)
+        v.add_new_vehicle_to_org(&org).expect("v");
+        v.assign_driver(Some(d.id)).expect("assign");
+
+        let mut c1 = Customer::create_customer(org.id, "C1", "1").expect("c1");
+        c1.update_location(18.5, 73.8, Some("x")).expect("l");
+        let mut c2 = Customer::create_customer(org.id, "C2", "2").expect("c2");
+        c2.update_location(18.5, 73.8, Some("x")).expect("l");
+
+        let err = org
+            .dispatch_trip_to_customers(&[
+                (&c1, &[line("Rebar", 5)][..]),
+                (&c2, &[line("Rebar", 5)][..]),
+            ])
+            .unwrap_err();
+        assert!(err.to_string().contains("free and large enough"));
     }
 }

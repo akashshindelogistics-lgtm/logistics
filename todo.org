@@ -157,7 +157,27 @@
    (4 model, 5 route), 5 new frontend unit tests, 2 new Playwright flows plus a
    demo-flow step. pages.yml expected-paths and README updated.
    Plan/context: [[file:docs/gps-tracking.md]]
-** TODO Support multi-stop routes so one vehicle's trip can serve several customer orders in a sequence, instead of one dispatch always meaning one vehicle to one customer
+** DONE Support multi-stop routes so one vehicle's trip can serve several customer orders in a sequence, instead of one dispatch always meaning one vehicle to one customer
+   New Trip concept (src/logistics/dispatch/trip.rs) + Trips table; Dispatches
+   gained trip_id + stop_sequence. A trip is a thin grouping — each stop is a
+   full DispatchOrder with its own lifecycle / invoice / POD — and its status
+   (PLANNED/IN_PROGRESS/COMPLETED) is derived from the stops. New
+   Organization::dispatch_trip_to_customers: the single-dispatch flow was
+   refactored into shared helpers (stock_snapshot/plan_stock_draw against a
+   decrementing snapshot so two stops can't over-commit stock,
+   select_free_vehicle, draw_down_plans); a trip needs >= 2 distinct located
+   customers, fits the combined load onto one free vehicle (nearest to stop 1),
+   is all-or-nothing, then writes the Trips row + one PENDING Dispatches row
+   per stop and fires the create-notification for each. Routes (Admin|
+   Dispatcher): POST/GET /api/orgs/{id}/trips, GET /api/trips/{id}. Frontend: a
+   Trips page (/trips, sidebar link) with a repeatable-stop planning form and a
+   card per trip; the Dispatches page tags trip-stop rows. Also fixed a latent
+   bug in the notifications feature — `Notifications.seq` was only in CREATE
+   TABLE, so a pre-existing local DB 500'd on the notifications list; added a
+   probe + ALTER. 12 new Rust tests (4 trip model, 2 trip route, 6 refactor
+   coverage retained), 7 frontend unit, 1 Playwright flow, a full-flow demo
+   step, and `npm run test:e2e:demo:trips`. pages.yml + README updated.
+   Plan/context: [[file:docs/multi-stop-routes.md]]
 ** DONE Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
    Unit enum gains Kg/Litre/Box/Pallet/Piece; Unit::from_str is now
    case-insensitive with aliases and still falls back to MetricTon.
