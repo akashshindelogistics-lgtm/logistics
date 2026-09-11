@@ -1,17 +1,29 @@
 name: Frontend Unit Tests (Vitest)
 
+# CI runs on a push to ANY branch, so a feature branch gets test feedback
+# before (and without) a pull request. The pull_request trigger is kept only
+# for forks — a fork can't trigger `push` on this repo — and the job below
+# skips the duplicate pull_request run for same-repo branches.
 on:
   push:
-    branches: [main, master]
+    branches: ['**']
   pull_request:
-    branches: [main, master]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   unit-tests:
     name: Frontend Unit Tests (Vitest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # A same-repo branch is already covered by the push event; only let a
+    # pull_request through when it comes from a fork.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
 
     steps:
       - name: Checkout repository

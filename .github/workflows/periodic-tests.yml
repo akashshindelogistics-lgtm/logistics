@@ -1,14 +1,22 @@
 name: Periodic Cargo Tests
 
+# The cargo suite runs on a push to ANY branch (not just main/master), so a
+# feature branch gets test feedback before (and without) a pull request. The
+# pull_request trigger is kept only for forks — a fork can't trigger `push` on
+# this repo — and the job below skips the duplicate pull_request run for
+# same-repo branches. The 2-hourly schedule is unchanged.
 on:
   schedule:
     # Run every 2 hours
     - cron: "0 */2 * * *"
   push:
-    branches: [main, master]
+    branches: ['**']
   pull_request:
-    branches: [main, master]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,6 +26,11 @@ jobs:
   test:
     name: Run Cargo Tests
     runs-on: ubuntu-latest
+    # A same-repo branch is already covered by the push event; only let a
+    # pull_request through when it comes from a fork.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
 
     services:
       mysql:
