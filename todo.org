@@ -231,7 +231,13 @@
   recreated on migrate (same as the Stock/godown change). 8 new Rust tests,
   3 new frontend unit tests, 2 new Playwright flows.
   Plan/context: [[file:docs/customers.md]]
-* TODO remove main branch, make master the default branch on GitHub - origin/HEAD still points at main, but every PR targets master
+* DONE remove main branch, make master the default branch on GitHub - origin/HEAD still points at main, but every PR targets master
+  `main` was stale — still sitting at the repo's very first commit while every
+  PR has targeted `master` since. Set the GitHub repo's default branch to
+  `master` (`gh repo edit --default-branch master`), then deleted `main` on
+  origin (`gh api -X DELETE git/refs/heads/main`). Local `origin/HEAD` and
+  remote-tracking refs updated to match (`git remote set-head origin -a`,
+  `git fetch --prune`).
 * DONE Add unit tests for all features implemented in the frontend
   Vitest + React Testing Library. Before this only dispatches (api client, lifecycle
   helpers, Dispatches page) had unit coverage. Added 16 new test files / 72 new tests
