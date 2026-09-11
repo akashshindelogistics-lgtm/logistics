@@ -157,7 +157,27 @@
    (4 model, 5 route), 5 new frontend unit tests, 2 new Playwright flows plus a
    demo-flow step. pages.yml expected-paths and README updated.
    Plan/context: [[file:docs/gps-tracking.md]]
-** TODO Support multi-stop routes so one vehicle's trip can serve several customer orders in a sequence, instead of one dispatch always meaning one vehicle to one customer
+** DONE Support multi-stop routes so one vehicle's trip can serve several customer orders in a sequence, instead of one dispatch always meaning one vehicle to one customer
+   New Trip concept (src/logistics/dispatch/trip.rs) + Trips table; Dispatches
+   gained trip_id + stop_sequence. A trip is a thin grouping — each stop is a
+   full DispatchOrder with its own lifecycle / invoice / POD — and its status
+   (PLANNED/IN_PROGRESS/COMPLETED) is derived from the stops. New
+   Organization::dispatch_trip_to_customers: the single-dispatch flow was
+   refactored into shared helpers (stock_snapshot/plan_stock_draw against a
+   decrementing snapshot so two stops can't over-commit stock,
+   select_free_vehicle, draw_down_plans); a trip needs >= 2 distinct located
+   customers, fits the combined load onto one free vehicle (nearest to stop 1),
+   is all-or-nothing, then writes the Trips row + one PENDING Dispatches row
+   per stop and fires the create-notification for each. Routes (Admin|
+   Dispatcher): POST/GET /api/orgs/{id}/trips, GET /api/trips/{id}. Frontend: a
+   Trips page (/trips, sidebar link) with a repeatable-stop planning form and a
+   card per trip; the Dispatches page tags trip-stop rows. Also fixed a latent
+   bug in the notifications feature — `Notifications.seq` was only in CREATE
+   TABLE, so a pre-existing local DB 500'd on the notifications list; added a
+   probe + ALTER. 12 new Rust tests (4 trip model, 2 trip route, 6 refactor
+   coverage retained), 7 frontend unit, 1 Playwright flow, a full-flow demo
+   step, and `npm run test:e2e:demo:trips`. pages.yml + README updated.
+   Plan/context: [[file:docs/multi-stop-routes.md]]
 ** DONE Add more units of measure (Kg, Litre, Box, Pallet, Piece) - `Unit` only has `MetricTon` today, which doesn't fit all cargo types
    Unit enum gains Kg/Litre/Box/Pallet/Piece; Unit::from_str is now
    case-insensitive with aliases and still falls back to MetricTon.
@@ -232,9 +252,29 @@
   tests, 4 new Playwright flows. Fleet displays now show the vehicle's real
   unit instead of a hardcoded "MT".
   Plan/context: [[file:docs/ui-editing.md]]
-* TODO UI dashboard doesn't have an option to add stock to the org. Stock can only be added by API at the moment
+* DONE UI dashboard doesn't have an option to add stock to the org. Stock can only be added by API at the moment
+  Already shipped: the "Organisation can have multiple godowns" work added a
+  per-godown "Add Stock" inline form (Stock Item / Stock Quantity / Volume)
+  on the org detail page's Godowns section, wired to
+  POST /api/godowns/{gid}/stock via addGodownStock. Verified it's still there
+  (src/pages/OrganizationDetail.tsx) and covered by
+  frontend/tests/organization.spec.ts ("create a godown and add stock to it
+  via the UI") and a step in e2e-full-flow.spec.ts. No further work needed;
+  this entry was stale.
 * TODO finish up manual steps to deploy frontend and backend on hosted platform
-* TODO Add unit tests for rust backend
+* DONE Add unit tests for rust backend
+  Audited every src/logistics/* module for #[test]/#[actix_web::test]
+  coverage: all domain modules already had it (262 tests, from the earlier
+  "write unit tests for all routes" and "check if all routes have unit
+  tests" items). The one real gap was src/logistics/ai/status.rs
+  (generate_dispatch_summary), which had none. Pulled its prompt-building
+  into a pure build_prompt(dispatch, customer) helper and added 5 tests: 4
+  deterministic prompt-content cases (vehicle/stock/customer fields, the
+  "location not set" and "none recorded" fallbacks, multiple line items
+  joined) plus one for the missing-ANTHROPIC_API_KEY error path. The live
+  Anthropic HTTP call itself is intentionally left untested — this codebase
+  has no HTTP-mocking layer and hitting the real API in a test isn't
+  appropriate. 251 Rust tests total, all passing.
 * TODO Create release for the current state - Date [ 1-09-2026 ]
 * TODO Set ANTHROPIC_API_KEY on rust backend so that AI summery works
 * DONE Customer create UI should have option to add location details of customer.

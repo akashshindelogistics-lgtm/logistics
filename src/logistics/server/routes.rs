@@ -9,6 +9,7 @@ use crate::logistics::dispatch::dispatch::{
     DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus, DispatchStatusEvent,
     ProofOfDelivery, ProofOfDeliveryInput,
 };
+use crate::logistics::dispatch::trip::{Trip, TripStatus};
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::godown::transfer::{StockTransfer, TransferError};
@@ -297,6 +298,20 @@ pub struct DispatchRequestPayload {
     pub line_items: Vec<DispatchLineItemPayload>,
 }
 
+/// One stop on a multi-stop trip: a customer and the stock lines to drop there.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct TripStopPayload {
+    pub customer_id: Uuid,
+    pub line_items: Vec<DispatchLineItemPayload>,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct CreateTripPayload {
+    /// The stops in the order the vehicle should visit them. At least two, and
+    /// no customer twice.
+    pub stops: Vec<TripStopPayload>,
+}
+
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct UpdateDispatchStatusPayload {
     pub status: DispatchStatus,
@@ -470,6 +485,20 @@ pub struct DispatchOrderResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<DispatchOrder>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct TripResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Trip>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct TripListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<Trip>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -2714,6 +2743,193 @@ fn driver_phone_for_vehicle(reg: &str, org_id: Uuid) -> Option<String> {
     Driver::get_by_id(driver_id).ok().flatten().map(|d| d.phone)
 }
 
+// ── Multi-stop trips ─────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    post,
+    path = "/api/orgs/{id}/trips",
+    tag = "Trips",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    request_body = CreateTripPayload,
+    responses(
+        (status = 200, description = "Trip created; one dispatch per stop", body = TripResponse),
+        (status = 400, description = "Trip could not be planned", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/orgs/{id}/trips")]
+pub async fn create_trip(
+    path: web::Path<Uuid>,
+    payload: web::Json<CreateTripPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only dispatch from your own organization".to_string(),
+            data: None,
+        });
+    }
+
+    // Resolve every stop's customer up front, checking org ownership.
+    let mut resolved: Vec<(Customer, Vec<DispatchLineItemInput>)> =
+        Vec::with_capacity(payload.stops.len());
+    for (i, stop) in payload.stops.iter().enumerate() {
+        let customer = match Customer::get_by_id(stop.customer_id) {
+            Ok(Some(c)) if c.org_id == org_id => c,
+            Ok(Some(_)) => {
+                return HttpResponse::BadRequest().json(ApiResponse::<String> {
+                    success: false,
+                    message: format!("Stop {}: customer belongs to a different organization", i + 1),
+                    data: None,
+                })
+            }
+            Ok(None) => {
+                return HttpResponse::BadRequest().json(ApiResponse::<String> {
+                    success: false,
+                    message: format!("Stop {}: customer not found", i + 1),
+                    data: None,
+                })
+            }
+            Err(err) => {
+                return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                    success: false,
+                    message: format!("Failed to fetch customer: {}", err),
+                    data: None,
+                })
+            }
+        };
+        let lines = stop
+            .line_items
+            .iter()
+            .map(|li| DispatchLineItemInput {
+                stock_description: li.stock_description.clone(),
+                requested_quantity: li.requested_quantity,
+            })
+            .collect();
+        resolved.push((customer, lines));
+    }
+
+    let org = Organization {
+        id: org_id,
+        name: String::new(),
+        address: String::new(),
+        vehicles: Vec::new(),
+        godowns: Vec::new(),
+        location: None,
+    };
+    let stops_ref: Vec<(&Customer, &[DispatchLineItemInput])> =
+        resolved.iter().map(|(c, l)| (c, l.as_slice())).collect();
+
+    match org.dispatch_trip_to_customers(&stops_ref) {
+        Ok(trip) => {
+            // Best-effort per-stop notifications.
+            for stop in &trip.stops {
+                if let Some((customer, _)) = resolved.iter().find(|(c, _)| c.id == stop.customer_id) {
+                    let phone = driver_phone_for_vehicle(&stop.vehicle_registration_number, org_id);
+                    let _ = Notification::record_dispatch_created(
+                        org_id,
+                        stop.id,
+                        customer,
+                        phone.as_deref(),
+                    );
+                }
+            }
+            HttpResponse::Ok().json(ApiResponse {
+                success: true,
+                message: format!("Trip created with {} stops", trip.stops.len()),
+                data: Some(trip),
+            })
+        }
+        Err(err) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Trip failed: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/trips",
+    tag = "Trips",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "The org's trips, newest first", body = TripListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/trips")]
+pub async fn list_org_trips(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match Trip::list_by_org(org_id) {
+        Ok(trips) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} trips", trips.len()),
+            data: Some(trips),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list trips: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/trips/{id}",
+    tag = "Trips",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Trip UUID")),
+    responses(
+        (status = 200, description = "The trip and its stops", body = TripResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Trip not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/trips/{id}")]
+pub async fn get_trip(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    match Trip::get_by_id(path.into_inner()) {
+        Ok(Some(trip)) if trip.org_id == auth.org_id => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Trip retrieved".to_string(),
+            data: Some(trip),
+        }),
+        Ok(Some(_)) => HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "That trip belongs to a different organization".to_string(),
+            data: None,
+        }),
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Trip not found".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch trip: {}", err),
+            data: None,
+        }),
+    }
+}
+
 #[utoipa::path(
     put,
     path = "/api/dispatches/{id}/status",
@@ -3528,6 +3744,9 @@ impl Modify for SecurityAddon {
         get_ops_report,
         list_dispatch_notifications,
         list_org_notifications,
+        create_trip,
+        list_org_trips,
+        get_trip,
     ),
     components(
         schemas(
@@ -3547,6 +3766,7 @@ impl Modify for SecurityAddon {
             Invoice, PaymentStatus, CustomerBillingSummary,
             OpsReport, VehicleUtilization, DeliveryPerformance, GodownInventory, DispatchVolumePoint,
             Notification, NotificationEvent, NotificationChannel, NotificationStatus,
+            Trip, TripStatus,
             OrgSummary,
             OrgResponse, OrgListResponse, VehicleResponse, VehicleListResponse,
             VehicleDocumentResponse, VehicleDocumentListResponse,
@@ -3557,6 +3777,7 @@ impl Modify for SecurityAddon {
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
             OpsReportResponse, UserResponse, UserListResponse, NotificationListResponse,
+            TripResponse, TripListResponse, CreateTripPayload, TripStopPayload,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
     ),
@@ -3574,6 +3795,7 @@ impl Modify for SecurityAddon {
         (name = "Billing", description = "Freight invoices and customer payment status"),
         (name = "Reports", description = "Operational reporting: fleet utilization, delivery performance, inventory, dispatch volume"),
         (name = "Notifications", description = "Customer and driver notifications recorded for each dispatch"),
+        (name = "Trips", description = "Multi-stop trips: one vehicle serving several customer orders in sequence"),
     )
 )]
 pub struct ApiDoc;
@@ -3640,7 +3862,10 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(get_customer_billing)
             .service(get_ops_report)
             .service(list_dispatch_notifications)
-            .service(list_org_notifications),
+            .service(list_org_notifications)
+            .service(create_trip)
+            .service(list_org_trips)
+            .service(get_trip),
     )
     .service(
         SwaggerUi::new("/swagger-ui/{_:.*}")
@@ -6619,6 +6844,151 @@ mod tests {
         let customer = test::read_body_json::<ApiResponse<Customer>, _>(resp).await.data.unwrap();
         assert_eq!(customer.phone.as_deref(), Some("+91 90000 00000"));
         assert_eq!(customer.email.as_deref(), Some("ops@reachable.example"));
+    }
+
+    // ── Multi-stop trips ────────────────────────────────────────────────────
+
+    async fn located_customer(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth: &str,
+        name: &str,
+    ) -> Uuid {
+        let customer = create_customer_via_api(app, org_id, auth, name).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/customers/{}/location", customer.id))
+            .insert_header(("Authorization", auth.to_string()))
+            .set_json(&LocationPayload { latitude: 19.07, longitude: 72.87, address: None })
+            .to_request();
+        assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
+        customer.id
+    }
+
+    fn trip_stop(customer_id: Uuid, qty: i64) -> TripStopPayload {
+        TripStopPayload {
+            customer_id,
+            line_items: vec![DispatchLineItemPayload {
+                stock_description: "Dispatch Test Goods".to_string(),
+                requested_quantity: qty,
+            }],
+        }
+    }
+
+    #[actix_web::test]
+    async fn test_create_a_two_stop_trip_and_read_it_back() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        // setup_dispatch stocks "Dispatch Test Goods" and registers one vehicle
+        // + active driver, then makes a first dispatch — cancel it to free the
+        // truck for the trip.
+        let (org, first, auth) = setup_dispatch(&app, "Trip Route Org").await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", first.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Cancelled,
+                proof_of_delivery: None,
+                return_to_godown_id: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let c1 = located_customer(&app, org.id, &auth, "Stop One").await;
+        let c2 = located_customer(&app, org.id, &auth, "Stop Two").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/trips", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)] })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let trip = test::read_body_json::<ApiResponse<Trip>, _>(resp).await.data.unwrap();
+        assert_eq!(trip.stops.len(), 2);
+        assert_eq!(trip.status, TripStatus::Planned);
+        let veh = trip.vehicle_registration_number.clone();
+        assert!(trip.stops.iter().all(|s| s.vehicle_registration_number == veh));
+        assert_eq!(
+            trip.stops.iter().filter_map(|s| s.stop_sequence).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        // GET /api/trips/{id}
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/trips/{}", trip.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let got = test::read_body_json::<ApiResponse<Trip>, _>(test::call_service(&app, req).await)
+            .await.data.unwrap();
+        assert_eq!(got.id, trip.id);
+        assert_eq!(got.stops.len(), 2);
+
+        // The trip's stops appear on the org's dispatch list, linked by trip_id.
+        let req = test::TestRequest::get()
+            .uri("/api/dispatches")
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let dispatches = test::read_body_json::<ApiResponse<Vec<DispatchOrder>>, _>(
+            test::call_service(&app, req).await,
+        ).await.data.unwrap();
+        assert_eq!(dispatches.iter().filter(|d| d.trip_id == Some(trip.id)).count(), 2);
+
+        // And on the org's trip list.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/trips", org.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let trips = test::read_body_json::<ApiResponse<Vec<Trip>>, _>(
+            test::call_service(&app, req).await,
+        ).await.data.unwrap();
+        assert_eq!(trips.len(), 1);
+    }
+
+    #[actix_web::test]
+    async fn test_trip_rejects_bad_stops_and_wrong_role() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, first, auth) = setup_dispatch(&app, "Trip Guard Org").await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", first.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Cancelled, proof_of_delivery: None, return_to_godown_id: None,
+            })
+            .to_request();
+        test::call_service(&app, req).await;
+
+        let c1 = located_customer(&app, org.id, &auth, "G Stop One").await;
+
+        // One stop -> 400.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/trips", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1)] })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+
+        // Unknown customer -> 400.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/trips", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)] })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+
+        // Warehouse-staff role -> 403.
+        let wh = add_user_and_login(&app, org.id, &auth, "trip-wh@example.com", OrgRole::WarehouseStaff).await;
+        let c2 = located_customer(&app, org.id, &auth, "G Stop Two").await;
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/trips", org.id))
+            .insert_header(("Authorization", wh))
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)] })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
 
     // ── Users / roles ───────────────────────────────────────────────────────

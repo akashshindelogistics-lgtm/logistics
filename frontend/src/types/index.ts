@@ -165,6 +165,21 @@ export interface DispatchOrder {
   dispatched_at: number;
   status_history: DispatchStatusEvent[];
   proof_of_delivery: ProofOfDelivery | null;
+  /** Set when this dispatch is one stop on a multi-stop trip. */
+  trip_id?: string | null;
+  stop_sequence?: number | null;
+}
+
+// Mirrors src/logistics/dispatch/trip.rs.
+export type TripStatus = 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED';
+
+export interface Trip {
+  id: string;
+  org_id: string;
+  vehicle_registration_number: string;
+  created_at: number;
+  status: TripStatus;
+  stops: DispatchOrder[];
 }
 
 // Mirrors PaymentStatus / Invoice / CustomerBillingSummary in

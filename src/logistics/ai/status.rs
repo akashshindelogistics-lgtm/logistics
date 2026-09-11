@@ -2,13 +2,12 @@ use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::DispatchOrder;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub async fn generate_dispatch_summary(
-    dispatch: &DispatchOrder,
-    customer: &Customer,
-) -> Result<String, String> {
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| "ANTHROPIC_API_KEY environment variable not set".to_string())?;
-
+/// Build the prompt sent to the Anthropic API for a dispatch's status
+/// summary. Pulled out of [`generate_dispatch_summary`] as a pure function so
+/// the prompt's content (vehicle, stock lines, customer details, the
+/// "none recorded" / "location not set" fallbacks) can be unit tested without
+/// a network call or an API key.
+fn build_prompt(dispatch: &DispatchOrder, customer: &Customer) -> String {
     let dispatched_when = {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -51,7 +50,7 @@ pub async fn generate_dispatch_summary(
             .join(", ")
     };
 
-    let prompt = format!(
+    format!(
         "You are a logistics status assistant. Write a clear, friendly 2–3 sentence status \
         update for the following dispatch order. Be specific and informative — mention the \
         vehicle, the stock items and their quantities, and the customer. Do not use bullet points.\n\n\
@@ -71,7 +70,17 @@ pub async fn generate_dispatch_summary(
         customer_name = customer.name,
         customer_addr = customer.address,
         customer_loc = customer_location,
-    );
+    )
+}
+
+pub async fn generate_dispatch_summary(
+    dispatch: &DispatchOrder,
+    customer: &Customer,
+) -> Result<String, String> {
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| "ANTHROPIC_API_KEY environment variable not set".to_string())?;
+
+    let prompt = build_prompt(dispatch, customer);
 
     let client = reqwest::Client::new();
     let mut request = client
@@ -113,4 +122,119 @@ pub async fn generate_dispatch_summary(
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| "Unexpected response format from Anthropic API".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logistics::dispatch::dispatch::{DispatchLineItem, DispatchStatus};
+    use crate::logistics::vehicle::vehicle::Location;
+    use uuid::Uuid;
+
+    fn sample_dispatch() -> DispatchOrder {
+        DispatchOrder {
+            id: Uuid::new_v4(),
+            org_id: Uuid::new_v4(),
+            customer_id: Uuid::new_v4(),
+            vehicle_registration_number: "MH12AB1234".to_string(),
+            line_items: vec![DispatchLineItem {
+                stock_description: "Cement".to_string(),
+                quantity: 10,
+                volume_in_size: 1,
+            }],
+            status: DispatchStatus::InTransit,
+            dispatched_at: 1_700_000_000,
+            status_history: Vec::new(),
+            proof_of_delivery: None,
+        }
+    }
+
+    fn sample_customer(location: Option<Location>) -> Customer {
+        Customer {
+            id: Uuid::new_v4(),
+            org_id: Uuid::new_v4(),
+            name: "Priya Sharma".to_string(),
+            address: "5 Market Road, Bengaluru".to_string(),
+            location,
+            phone: None,
+            email: None,
+        }
+    }
+
+    #[test]
+    fn build_prompt_includes_order_vehicle_stock_and_customer_details() {
+        let dispatch = sample_dispatch();
+        let customer = sample_customer(Some(Location {
+            latitude: 12.9716,
+            longitude: 77.5946,
+            timestamp: 0,
+            address: Some("Koramangala".to_string()),
+        }));
+
+        let prompt = build_prompt(&dispatch, &customer);
+
+        assert!(prompt.contains(&dispatch.vehicle_registration_number));
+        assert!(prompt.contains("Cement (10 units)"));
+        assert!(prompt.contains("IN_TRANSIT"));
+        assert!(prompt.contains("Priya Sharma"));
+        assert!(prompt.contains("5 Market Road, Bengaluru"));
+        assert!(prompt.contains("12.9716"));
+        assert!(prompt.contains("77.5946"));
+        assert!(prompt.contains("Koramangala"));
+        // Only the first 8 characters of the id are surfaced, not the whole UUID.
+        assert!(prompt.contains(&dispatch.id.to_string()[..8]));
+    }
+
+    #[test]
+    fn build_prompt_falls_back_when_customer_location_is_unset() {
+        let dispatch = sample_dispatch();
+        let customer = sample_customer(None);
+
+        let prompt = build_prompt(&dispatch, &customer);
+
+        assert!(prompt.contains("location not set"));
+    }
+
+    #[test]
+    fn build_prompt_falls_back_when_there_are_no_line_items() {
+        let mut dispatch = sample_dispatch();
+        dispatch.line_items.clear();
+        let customer = sample_customer(None);
+
+        let prompt = build_prompt(&dispatch, &customer);
+
+        assert!(prompt.contains("none recorded"));
+    }
+
+    #[test]
+    fn build_prompt_joins_multiple_line_items() {
+        let mut dispatch = sample_dispatch();
+        dispatch.line_items.push(DispatchLineItem {
+            stock_description: "Sand".to_string(),
+            quantity: 25,
+            volume_in_size: 1,
+        });
+        let customer = sample_customer(None);
+
+        let prompt = build_prompt(&dispatch, &customer);
+
+        assert!(prompt.contains("Cement (10 units), Sand (25 units)"));
+    }
+
+    #[actix_web::test]
+    async fn generate_dispatch_summary_errors_when_the_api_key_is_not_set() {
+        // SAFETY: this module is the only code that reads ANTHROPIC_API_KEY,
+        // and no other test sets it, so this doesn't race with anything else.
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+        let dispatch = sample_dispatch();
+        let customer = sample_customer(None);
+
+        let err = generate_dispatch_summary(&dispatch, &customer)
+            .await
+            .expect_err("should fail without an API key");
+
+        assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
+    }
 }

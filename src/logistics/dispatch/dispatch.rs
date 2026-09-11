@@ -56,10 +56,31 @@ fn ensure_dispatches_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn E
             customer_id VARCHAR(36) NOT NULL,
             vehicle_registration_number VARCHAR(255) NOT NULL,
             status VARCHAR(50) NOT NULL,
-            dispatched_at BIGINT NOT NULL
+            dispatched_at BIGINT NOT NULL,
+            trip_id VARCHAR(36) DEFAULT NULL,
+            stop_sequence BIGINT DEFAULT NULL
         )",
         (),
     )?;
+    ensure_trip_columns(conn)?;
+    Ok(())
+}
+
+/// Add the multi-stop `trip_id` / `stop_sequence` columns to a `Dispatches`
+/// table that predates them. Fresh databases get them in `CREATE TABLE`; this
+/// is only for a long-lived local one. See `docs/multi-stop-routes.md`.
+pub(crate) fn ensure_trip_columns(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    for (col, ty) in [("trip_id", "VARCHAR(36)"), ("stop_sequence", "BIGINT")] {
+        let present: Option<i64> = conn.exec_first(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'Dispatches'
+               AND column_name = :col",
+            params! { "col" => col },
+        )?;
+        if present.is_none() {
+            conn.query_drop(format!("ALTER TABLE Dispatches ADD COLUMN {col} {ty} DEFAULT NULL"))?;
+        }
+    }
     Ok(())
 }
 
@@ -369,6 +390,15 @@ pub struct DispatchOrder {
     /// [`Self::list_by_org`] / [`Self::list_all`].
     #[serde(default)]
     pub proof_of_delivery: Option<ProofOfDelivery>,
+    /// When this dispatch is one stop on a multi-stop trip, the trip it
+    /// belongs to. `None` for a standalone one-customer dispatch. See
+    /// `crate::logistics::dispatch::trip`.
+    #[serde(default)]
+    pub trip_id: Option<Uuid>,
+    /// This stop's 1-based position in its trip's sequence. `None` unless
+    /// `trip_id` is set.
+    #[serde(default)]
+    pub stop_sequence: Option<i64>,
 }
 
 impl DispatchOrder {
@@ -389,8 +419,8 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         conn.exec_drop(
-            "INSERT INTO Dispatches (id, org_id, customer_id, vehicle_registration_number, status, dispatched_at)
-             VALUES (:id, :org_id, :customer_id, :vehicle_registration_number, :status, :dispatched_at)",
+            "INSERT INTO Dispatches (id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence)
+             VALUES (:id, :org_id, :customer_id, :vehicle_registration_number, :status, :dispatched_at, :trip_id, :stop_sequence)",
             params! {
                 "id" => self.id.to_string(),
                 "org_id" => self.org_id.to_string(),
@@ -398,6 +428,8 @@ impl DispatchOrder {
                 "vehicle_registration_number" => &self.vehicle_registration_number,
                 "status" => self.status.as_str(),
                 "dispatched_at" => self.dispatched_at,
+                "trip_id" => self.trip_id.map(|t| t.to_string()),
+                "stop_sequence" => self.stop_sequence,
             },
         )?;
 
@@ -639,7 +671,7 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         let row: Option<DispatchRow> = conn.exec_first(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at FROM Dispatches WHERE id = :id",
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence FROM Dispatches WHERE id = :id",
             params! { "id" => id.to_string() },
         )?;
 
@@ -658,7 +690,7 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         let rows: Vec<DispatchRow> = conn.exec(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at FROM Dispatches",
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence FROM Dispatches",
             (),
         )?;
 
@@ -671,8 +703,23 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         let rows: Vec<DispatchRow> = conn.exec(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at FROM Dispatches WHERE org_id = :org_id",
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence FROM Dispatches WHERE org_id = :org_id",
             params! { "org_id" => org_id.to_string() },
+        )?;
+
+        Self::rows_to_orders(&mut conn, rows)
+    }
+
+    /// The stops of one multi-stop trip, ordered by `stop_sequence`.
+    pub fn list_by_trip(trip_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        ensure_tables(&mut conn)?;
+
+        let rows: Vec<DispatchRow> = conn.exec(
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence
+             FROM Dispatches WHERE trip_id = :trip_id ORDER BY stop_sequence ASC",
+            params! { "trip_id" => trip_id.to_string() },
         )?;
 
         Self::rows_to_orders(&mut conn, rows)
@@ -684,7 +731,7 @@ impl DispatchOrder {
         status_history: Vec<DispatchStatusEvent>,
         proof_of_delivery: Option<ProofOfDelivery>,
     ) -> Self {
-        let (id, org_id, customer_id, vehicle_reg, status, dispatched_at) = row;
+        let (id, org_id, customer_id, vehicle_reg, status, dispatched_at, trip_id, stop_sequence) = row;
         DispatchOrder {
             id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
             org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -695,6 +742,8 @@ impl DispatchOrder {
             dispatched_at,
             status_history,
             proof_of_delivery,
+            trip_id: trip_id.and_then(|t| Uuid::parse_str(&t).ok()),
+            stop_sequence,
         }
     }
 
@@ -720,7 +769,16 @@ impl DispatchOrder {
 
 /// One raw `Dispatches` row: `(id, org_id, customer_id,
 /// vehicle_registration_number, status, dispatched_at)`.
-type DispatchRow = (String, String, String, String, String, i64);
+type DispatchRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    Option<String>,
+    Option<i64>,
+);
 
 #[cfg(test)]
 mod tests {
@@ -769,6 +827,8 @@ mod tests {
             dispatched_at: 1_700_000_000,
             status_history: Vec::new(),
             proof_of_delivery: None,
+            trip_id: None,
+            stop_sequence: None,
         };
         order.save().expect("save dispatch");
         (org, godown.id, order)
@@ -785,6 +845,8 @@ mod tests {
             dispatched_at: 1_700_000_000,
             status_history: Vec::new(),
             proof_of_delivery: None,
+            trip_id: None,
+            stop_sequence: None,
         }
     }
 
