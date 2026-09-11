@@ -237,7 +237,14 @@ export default function Dispatches() {
                 {orders.map(o => (
                   <>
                     <tr key={o.id}>
-                      <td><span className="mono">{o.id.slice(0, 8)}…</span></td>
+                      <td>
+                        <span className="mono">{o.id.slice(0, 8)}…</span>
+                        {o.trip_id && (
+                          <div className="badge tag-blue" style={{ marginTop: 4 }}>
+                            Trip · stop {o.stop_sequence}
+                          </div>
+                        )}
+                      </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--green-bg)', color: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>

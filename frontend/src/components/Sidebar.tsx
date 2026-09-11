@@ -9,6 +9,7 @@ const baseLinks = [
   { to: '/vehicles',   label: 'Vehicles',        Icon: IconTruck },
   { to: '/customers',  label: 'Customers',       Icon: IconUsers },
   { to: '/dispatches', label: 'Dispatches',      Icon: IconDispatch },
+  { to: '/trips',      label: 'Trips',           Icon: IconDispatch },
   { to: '/reports',    label: 'Reports',         Icon: IconChart },
 ];
 const adminLinks = [

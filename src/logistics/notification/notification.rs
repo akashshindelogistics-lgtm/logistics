@@ -127,6 +127,19 @@ impl Notification {
                 CONSTRAINT fk_notification_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
         )?;
+        // `seq` (a stable newest-first ordering key) was added after the table
+        // first shipped; back-fill it onto a local database that predates it.
+        let has_seq: Option<i64> = conn.exec_first(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'Notifications'
+               AND column_name = 'seq'",
+            (),
+        )?;
+        if has_seq.is_none() {
+            conn.query_drop(
+                "ALTER TABLE Notifications ADD COLUMN seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE",
+            )?;
+        }
         Ok(())
     }
 

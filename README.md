@@ -45,6 +45,9 @@ operations, live location maps, and AI-generated dispatch summaries.
   `DELIVERED` requires proof of delivery (receiver name plus a
   signature/photo); marking one `RETURNED` credits the shipment's stock back
   into a godown.
+- **Multi-stop trips** — plan one vehicle to visit several customers in a
+  sequence; each stop is a normal dispatch with its own lifecycle, linked
+  under a trip whose status is derived from its stops.
 - **Freight billing** — raise one invoice per dispatch with an amount and a
   due date; the dashboard tracks each invoice as paid / pending / overdue
   and rolls a customer's unpaid invoices up into an outstanding balance.
@@ -192,6 +195,7 @@ npm run test:e2e:demo
 npm run test:e2e:demo:reports        # operations reporting
 npm run test:e2e:demo:roles          # role-scoped team members
 npm run test:e2e:demo:notifications  # dispatch notifications
+npm run test:e2e:demo:trips          # multi-stop trips
 ```
 
 ## API overview
@@ -234,6 +238,8 @@ All routes are served under the `/api` prefix.
 | GET/POST | `/api/customers`, `/api/orgs/{id}/customers` | List the org's customers / add one (optionally with an initial `latitude`/`longitude`) |
 | PUT/DELETE | `/api/customers/{id}/location`, `/api/customers/{id}` | Update a customer's location / delete the customer |
 | POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to one of its customers |
+| POST/GET | `/api/orgs/{id}/trips` | Plan a multi-stop trip (one vehicle, several customers) / list the org's trips |
+| GET | `/api/trips/{id}` | One multi-stop trip and its ordered stops |
 | GET | `/api/dispatches` | List dispatch orders |
 | PUT | `/api/dispatches/{id}/status` | Advance a dispatch's lifecycle status |
 | GET | `/api/dispatches/{id}/summary` | AI-generated summary of a dispatch |

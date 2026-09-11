@@ -77,6 +77,7 @@ jobs:
               '/api/invoices/{id}/pay', '/api/orgs/{id}/invoices',
               '/api/orgs/{id}/reports',
               '/api/dispatches/{id}/notifications', '/api/orgs/{id}/notifications',
+              '/api/orgs/{id}/trips', '/api/trips/{id}',
           ]
           missing = [p for p in expected if p not in paths]
           if missing:
