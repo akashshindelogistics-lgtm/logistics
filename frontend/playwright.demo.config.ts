@@ -27,6 +27,7 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    video: 'on',
     headless: false,
     launchOptions: {
       // Slow every Playwright-driven action down so the flow is easy to
