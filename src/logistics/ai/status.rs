@@ -146,6 +146,8 @@ mod tests {
             dispatched_at: 1_700_000_000,
             status_history: Vec::new(),
             proof_of_delivery: None,
+            trip_id: None,
+            stop_sequence: None,
         }
     }
 
