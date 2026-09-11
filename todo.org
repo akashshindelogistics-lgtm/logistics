@@ -281,7 +281,26 @@
   Anthropic HTTP call itself is intentionally left untested — this codebase
   has no HTTP-mocking layer and hitting the real API in a test isn't
   appropriate. 251 Rust tests total, all passing.
-* TODO Create release for the current state - Date [ 1-09-2026 ]
+* DONE Create release for the current state - Date [ 1-09-2026 ]
+  v0.1.0 was tagged on this date but never actually released — release.yml's
+  Docker build failed (fixed two days later by PR #20, never re-run) and the
+  automated release-please flow that should have cut the next one has been
+  failing on every push to master since, root-caused this session to two
+  issues: it read its config from the repo's default branch, which was the
+  stale `main` (see the "remove main branch" item above) - fixed by that
+  change; then hit a second, separate blocker (GitHub Actions not permitted
+  to open pull requests on this repo, a permissions setting) that's still
+  open. Rather than leave "current state" unreleased indefinitely, cut
+  v0.2.0 by hand: bumped Cargo.toml/.lock, frontend/package.json/-lock.json
+  and .release-please-manifest.json 0.1.0 -> 0.2.0, wrote a CHANGELOG.md
+  entry summarizing everything merged since v0.1.0, tagged and pushed
+  v0.2.0. release.yml ran clean: linux/arm64 image on GHCR
+  (ghcr.io/akashshindelogistics-lgtm/logistics-api:0.2.0), frontend tarball
+  + openapi.json attached to the GitHub Release, deploy job correctly
+  skipped (DEPLOY_ON_RELEASE unset - no hosting configured yet, see the
+  "finish up manual deploy steps" item). Once the Actions PR-permission is
+  fixed, release-please resumes normal automated operation from here.
+  https://github.com/akashshindelogistics-lgtm/logistics/releases/tag/v0.2.0
 * TODO Set ANTHROPIC_API_KEY on rust backend so that AI summery works
 * DONE Customer create UI should have option to add location details of customer.
   The "Create Customer" form gained optional Latitude / Longitude number
