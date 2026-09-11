@@ -232,9 +232,29 @@
   tests, 4 new Playwright flows. Fleet displays now show the vehicle's real
   unit instead of a hardcoded "MT".
   Plan/context: [[file:docs/ui-editing.md]]
-* TODO UI dashboard doesn't have an option to add stock to the org. Stock can only be added by API at the moment
+* DONE UI dashboard doesn't have an option to add stock to the org. Stock can only be added by API at the moment
+  Already shipped: the "Organisation can have multiple godowns" work added a
+  per-godown "Add Stock" inline form (Stock Item / Stock Quantity / Volume)
+  on the org detail page's Godowns section, wired to
+  POST /api/godowns/{gid}/stock via addGodownStock. Verified it's still there
+  (src/pages/OrganizationDetail.tsx) and covered by
+  frontend/tests/organization.spec.ts ("create a godown and add stock to it
+  via the UI") and a step in e2e-full-flow.spec.ts. No further work needed;
+  this entry was stale.
 * TODO finish up manual steps to deploy frontend and backend on hosted platform
-* TODO Add unit tests for rust backend
+* DONE Add unit tests for rust backend
+  Audited every src/logistics/* module for #[test]/#[actix_web::test]
+  coverage: all domain modules already had it (262 tests, from the earlier
+  "write unit tests for all routes" and "check if all routes have unit
+  tests" items). The one real gap was src/logistics/ai/status.rs
+  (generate_dispatch_summary), which had none. Pulled its prompt-building
+  into a pure build_prompt(dispatch, customer) helper and added 5 tests: 4
+  deterministic prompt-content cases (vehicle/stock/customer fields, the
+  "location not set" and "none recorded" fallbacks, multiple line items
+  joined) plus one for the missing-ANTHROPIC_API_KEY error path. The live
+  Anthropic HTTP call itself is intentionally left untested — this codebase
+  has no HTTP-mocking layer and hitting the real API in a test isn't
+  appropriate. 251 Rust tests total, all passing.
 * TODO Create release for the current state - Date [ 1-09-2026 ]
 * TODO Set ANTHROPIC_API_KEY on rust backend so that AI summery works
 * DONE Customer create UI should have option to add location details of customer.
