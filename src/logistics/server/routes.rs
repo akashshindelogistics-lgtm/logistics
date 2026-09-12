@@ -3501,6 +3501,59 @@ pub async fn get_ops_report(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> im
     }
 }
 
+/// "Explain this report" - an AI-narrated summary of the org's operational
+/// report, same shape as `GET /api/dispatches/{id}/summary` but pointed at
+/// [`OpsReport`] instead of one dispatch. Not RAG - straight
+/// prompt-over-structured-data, exactly like the dispatch summary already is.
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/reports/summary",
+    tag = "Reports",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "AI-generated plain-English report briefing", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/reports/summary")]
+pub async fn get_ops_report_summary(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only summarize reports for your own organization"
+                .to_string(),
+            data: None,
+        });
+    }
+
+    let report = match OpsReport::for_org(org_id) {
+        Ok(report) => report,
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to build report: {}", err),
+                data: None,
+            })
+        }
+    };
+
+    match crate::logistics::ai::report::generate_report_summary(&report).await {
+        Ok(summary) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Summary generated".to_string(),
+            data: Some(summary),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to generate summary: {}", err),
+            data: None,
+        }),
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/api/dispatches/{id}/notifications",
@@ -3872,6 +3925,7 @@ impl Modify for SecurityAddon {
         list_org_invoices,
         get_customer_billing,
         get_ops_report,
+        get_ops_report_summary,
         list_dispatch_notifications,
         list_org_notifications,
         create_trip,
@@ -3996,6 +4050,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(list_org_invoices)
             .service(get_customer_billing)
             .service(get_ops_report)
+            .service(get_ops_report_summary)
             .service(list_dispatch_notifications)
             .service(list_org_notifications)
             .service(create_trip)
@@ -6475,6 +6530,32 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 200);
         let body: ApiResponse<AssistantReindexResult> = test::read_body_json(resp).await;
         assert!(body.data.unwrap().chunks_indexed >= 1);
+    }
+
+    // ── GET /api/orgs/{id}/reports/summary ────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_get_ops_report_summary_without_token_returns_401() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/reports/summary", Uuid::new_v4()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_get_ops_report_summary_returns_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _auth) = setup_org(&app, "Report Summary Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Report Summary Intruder Org").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/reports/summary", org.id))
+            .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
 
     // ── PUT /api/dispatches/{id}/status ───────────────────────────────────────

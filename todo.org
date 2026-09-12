@@ -478,7 +478,7 @@
     Inject a small always-current OpsReport::for_org snapshot directly into
     the generation prompt alongside retrieved chunks, rather than trying to
     keep volatile numbers indexed as chunks that go stale every dispatch.
-** TODO "Explain this report" - an AI-narrated summary on the Reports page, same shape as the existing AI dispatch summary but pointed at OpsReport instead of one dispatch
+** DONE "Explain this report" - an AI-narrated summary on the Reports page, same shape as the existing AI dispatch summary but pointed at OpsReport instead of one dispatch
    Not RAG - straight prompt-over-structured-data, exactly like
    generate_dispatch_summary already does for one dispatch. New
    build_report_prompt(report: &OpsReport) -> String (pure, unit-testable)
@@ -490,6 +490,25 @@
    is good at and a static dashboard tile can't do. Same GET-on-demand route
    shape as /api/dispatches/{id}/summary; same .btn-ai/.ai-summary-card
    frontend treatment, placed above the stat-tile grid on Reports.tsx.
+   Implemented as a new src/logistics/ai/report.rs module (mirrors
+   ai/status.rs's exact Anthropic call shape - same model, same reqwest
+   pattern, same headers) with build_report_prompt and
+   generate_report_summary. Route: GET /api/orgs/{id}/reports/summary
+   (AuthenticatedOrg-gated, same org_id-path-param 403 check as
+   get_ops_report). Frontend: an "Explain this report"/"Regenerate" button
+   in a new section-card above the stat-tile grid on Reports.tsx, calling
+   getOpsReportSummary and rendering the answer in an .ai-summary-card,
+   same loading/error treatment as the dispatch summary. No Playwright
+   coverage of the live-answer path, matching the existing AI dispatch-
+   summary feature's precedent (ANTHROPIC_API_KEY isn't configured in this
+   environment) - verified manually end-to-end against the real backend
+   instead, confirming the deterministic "ANTHROPIC_API_KEY... not set"
+   error surfaces correctly through the whole stack. 5 new pure/async unit
+   tests in ai/report.rs (prompt content + missing-API-key path) + 2 new
+   route tests (401/403) + 2 new frontend api-client/component tests. Full
+   `cargo test --lib` (304 tests) and `npm run test:unit` (188 tests) green
+   with no regressions; existing `npm run test:e2e` reports.spec.ts (2
+   tests) still passes with the new UI in place.
 ** TODO Daily ops digest - an on-demand (not scheduled) AI summary of "what needs attention today" across dispatches, compliance and stock
    Also prompt-over-structured-data, one level broader than the report
    narration above: pulls together dispatches stuck in a status too long

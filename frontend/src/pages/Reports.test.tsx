@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import Reports from './Reports';
 import * as reportsApi from '../api/reports';
 import type { OpsReport } from '../types';
@@ -73,5 +74,34 @@ describe('Reports page', () => {
     vi.mocked(reportsApi.getOpsReport).mockRejectedValue(new Error('boom'));
     render(<Reports />);
     expect(await screen.findByText(/no report available/i)).toBeInTheDocument();
+  });
+
+  it('generates and displays an AI narration of the report on demand', async () => {
+    vi.mocked(reportsApi.getOpsReport).mockResolvedValue(ok(report()));
+    vi.mocked(reportsApi.getOpsReportSummary).mockResolvedValue(
+      ok('Utilization is unusually low this week - only 1 of 4 vehicles are active.'),
+    );
+
+    const user = userEvent.setup();
+    render(<Reports />);
+
+    const button = await screen.findByRole('button', { name: /explain this report/i });
+    await user.click(button);
+
+    expect(reportsApi.getOpsReportSummary).toHaveBeenCalledWith('org1');
+    expect(await screen.findByText(/utilization is unusually low this week/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /regenerate/i })).toBeInTheDocument();
+  });
+
+  it('shows a fallback message when the report summary call fails', async () => {
+    vi.mocked(reportsApi.getOpsReport).mockResolvedValue(ok(report()));
+    vi.mocked(reportsApi.getOpsReportSummary).mockRejectedValue(new Error('network error'));
+
+    const user = userEvent.setup();
+    render(<Reports />);
+
+    await user.click(await screen.findByRole('button', { name: /explain this report/i }));
+
+    expect(await screen.findByText(/ensure anthropic_api_key is set on the server/i)).toBeInTheDocument();
   });
 });
