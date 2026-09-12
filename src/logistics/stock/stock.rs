@@ -105,6 +105,10 @@ impl Stock {
                 "godown_id" => godown_id.to_string(),
             },
         )?;
+        crate::logistics::ai::chunk::reindex_stock_by_description_best_effort(
+            godown_id,
+            &self.description,
+        );
         Ok(())
     }
 
@@ -133,6 +137,10 @@ impl Stock {
         self.quantity = quantity;
         self.reorder_threshold = reorder_threshold;
         self.below_threshold = Self::is_below(quantity, reorder_threshold);
+        crate::logistics::ai::chunk::reindex_stock_by_description_best_effort(
+            godown_id,
+            &self.description,
+        );
         Ok(())
     }
 
@@ -147,6 +155,10 @@ impl Stock {
                 "godown_id" => godown_id.to_string(),
             },
         )?;
+        crate::logistics::ai::chunk::reindex_stock_by_description_best_effort(
+            godown_id,
+            &self.description,
+        );
         Ok(())
     }
 }
@@ -312,5 +324,36 @@ mod tests {
         let bolts = reloaded.iter().find(|s| s.description == "Bolts").unwrap();
         assert_eq!(bolts.reorder_threshold, None);
         assert!(!bolts.below_threshold);
+    }
+
+    #[test]
+    fn test_add_update_and_remove_keep_the_assistant_index_in_sync() {
+        use crate::logistics::ai::chunk;
+
+        let _db = TestDb::create();
+        let godown = make_godown();
+        let mut stock = Stock::new(1, 100, "Pallets");
+        stock.add_to_godown(godown.id).expect("add");
+
+        let results = chunk::search_by_org(godown.org_id, "Pallets", 8).expect("search");
+        assert!(
+            results.iter().any(|c| c.text.contains("100 units of Pallets")),
+            "adding stock should index it: {results:?}"
+        );
+
+        stock.update_in_godown(godown.id, 1, 5, Some(50)).expect("update");
+        let results = chunk::search_by_org(godown.org_id, "Pallets", 8).expect("search");
+        assert!(
+            results.iter().any(|c| c.text.contains("5 units of Pallets")
+                && c.text.contains("below its reorder threshold")),
+            "updating stock should reindex it with the new quantity: {results:?}"
+        );
+
+        stock.remove_from_godown(godown.id).expect("remove");
+        let results = chunk::search_by_org(godown.org_id, "Pallets", 8).expect("search");
+        assert!(
+            !results.iter().any(|c| c.text.contains("Pallets")),
+            "removing stock should drop its chunk: {results:?}"
+        );
     }
 }

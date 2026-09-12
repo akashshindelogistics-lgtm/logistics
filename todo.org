@@ -424,9 +424,30 @@
     step added to e2e-full-flow.spec.ts, matching the existing AI
     dispatch-summary feature's precedent - the live-answer path needs
     ANTHROPIC_API_KEY, not configured in this environment.
-*** TODO Phase 2: dispatch_narrative + stock_snapshot chunks and their write-through hooks (on DispatchOrder::transition_to and Stock update/transfer)
+*** DONE Phase 2: dispatch_narrative + stock_snapshot chunks and their write-through hooks (on DispatchOrder::transition_to and Stock update/transfer)
     No frontend changes needed - the widget already renders whatever
-    sources[] come back generically.
+    sources[] come back generically. ChunkKind extended with
+    DispatchNarrative | StockSnapshot; dispatch_narrative_text (customer +
+    line items + full status_history + proof of delivery, regenerated
+    whole on every status change, not appended) and stock_snapshot_text
+    (godown + description + quantity + below_threshold flag) added to
+    src/logistics/ai/chunk.rs alongside reindex_dispatch_best_effort and
+    reindex_stock_by_description_best_effort. Write-through hooks wired
+    into seven call sites: DispatchOrder::save/transition_to/
+    credit_line_items_back (src/logistics/dispatch/dispatch.rs),
+    Stock::add_to_godown/update_in_godown/remove_from_godown
+    (src/logistics/stock/stock.rs), StockTransfer::execute
+    (src/logistics/godown/transfer.rs), and Organization::draw_down_plans
+    (src/logistics/orgs/orgs.rs, the shared stock-decrement path used by
+    every dispatch). 4 new pure unit tests for the chunk-text builders +
+    6 new integration tests proving the index tracks reality end to end:
+    dispatch save/transition regenerates the narrative whole, a RETURNED
+    transition credits stock back into the chunk, add/update/remove keep
+    a stock chunk in sync (including deletion once quantity hits zero),
+    a transfer reindexes both the source and destination godowns'
+    chunks (and deletes the source chunk when fully drained), and
+    dispatch_stock_to_customer's draw-down reflects in the stock chunk.
+    Full `cargo test --lib` suite (284 tests) green with no regressions.
 *** TODO Phase 3: org_directory chunks (customer/godown/vehicle address/identity) plus a reindex_org(org_id) backfill function
     For orgs whose existing rows predate this feature - nothing re-triggers
     their write-through hook until next touched.

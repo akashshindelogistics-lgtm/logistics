@@ -465,6 +465,10 @@ impl Organization {
                         "desc" => &plan.description,
                     },
                 )?;
+                crate::logistics::ai::chunk::reindex_stock_by_description_best_effort(
+                    *godown_id,
+                    &plan.description,
+                );
             }
             items.push(DispatchLineItem {
                 stock_description: plan.description,
@@ -870,6 +874,38 @@ mod tests {
             .expect("Failed to query stock from DB");
 
         assert_eq!(stock_qty, Some(85));
+    }
+
+    #[test]
+    fn test_dispatch_stock_to_customer_reindexes_the_drawn_down_stock_chunk() {
+        use crate::logistics::ai::chunk;
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("Global Logistics", "Delhi HQ")
+            .expect("Failed to create organization");
+        org.update_location(28.6139, 77.2090, Some("Delhi HQ")).expect("Failed to update org location");
+
+        let godown = Godown::create(org.id, "Delhi Godown", "Okhla Phase 1", None)
+            .expect("Failed to create godown");
+        Stock::new(50, 100, "High-End Laptops").add_to_godown(godown.id).expect("Failed to add stock");
+
+        let driver = Driver::create(org.id, "Driver One", "LIC-1", "111").expect("driver");
+        let mut vehicle = Vehicle::new("UP16 BZ 2222", 10_000, Unit::MetricTon);
+        vehicle.add_new_vehicle_to_org(&org).expect("Failed to add vehicle");
+        vehicle.update_location(28.5355, 77.3910, Some("Noida Hub")).expect("Failed to update vehicle location");
+        vehicle.assign_driver(Some(driver.id)).expect("assign driver");
+
+        let mut customer = Customer::create_customer(org.id, "Tech Store India", "Connaught Place, New Delhi")
+            .expect("Failed to create customer");
+        customer.update_location(28.6200, 77.2100, Some("Connaught Place")).expect("Failed to update customer location");
+
+        org.dispatch_stock_to_customer(&customer, &[line("High-End Laptops", 15)])
+            .expect("Failed to dispatch stock to customer");
+
+        let results = chunk::search_by_org(org.id, "Delhi Godown Laptops", 8).expect("search");
+        assert!(
+            results.iter().any(|c| c.text.contains("Delhi Godown") && c.text.contains("85 units of High-End Laptops")),
+            "draw_down_plans should reindex the stock chunk with the decremented quantity: {results:?}"
+        );
     }
 
     #[test]
