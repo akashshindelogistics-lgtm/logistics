@@ -490,7 +490,7 @@
    is good at and a static dashboard tile can't do. Same GET-on-demand route
    shape as /api/dispatches/{id}/summary; same .btn-ai/.ai-summary-card
    frontend treatment, placed above the stat-tile grid on Reports.tsx.
-** TODO Daily ops digest - an on-demand (not scheduled) AI summary of "what needs attention today" across dispatches, compliance and stock
+** DONE Daily ops digest - an on-demand (not scheduled) AI summary of "what needs attention today" across dispatches, compliance and stock
    Also prompt-over-structured-data, one level broader than the report
    narration above: pulls together dispatches stuck in a status too long
    (compare status_history's last-changed timestamp against now), vehicles
@@ -502,6 +502,24 @@
    Worth building this one AFTER the assistant widget (previous item) even
    though it doesn't need retrieval, since the widget gives it a place to
    live for free.
+   Implemented as a new src/logistics/ai/digest.rs module: build_digest_prompt
+   (pure, unit-testable) + generate_daily_digest(org_id), which filters
+   DispatchOrder::list_by_org for non-terminal dispatches whose last
+   status_history entry is >48h old, VehicleDocument::list_by_org for
+   ExpiringSoon/Expired documents, and Godown::list_by_org's stock rows for
+   below_threshold - then asks Claude to prioritize them into a short
+   briefing. Returns a canned "nothing needs attention" answer without
+   calling Claude when every category is empty, same short-circuit
+   answer_question uses when retrieval finds nothing. Route:
+   GET /api/orgs/{id}/assistant/digest (AuthenticatedOrg-gated, same
+   org_id-path-param 403 check as the other assistant routes). Folded into
+   the AssistantWidget as a "✦ What needs my attention today?" starter
+   suggestion shown in the empty state, answered as a normal turn (no
+   sources, since this isn't retrieval-grounded). 4 new backend unit tests,
+   3 new route tests, 3 new frontend api-client/component tests, 1 new
+   Playwright flow. Full `cargo test --lib` (304 tests), `npm run test:unit`
+   (188 tests) and `npm run test:e2e` (63 tests) all green with no
+   regressions.
 ** TODO Smart reorder suggestions - narrate low-stock godowns with a suggested reorder quantity based on recent dispatch velocity, not just the current below_threshold flag
    Needs one new piece of structured computation this system doesn't have
    yet - per-item dispatch velocity (units of a given stock description

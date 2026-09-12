@@ -3177,6 +3177,48 @@ pub async fn reindex_assistant(path: web::Path<Uuid>, auth: AuthenticatedOrg) ->
     }
 }
 
+/// The daily ops digest: an on-demand AI summary of "what needs attention
+/// today" across dispatches, compliance and stock. Folded into the assistant
+/// widget as a canned starter question rather than a page of its own — see
+/// `crate::logistics::ai::digest`.
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/assistant/digest",
+    tag = "AI Assistant",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "AI-generated 'what needs attention today' briefing", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/assistant/digest")]
+pub async fn get_daily_digest(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only view the digest for your own organization"
+                .to_string(),
+            data: None,
+        });
+    }
+
+    match crate::logistics::ai::digest::generate_daily_digest(org_id).await {
+        Ok(digest) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Digest generated".to_string(),
+            data: Some(digest),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to generate digest: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── Freight billing handlers (protected) ─────────────────────────────────────
 //
 // One invoice per dispatch. Every route checks the underlying dispatch (or the
@@ -3865,6 +3907,7 @@ impl Modify for SecurityAddon {
         get_dispatch_summary,
         ask_assistant,
         reindex_assistant,
+        get_daily_digest,
         create_dispatch_invoice,
         get_dispatch_invoice,
         update_invoice,
@@ -3989,6 +4032,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(get_dispatch_summary)
             .service(ask_assistant)
             .service(reindex_assistant)
+            .service(get_daily_digest)
             .service(create_dispatch_invoice)
             .service(get_dispatch_invoice)
             .service(update_invoice)
@@ -6475,6 +6519,48 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 200);
         let body: ApiResponse<AssistantReindexResult> = test::read_body_json(resp).await;
         assert!(body.data.unwrap().chunks_indexed >= 1);
+    }
+
+    // ── GET /api/orgs/{id}/assistant/digest ───────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_get_daily_digest_without_token_returns_401() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/assistant/digest", Uuid::new_v4()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_get_daily_digest_returns_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _auth) = setup_org(&app, "Digest Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Digest Intruder Org").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/assistant/digest", org.id))
+            .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_get_daily_digest_returns_a_canned_answer_when_nothing_needs_attention() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Digest Quiet Org").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/assistant/digest", org.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(body.data.unwrap().contains("Nothing needs your attention"));
     }
 
     // ── PUT /api/dispatches/{id}/status ───────────────────────────────────────
