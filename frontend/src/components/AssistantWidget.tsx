@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { askAssistant } from '../api/assistant';
+import { askAssistant, reindexAssistant } from '../api/assistant';
 import { isLoggedIn, getOrgId } from '../api/auth';
 import type { AssistantSource } from '../types';
 import '../pages/page.css';
@@ -26,8 +26,26 @@ export default function AssistantWidget() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reindexing, setReindexing] = useState(false);
+  const [reindexStatus, setReindexStatus] = useState<string | null>(null);
 
   if (!isLoggedIn()) return null;
+
+  const handleReindex = async () => {
+    const orgId = getOrgId();
+    if (!orgId) return;
+
+    setReindexing(true);
+    setReindexStatus(null);
+    try {
+      const res = await reindexAssistant(orgId);
+      setReindexStatus(res.data ? `Reindexed ${res.data.chunks_indexed} fact(s).` : res.message);
+    } catch {
+      setReindexStatus('Could not reindex right now.');
+    } finally {
+      setReindexing(false);
+    }
+  };
 
   const handleAsk = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +134,18 @@ export default function AssistantWidget() {
               Ask
             </button>
           </form>
+
+          <div className="assistant-panel-footer">
+            <button
+              type="button"
+              className="assistant-reindex-link"
+              onClick={handleReindex}
+              disabled={reindexing}
+            >
+              {reindexing ? 'Reindexing…' : 'Reindex my data'}
+            </button>
+            {reindexStatus && <span className="assistant-reindex-status">{reindexStatus}</span>}
+          </div>
         </div>
       )}
 

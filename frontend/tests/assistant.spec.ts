@@ -46,4 +46,13 @@ test.describe('AI assistant widget', () => {
     await page.getByRole('button', { name: /close assistant/i }).click();
     await expect(page.getByRole('dialog', { name: /ask your data/i })).not.toBeVisible();
   });
+
+  test('reindexes on demand and reports how many facts were rebuilt', async ({ page }) => {
+    await registerOrg(page, `Assistant Reindex ${uid()}`);
+
+    await page.getByRole('button', { name: /open assistant/i }).click();
+    await page.getByRole('button', { name: /reindex my data/i }).click();
+
+    await expect(page.getByText(/reindexed \d+ fact\(s\)\./i)).toBeVisible({ timeout: 10000 });
+  });
 });

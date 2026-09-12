@@ -71,4 +71,29 @@ describe('AssistantWidget', () => {
 
     expect(await screen.findByText(/could not reach the assistant/i)).toBeInTheDocument();
   });
+
+  it('reindexes on demand and shows how many chunks were rebuilt', async () => {
+    vi.mocked(isLoggedIn).mockReturnValue(true);
+    vi.mocked(assistantApi.reindexAssistant).mockResolvedValue(ok({ chunks_indexed: 7 }));
+
+    const user = userEvent.setup();
+    render(<AssistantWidget />);
+    await user.click(screen.getByRole('button', { name: /open assistant/i }));
+    await user.click(screen.getByRole('button', { name: /reindex my data/i }));
+
+    expect(assistantApi.reindexAssistant).toHaveBeenCalledWith('org1');
+    expect(await screen.findByText(/reindexed 7 fact\(s\)/i)).toBeInTheDocument();
+  });
+
+  it('shows a status message when reindexing fails', async () => {
+    vi.mocked(isLoggedIn).mockReturnValue(true);
+    vi.mocked(assistantApi.reindexAssistant).mockRejectedValue(new Error('network error'));
+
+    const user = userEvent.setup();
+    render(<AssistantWidget />);
+    await user.click(screen.getByRole('button', { name: /open assistant/i }));
+    await user.click(screen.getByRole('button', { name: /reindex my data/i }));
+
+    expect(await screen.findByText(/could not reindex right now/i)).toBeInTheDocument();
+  });
 });

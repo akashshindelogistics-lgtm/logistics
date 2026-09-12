@@ -185,6 +185,9 @@ impl Vehicle {
         )?;
 
         self.assigned_driver_id = driver_id;
+        if let Ok(Some(org_id)) = Self::org_of(&self.registration_number) {
+            crate::logistics::ai::chunk::reindex_vehicle_best_effort(self, org_id);
+        }
         Ok(())
     }
 
@@ -241,6 +244,8 @@ impl Vehicle {
             },
         )?;
 
+        crate::logistics::ai::chunk::reindex_vehicle_best_effort(self, org.id);
+
         Ok(())
     }
 
@@ -269,6 +274,9 @@ impl Vehicle {
         )?;
         if let Some(key) = stored_key.and_then(|s| Uuid::parse_str(&s).ok()) {
             self.tracker_key = key;
+        }
+        if let Ok(Some(org_id)) = Self::org_of(&self.registration_number) {
+            crate::logistics::ai::chunk::reindex_vehicle_best_effort(self, org_id);
         }
         Ok(())
     }
@@ -383,6 +391,8 @@ impl Vehicle {
                 "registration_number" => &self.registration_number,
             },
         )?;
+
+        crate::logistics::ai::chunk::delete_vehicle_chunk_best_effort(&self.registration_number);
 
         Ok(())
     }
@@ -573,6 +583,32 @@ mod tests {
         assert_eq!(db_lng, Some(lng));
         assert!(db_ts.is_some() && db_ts.unwrap() > 0);
         assert_eq!(db_addr.as_deref(), Some(addr));
+    }
+
+    #[test]
+    fn test_add_update_assign_driver_and_remove_keep_the_assistant_index_in_sync() {
+        use crate::logistics::ai::chunk;
+        use crate::logistics::driver::driver::Driver;
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Fleet Directory Org", "1 Depot Rd").expect("create org");
+
+        let mut vehicle = Vehicle::new("MH12AB1234", 10_000, Unit::MetricTon);
+        vehicle.add_new_vehicle_to_org(&org).expect("add");
+        let results = chunk::search_by_org(org.id, "MH12AB1234", 8).expect("search");
+        assert!(results.iter().any(|c| c.text.contains("MH12AB1234") && c.text.contains("No driver currently assigned.")), "{results:?}");
+
+        vehicle.update_vehicle(15_000, Unit::MetricTon).expect("update");
+        let results = chunk::search_by_org(org.id, "MH12AB1234", 8).expect("search");
+        assert!(results.iter().any(|c| c.text.contains("15000")), "{results:?}");
+
+        let driver = Driver::create(org.id, "Ravi Kumar", "LIC-1", "9999999999").expect("driver");
+        vehicle.assign_driver(Some(driver.id)).expect("assign driver");
+        let results = chunk::search_by_org(org.id, "MH12AB1234", 8).expect("search");
+        assert!(results.iter().any(|c| c.text.contains("Ravi Kumar")), "{results:?}");
+
+        vehicle.remove_vehicle().expect("remove");
+        let results = chunk::search_by_org(org.id, "MH12AB1234", 8).expect("search");
+        assert!(!results.iter().any(|c| c.text.contains("MH12AB1234")), "removing a vehicle should drop its chunk: {results:?}");
     }
 
     #[test]

@@ -550,6 +550,19 @@ pub struct AssistantAnswerResponse {
     pub data: Option<AssistantAnswer>,
 }
 
+/// How many chunks a `POST /api/orgs/{id}/assistant/reindex` call (re)built.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AssistantReindexResult {
+    pub chunks_indexed: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AssistantReindexResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<AssistantReindexResult>,
+}
+
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UserResponse {
     pub success: bool,
@@ -3123,6 +3136,47 @@ pub async fn ask_assistant(
     }
 }
 
+/// Rebuild every assistant chunk for an org from scratch. Exists for orgs
+/// whose customers/godowns/vehicles/dispatches predate this feature and so
+/// never triggered a write-through index hook — see
+/// `crate::logistics::ai::chunk::reindex_org`. Safe to call repeatedly.
+#[utoipa::path(
+    post,
+    path = "/api/orgs/{id}/assistant/reindex",
+    tag = "AI Assistant",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "Every chunk for the organization was rebuilt", body = AssistantReindexResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/orgs/{id}/assistant/reindex")]
+pub async fn reindex_assistant(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only reindex your own organization".to_string(),
+            data: None,
+        });
+    }
+
+    match crate::logistics::ai::chunk::reindex_org(org_id) {
+        Ok(chunks_indexed) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Reindexed {chunks_indexed} chunk(s)"),
+            data: Some(AssistantReindexResult { chunks_indexed }),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to reindex: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── Freight billing handlers (protected) ─────────────────────────────────────
 //
 // One invoice per dispatch. Every route checks the underlying dispatch (or the
@@ -3810,6 +3864,7 @@ impl Modify for SecurityAddon {
         update_dispatch_status,
         get_dispatch_summary,
         ask_assistant,
+        reindex_assistant,
         create_dispatch_invoice,
         get_dispatch_invoice,
         update_invoice,
@@ -3854,6 +3909,7 @@ impl Modify for SecurityAddon {
             OpsReportResponse, UserResponse, UserListResponse, NotificationListResponse,
             TripResponse, TripListResponse, CreateTripPayload, TripStopPayload,
             AssistantAskPayload, AssistantAnswer, AssistantSource, AssistantAnswerResponse,
+            AssistantReindexResult, AssistantReindexResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
     ),
@@ -3932,6 +3988,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(update_dispatch_status)
             .service(get_dispatch_summary)
             .service(ask_assistant)
+            .service(reindex_assistant)
             .service(create_dispatch_invoice)
             .service(get_dispatch_invoice)
             .service(update_invoice)
@@ -6375,6 +6432,49 @@ mod tests {
         let answer = body.data.unwrap();
         assert!(answer.sources.is_empty());
         assert!(answer.answer.to_lowercase().contains("indexed yet"));
+    }
+
+    // ── POST /api/orgs/{id}/assistant/reindex ─────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_reindex_assistant_without_token_returns_401() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/assistant/reindex", Uuid::new_v4()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_reindex_assistant_returns_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _auth) = setup_org(&app, "Reindex Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Reindex Intruder Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/assistant/reindex", org.id))
+            .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_reindex_assistant_rebuilds_the_index_and_reports_the_count() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Reindex Backfill Org").await;
+        Customer::create_customer(org.id, "Legacy Customer", "1 Old Rd").expect("create customer");
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/assistant/reindex", org.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<AssistantReindexResult> = test::read_body_json(resp).await;
+        assert!(body.data.unwrap().chunks_indexed >= 1);
     }
 
     // ── PUT /api/dispatches/{id}/status ───────────────────────────────────────

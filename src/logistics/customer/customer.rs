@@ -135,6 +135,8 @@ impl Customer {
             },
         )?;
 
+        crate::logistics::ai::chunk::reindex_customer_best_effort(&customer);
+
         Ok(customer)
     }
 
@@ -162,6 +164,7 @@ impl Customer {
         )?;
         self.phone = phone;
         self.email = email;
+        crate::logistics::ai::chunk::reindex_customer_best_effort(self);
         Ok(())
     }
 
@@ -259,6 +262,7 @@ impl Customer {
             "DELETE FROM Customers WHERE id = :id",
             params! { "id" => self.id.to_string() },
         )?;
+        crate::logistics::ai::chunk::delete_customer_chunk_best_effort(self.id);
         Ok(())
     }
 }
@@ -346,6 +350,25 @@ mod tests {
 
         customer.delete().expect("delete");
         assert!(Customer::get_by_id(customer.id).expect("get").is_none());
+    }
+
+    #[test]
+    fn test_create_set_contact_and_delete_keep_the_assistant_index_in_sync() {
+        use crate::logistics::ai::chunk;
+        let _db = TestDb::create();
+        let org = make_org("Directory Org");
+
+        let mut customer = Customer::create_customer(org.id, "Reachable Co", "5 Market St").expect("create");
+        let results = chunk::search_by_org(org.id, "Reachable Market", 8).expect("search");
+        assert!(results.iter().any(|c| c.text.contains("Reachable Co") && c.text.contains("5 Market St")), "{results:?}");
+
+        customer.set_contact(Some("+91 90000 00000".into()), None).expect("set contact");
+        let results = chunk::search_by_org(org.id, "Reachable Market", 8).expect("search");
+        assert!(results.iter().any(|c| c.text.contains("+91 90000 00000")), "{results:?}");
+
+        customer.delete().expect("delete");
+        let results = chunk::search_by_org(org.id, "Reachable Market", 8).expect("search");
+        assert!(!results.iter().any(|c| c.text.contains("Reachable Co")), "deleting a customer should drop its chunk: {results:?}");
     }
 
     #[test]
