@@ -4,6 +4,14 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.6.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.5.0...v0.6.0) (2026-09-12)
+
+
+### Features
+
+* **ai:** add an AI-narrated "explain this report" summary ([f14ccd1](https://github.com/akashshindelogistics-lgtm/logistics/commit/f14ccd175f5e9267dcc9afa1dc63861755c16f27))
+* **ai:** add an AI-narrated "explain this report" summary ([fa24244](https://github.com/akashshindelogistics-lgtm/logistics/commit/fa242442d0ac678b8dbb0196840665bbb24743d9))
+
 ## [0.5.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.4.0...v0.5.0) (2026-09-12)
 
 
