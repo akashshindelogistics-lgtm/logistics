@@ -259,6 +259,10 @@ impl StockTransfer {
         )?;
 
         tx.commit()?;
+
+        crate::logistics::ai::chunk::reindex_stock_by_description_best_effort(from.id, description);
+        crate::logistics::ai::chunk::reindex_stock_by_description_best_effort(to.id, description);
+
         Ok(transfer)
     }
 
@@ -353,6 +357,52 @@ mod tests {
         assert!(reload(a.id).stock.iter().all(|s| s.description != "Bolts"));
         let b_bolts = reload(b.id).stock.into_iter().find(|s| s.description == "Bolts").unwrap();
         assert_eq!(b_bolts.quantity, 130);
+    }
+
+    #[test]
+    fn test_execute_reindexes_the_assistant_chunks_for_both_godowns() {
+        use crate::logistics::ai::chunk;
+        let _db = TestDb::create();
+        let org = org();
+        let a = Godown::create(org.id, "Warehouse A", "1 Dock Road", None).expect("a");
+        let b = Godown::create(org.id, "Warehouse B", "2 Dock Road", None).expect("b");
+        Stock::new(5, 100, "Cement").add_to_godown(a.id).expect("seed stock");
+
+        StockTransfer::execute(&reload(a.id), &reload(b.id), "Cement", 40).expect("transfer");
+
+        let results = chunk::search_by_org(org.id, "Warehouse Cement", 8).expect("search");
+        assert!(
+            results.iter().any(|c| c.text.contains("Warehouse A") && c.text.contains("60 units of Cement")),
+            "source godown chunk should reflect the drawn-down quantity: {results:?}"
+        );
+        assert!(
+            results.iter().any(|c| c.text.contains("Warehouse B") && c.text.contains("40 units of Cement")),
+            "destination godown chunk should reflect the credited quantity: {results:?}"
+        );
+    }
+
+    #[test]
+    fn test_execute_deletes_the_source_chunk_when_a_transfer_drains_it_completely() {
+        use crate::logistics::ai::chunk;
+        let _db = TestDb::create();
+        let org = org();
+        let a = Godown::create(org.id, "Warehouse A", "1 Dock Road", None).expect("a");
+        let b = Godown::create(org.id, "Warehouse B", "2 Dock Road", None).expect("b");
+        Stock::new(5, 100, "Bolts").add_to_godown(a.id).expect("seed a");
+        Stock::new(5, 30, "Bolts").add_to_godown(b.id).expect("seed b");
+
+        StockTransfer::execute(&reload(a.id), &reload(b.id), "Bolts", 100).expect("transfer");
+
+        let results = chunk::search_by_org(org.id, "Warehouse A Bolts", 8).expect("search");
+        assert!(
+            !results.iter().any(|c| c.text.contains("Warehouse A") && c.text.contains("Bolts")),
+            "draining the source item completely should drop its chunk: {results:?}"
+        );
+        let b_results = chunk::search_by_org(org.id, "Warehouse B Bolts", 8).expect("search");
+        assert!(
+            b_results.iter().any(|c| c.text.contains("Warehouse B") && c.text.contains("130 units of Bolts")),
+            "destination chunk should reflect the merged quantity: {b_results:?}"
+        );
     }
 
     #[test]

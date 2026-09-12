@@ -461,6 +461,8 @@ impl DispatchOrder {
             changed_at: self.dispatched_at,
         });
 
+        crate::logistics::ai::chunk::reindex_dispatch_best_effort(self);
+
         Ok(())
     }
 
@@ -563,6 +565,8 @@ impl DispatchOrder {
             changed_at,
         });
 
+        crate::logistics::ai::chunk::reindex_dispatch_best_effort(self);
+
         Ok(())
     }
 
@@ -661,6 +665,10 @@ impl DispatchOrder {
                     },
                 )?;
             }
+            crate::logistics::ai::chunk::reindex_stock_by_description_best_effort(
+                godown_id,
+                &item.stock_description,
+            );
         }
         Ok(())
     }
@@ -1043,6 +1051,67 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(in_godown, 2);
+    }
+
+    #[test]
+    fn test_return_credits_stock_back_and_the_stock_chunk_reflects_it() {
+        use crate::logistics::ai::chunk;
+
+        let _db = TestDb::create();
+        let (org, _godown_id, mut order) = in_transit_order_with_godown();
+
+        order
+            .transition_to(Returned, None, None)
+            .expect("IN_TRANSIT -> RETURNED is legal");
+
+        let results = chunk::search_by_org(org.id, "Cement godown", 8).expect("search");
+        assert!(
+            results.iter().any(|c| c.text.contains("130")),
+            "the stock chunk should reflect the credited-back quantity: {results:?}"
+        );
+    }
+
+    #[test]
+    fn test_save_and_transition_to_index_and_reindex_the_dispatch_narrative() {
+        use crate::logistics::ai::chunk;
+        use crate::logistics::customer::customer::Customer;
+
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Narrative Co", "1 Depot Rd").expect("org");
+        let customer =
+            Customer::create_customer(org.id, "Acme Corp", "5 Market Road").expect("customer");
+
+        let mut order = DispatchOrder {
+            id: Uuid::new_v4(),
+            org_id: org.id,
+            customer_id: customer.id,
+            vehicle_registration_number: "MH12AB1234".to_string(),
+            line_items: vec![line("Cement", 10)],
+            status: Pending,
+            dispatched_at: 1_700_000_000,
+            status_history: Vec::new(),
+            proof_of_delivery: None,
+            trip_id: None,
+            stop_sequence: None,
+        };
+        order.save().expect("save");
+
+        let results = chunk::search_by_org(org.id, "Acme Corp Cement", 8).expect("search");
+        assert!(
+            results.iter().any(|c| c.text.contains("Acme Corp") && c.text.contains("Pending")),
+            "saving a dispatch should index its narrative: {results:?}"
+        );
+
+        order.transition_to(Confirmed, None, None).expect("advance");
+        let results = chunk::search_by_org(org.id, "Acme Corp Cement", 8).expect("search");
+        assert!(
+            results.iter().any(|c| c.text.contains("Confirmed")),
+            "advancing status should reindex the narrative with the new status: {results:?}"
+        );
+        assert!(
+            !results.iter().any(|c| c.text.to_lowercase().contains("current status: pending")),
+            "the narrative is regenerated whole, not appended: {results:?}"
+        );
     }
 
     #[test]

@@ -7,13 +7,20 @@
 //! similarity. See `todo.org`'s "AI opportunities" section for the full
 //! design and phasing.
 //!
-//! v1 indexes two chunk kinds, one row per source row: [`Notification`] and
-//! [`VehicleDocument`]. Indexing is write-through and best-effort — see
+//! v1 (Phase 1) indexed [`Notification`] and [`VehicleDocument`]. Phase 2
+//! adds [`DispatchOrder`] (as a synthesized narrative — "what happened with
+//! dispatch X" needs the structured status history turned into text
+//! somewhere) and [`Stock`] (one chunk per godown+item, covering "what's low
+//! on stock"). Indexing is write-through and best-effort — see
 //! [`upsert_best_effort`] — never a background job, and never allowed to
 //! fail the write it's attached to.
 
+use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
+use crate::logistics::dispatch::dispatch::DispatchOrder;
+use crate::logistics::godown::godown::Godown;
 use crate::logistics::notification::notification::Notification;
+use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::document::VehicleDocument;
 use mysql::prelude::*;
 use mysql::*;
@@ -35,6 +42,8 @@ fn now_unix() -> i64 {
 pub enum ChunkKind {
     Notification,
     VehicleDocument,
+    DispatchNarrative,
+    StockSnapshot,
 }
 
 impl ChunkKind {
@@ -42,12 +51,16 @@ impl ChunkKind {
         match self {
             ChunkKind::Notification => "notification",
             ChunkKind::VehicleDocument => "vehicle_document",
+            ChunkKind::DispatchNarrative => "dispatch_narrative",
+            ChunkKind::StockSnapshot => "stock_snapshot",
         }
     }
 
     fn from_str(s: &str) -> Self {
         match s {
             "vehicle_document" => ChunkKind::VehicleDocument,
+            "dispatch_narrative" => ChunkKind::DispatchNarrative,
+            "stock_snapshot" => ChunkKind::StockSnapshot,
             _ => ChunkKind::Notification,
         }
     }
@@ -199,6 +212,104 @@ pub fn vehicle_document_chunk_text(d: &VehicleDocument) -> String {
     )
 }
 
+/// The narrative text for a [`DispatchOrder`] chunk — a synthesized story of
+/// the whole shipment (customer, line items, status history, proof of
+/// delivery), since "what happened with dispatch X" needs the structured
+/// history turned into text somewhere. Regenerated whole on every status
+/// change, not appended to.
+pub fn dispatch_narrative_text(d: &DispatchOrder, customer: &Customer) -> String {
+    let items = if d.line_items.is_empty() {
+        "no line items recorded".to_string()
+    } else {
+        d.line_items
+            .iter()
+            .map(|li| format!("{} ({} units)", li.stock_description, li.quantity))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    let history = if d.status_history.is_empty() {
+        "no history recorded".to_string()
+    } else {
+        d.status_history
+            .iter()
+            .map(|ev| format!("{:?} at {}", ev.status, ev.changed_at))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    let pod_part = d
+        .proof_of_delivery
+        .as_ref()
+        .map(|p| format!(" Delivered to {}.", p.receiver_name))
+        .unwrap_or_default();
+
+    format!(
+        "Dispatch {} to {} ({}): {} via vehicle {}. Current status: {:?}. History: {}.{}",
+        &d.id.to_string()[..8],
+        customer.name,
+        customer.address,
+        items,
+        d.vehicle_registration_number,
+        d.status,
+        history,
+        pod_part
+    )
+}
+
+/// The narrative text for a [`Stock`] chunk — one row per godown+item,
+/// covering "what's low on stock" questions.
+pub fn stock_snapshot_text(godown: &Godown, stock: &Stock) -> String {
+    let threshold_note = if stock.below_threshold {
+        " — below its reorder threshold".to_string()
+    } else {
+        String::new()
+    };
+    format!(
+        "Godown '{}' ({}) holds {} units of {}{}.",
+        godown.name, godown.address, stock.quantity, stock.description, threshold_note
+    )
+}
+
+/// Re-index a dispatch's narrative chunk. Best-effort like every other
+/// write-through hook; if the customer can't be loaded (it should always be
+/// loadable — this is defensive, not expected), indexing is silently
+/// skipped rather than failing the dispatch write it's attached to.
+pub fn reindex_dispatch_best_effort(dispatch: &DispatchOrder) {
+    let customer = match Customer::get_by_id(dispatch.customer_id) {
+        Ok(Some(c)) => c,
+        _ => return,
+    };
+    upsert_best_effort(
+        dispatch.org_id,
+        ChunkKind::DispatchNarrative,
+        &dispatch.id.to_string(),
+        dispatch_narrative_text(dispatch, &customer),
+    );
+}
+
+/// Re-index (or, if it no longer exists, remove) the chunk for one stock
+/// item in a godown, reading the current truth back from the database
+/// rather than trusting a possibly-stale in-memory value — a stock transfer
+/// touches two godowns' worth of rows in one write, so re-reading is simpler
+/// and more robust than threading updated quantities through by hand.
+pub fn reindex_stock_by_description_best_effort(godown_id: Uuid, description: &str) {
+    let godown = match Godown::get_by_id(godown_id) {
+        Ok(Some(g)) => g,
+        _ => return,
+    };
+    let source_id = format!("{godown_id}:{description}");
+    match godown.stock.iter().find(|s| s.description == description) {
+        Some(stock) => upsert_best_effort(
+            godown.org_id,
+            ChunkKind::StockSnapshot,
+            &source_id,
+            stock_snapshot_text(&godown, stock),
+        ),
+        None => delete_by_source_best_effort(ChunkKind::StockSnapshot, &source_id),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +386,105 @@ mod tests {
         d.notes = Some("   ".to_string());
         let text = vehicle_document_chunk_text(&d);
         assert!(!text.contains("Notes:"));
+    }
+
+    fn sample_customer() -> Customer {
+        Customer {
+            id: Uuid::new_v4(),
+            org_id: Uuid::new_v4(),
+            name: "Acme Corp".to_string(),
+            address: "5 Market Road, Bengaluru".to_string(),
+            location: None,
+            phone: None,
+            email: None,
+        }
+    }
+
+    fn sample_dispatch() -> DispatchOrder {
+        use crate::logistics::dispatch::dispatch::{DispatchLineItem, DispatchStatus};
+        DispatchOrder {
+            id: Uuid::new_v4(),
+            org_id: Uuid::new_v4(),
+            customer_id: Uuid::new_v4(),
+            vehicle_registration_number: "MH12AB1234".to_string(),
+            line_items: vec![DispatchLineItem {
+                stock_description: "Cement".to_string(),
+                quantity: 10,
+                volume_in_size: 1,
+            }],
+            status: DispatchStatus::InTransit,
+            dispatched_at: 1_700_000_000,
+            status_history: Vec::new(),
+            proof_of_delivery: None,
+            trip_id: None,
+            stop_sequence: None,
+        }
+    }
+
+    #[test]
+    fn dispatch_narrative_text_includes_customer_items_vehicle_and_status() {
+        let d = sample_dispatch();
+        let c = sample_customer();
+        let text = dispatch_narrative_text(&d, &c);
+        assert!(text.contains("Acme Corp"));
+        assert!(text.contains("5 Market Road, Bengaluru"));
+        assert!(text.contains("Cement (10 units)"));
+        assert!(text.contains("MH12AB1234"));
+        assert!(text.contains("InTransit"));
+        assert!(text.contains("no history recorded"));
+        assert!(!text.contains("Delivered to"));
+    }
+
+    #[test]
+    fn dispatch_narrative_text_includes_history_and_proof_of_delivery() {
+        use crate::logistics::dispatch::dispatch::{
+            DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
+        };
+        let mut d = sample_dispatch();
+        d.status_history = vec![
+            DispatchStatusEvent { status: DispatchStatus::Pending, changed_at: 1 },
+            DispatchStatusEvent { status: DispatchStatus::Delivered, changed_at: 2 },
+        ];
+        d.proof_of_delivery = Some(ProofOfDelivery {
+            receiver_name: "Priya Sharma".to_string(),
+            signature_or_photo_url: "https://example.com/sig.png".to_string(),
+            delivered_at: 2,
+        });
+        let text = dispatch_narrative_text(&d, &sample_customer());
+        assert!(text.contains("Pending at 1"));
+        assert!(text.contains("Delivered at 2"));
+        assert!(text.contains("Delivered to Priya Sharma."));
+    }
+
+    fn sample_godown() -> Godown {
+        Godown {
+            id: Uuid::new_v4(),
+            org_id: Uuid::new_v4(),
+            name: "Chennai Central".to_string(),
+            address: "12 Anna Salai, Chennai".to_string(),
+            location: None,
+            max_capacity: None,
+            stock: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn stock_snapshot_text_includes_godown_item_and_quantity() {
+        let godown = sample_godown();
+        let stock = Stock::new(1, 40, "Cement");
+        let text = stock_snapshot_text(&godown, &stock);
+        assert!(text.contains("Chennai Central"));
+        assert!(text.contains("12 Anna Salai, Chennai"));
+        assert!(text.contains("40 units of Cement"));
+        assert!(!text.contains("below its reorder threshold"));
+    }
+
+    #[test]
+    fn stock_snapshot_text_flags_below_threshold_stock() {
+        let godown = sample_godown();
+        let stock = Stock::new(1, 40, "Cement").with_reorder_threshold(Some(50));
+        let text = stock_snapshot_text(&godown, &stock);
+        assert!(text.contains("below its reorder threshold"));
     }
 
     #[test]
