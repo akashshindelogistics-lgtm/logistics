@@ -113,3 +113,24 @@ fn deleting_the_org_cascades_to_its_notifications() {
     org.remove_organization().expect("remove org");
     assert!(Notification::list_by_org(org.id, 100).expect("list").is_empty());
 }
+
+#[test]
+fn recording_a_notification_indexes_it_for_the_assistant() {
+    use crate::logistics::ai::chunk;
+
+    let _db = TestDb::create();
+    let org = org();
+    let mut customer = Customer::create_customer(org.id, "Priya Sharma", "5 Market Rd").expect("customer");
+    customer
+        .set_contact(None, Some("priya@example.com".into()))
+        .expect("contact");
+    let dispatch_id = Uuid::new_v4();
+
+    Notification::record_dispatch_created(org.id, dispatch_id, &customer, None).expect("record");
+
+    let results = chunk::search_by_org(org.id, "Priya Sharma dispatched", 8).expect("search");
+    assert!(
+        results.iter().any(|c| c.text.contains("Priya Sharma")),
+        "the recorded notification should be indexed and findable: {results:?}"
+    );
+}

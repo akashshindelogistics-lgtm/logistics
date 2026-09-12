@@ -317,6 +317,21 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create OrgCredentials");
 
     conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS AiChunks (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            kind VARCHAR(32) NOT NULL,
+            source_id VARCHAR(191) NOT NULL,
+            text TEXT NOT NULL,
+            updated_at BIGINT NOT NULL,
+            UNIQUE KEY uq_ai_chunk_source (org_id, kind, source_id),
+            FULLTEXT INDEX ft_ai_chunk_text (text),
+            CONSTRAINT fk_ai_chunk_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create AiChunks");
+
+    conn.query_drop(
         "CREATE TABLE IF NOT EXISTS OrgUsers (
             id VARCHAR(36) PRIMARY KEY,
             org_id VARCHAR(36) NOT NULL,

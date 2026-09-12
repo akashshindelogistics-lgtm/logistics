@@ -311,7 +311,7 @@ impl VehicleDocument {
         )?;
 
         let (days_until_expiry, status) = evaluate(&expires_on);
-        Ok(VehicleDocument {
+        let doc = VehicleDocument {
             id,
             org_id,
             vehicle_registration,
@@ -322,7 +322,14 @@ impl VehicleDocument {
             notes,
             days_until_expiry,
             status,
-        })
+        };
+        crate::logistics::ai::chunk::upsert_best_effort(
+            doc.org_id,
+            crate::logistics::ai::chunk::ChunkKind::VehicleDocument,
+            &doc.id.to_string(),
+            crate::logistics::ai::chunk::vehicle_document_chunk_text(&doc),
+        );
+        Ok(doc)
     }
 
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
@@ -430,6 +437,12 @@ impl VehicleDocument {
         self.notes = notes;
         self.days_until_expiry = days_until_expiry;
         self.status = status;
+        crate::logistics::ai::chunk::upsert_best_effort(
+            self.org_id,
+            crate::logistics::ai::chunk::ChunkKind::VehicleDocument,
+            &self.id.to_string(),
+            crate::logistics::ai::chunk::vehicle_document_chunk_text(self),
+        );
         Ok(())
     }
 
@@ -439,6 +452,10 @@ impl VehicleDocument {
             "DELETE FROM VehicleDocuments WHERE id = :id",
             params! { "id" => self.id.to_string() },
         )?;
+        crate::logistics::ai::chunk::delete_by_source_best_effort(
+            crate::logistics::ai::chunk::ChunkKind::VehicleDocument,
+            &self.id.to_string(),
+        );
         Ok(())
     }
 }
@@ -673,6 +690,37 @@ mod tests {
         vehicle.remove_vehicle().expect("remove vehicle");
 
         assert!(VehicleDocument::list_by_org(org.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_create_indexes_the_document_for_the_assistant_and_delete_removes_it() {
+        use crate::logistics::ai::chunk;
+
+        let _db = TestDb::create();
+        let org = org_with_vehicle("KA01 AA 9999");
+        let doc = VehicleDocument::create(
+            org.id,
+            "KA01 AA 9999",
+            ComplianceDocType::Insurance,
+            "INS-9911",
+            None,
+            date_offset(20),
+            None,
+        )
+        .unwrap();
+
+        let results = chunk::search_by_org(org.id, "KA01 insurance", 8).expect("search");
+        assert!(
+            results.iter().any(|c| c.text.contains("INS-9911")),
+            "a newly created document should be indexed and findable: {results:?}"
+        );
+
+        doc.delete().expect("delete");
+        let results = chunk::search_by_org(org.id, "KA01 insurance", 8).expect("search");
+        assert!(
+            !results.iter().any(|c| c.text.contains("INS-9911")),
+            "deleting the document should remove its index entry too: {results:?}"
+        );
     }
 
     #[test]

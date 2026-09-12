@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { isLoggedIn } from './api/auth';
 import Sidebar from './components/Sidebar';
+import AssistantWidget from './components/AssistantWidget';
 import Dashboard from './pages/Dashboard';
 import Organizations from './pages/Organizations';
 import OrganizationDetail from './pages/OrganizationDetail';
@@ -26,6 +27,7 @@ function AppShell() {
   return (
     <>
       <Sidebar />
+      <AssistantWidget />
       <div className="main-area">
         <Routes>
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />

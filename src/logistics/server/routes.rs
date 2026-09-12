@@ -1,3 +1,4 @@
+use crate::logistics::ai::assistant::{AssistantAnswer, AssistantSource};
 use crate::logistics::auth::auth::{
     decode_token, generate_token, generate_user_token, OrgCredentials, OrgSummary,
 };
@@ -298,6 +299,12 @@ pub struct DispatchRequestPayload {
     pub line_items: Vec<DispatchLineItemPayload>,
 }
 
+/// A natural-language question for the org-scoped "ask your data" assistant.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct AssistantAskPayload {
+    pub question: String,
+}
+
 /// One stop on a multi-stop trip: a customer and the stock lines to drop there.
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct TripStopPayload {
@@ -534,6 +541,13 @@ pub struct OpsReportResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<OpsReport>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AssistantAnswerResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<AssistantAnswer>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -3049,6 +3063,66 @@ pub async fn get_dispatch_summary(
     }
 }
 
+// ── AI assistant (protected) ──────────────────────────────────────────────────
+//
+// An org-scoped "ask your data" assistant: a natural-language question is
+// answered using only facts retrieved from that org's own indexed data
+// (dispatch notifications, vehicle compliance documents — see
+// crate::logistics::ai::chunk). Every role may ask; this is a read, not a
+// write. See todo.org's "AI opportunities" section for the full design.
+
+#[utoipa::path(
+    post,
+    path = "/api/orgs/{id}/assistant/ask",
+    tag = "AI Assistant",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    request_body = AssistantAskPayload,
+    responses(
+        (status = 200, description = "Answer grounded in the organization's own indexed data", body = AssistantAnswerResponse),
+        (status = 400, description = "Empty question", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/orgs/{id}/assistant/ask")]
+pub async fn ask_assistant(
+    path: web::Path<Uuid>,
+    payload: web::Json<AssistantAskPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only ask about your own organization".to_string(),
+            data: None,
+        });
+    }
+
+    let question = payload.question.trim();
+    if question.is_empty() {
+        return HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: "Question must not be empty".to_string(),
+            data: None,
+        });
+    }
+
+    match crate::logistics::ai::assistant::answer_question(org_id, question).await {
+        Ok(answer) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Answer generated".to_string(),
+            data: Some(answer),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to generate answer: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── Freight billing handlers (protected) ─────────────────────────────────────
 //
 // One invoice per dispatch. Every route checks the underlying dispatch (or the
@@ -3735,6 +3809,7 @@ impl Modify for SecurityAddon {
         dispatch_stock,
         update_dispatch_status,
         get_dispatch_summary,
+        ask_assistant,
         create_dispatch_invoice,
         get_dispatch_invoice,
         update_invoice,
@@ -3778,6 +3853,7 @@ impl Modify for SecurityAddon {
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
             OpsReportResponse, UserResponse, UserListResponse, NotificationListResponse,
             TripResponse, TripListResponse, CreateTripPayload, TripStopPayload,
+            AssistantAskPayload, AssistantAnswer, AssistantSource, AssistantAnswerResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
     ),
@@ -3796,6 +3872,7 @@ impl Modify for SecurityAddon {
         (name = "Reports", description = "Operational reporting: fleet utilization, delivery performance, inventory, dispatch volume"),
         (name = "Notifications", description = "Customer and driver notifications recorded for each dispatch"),
         (name = "Trips", description = "Multi-stop trips: one vehicle serving several customer orders in sequence"),
+        (name = "AI Assistant", description = "Retrieval-grounded natural-language Q&A over an organization's own data"),
     )
 )]
 pub struct ApiDoc;
@@ -3854,6 +3931,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(dispatch_stock)
             .service(update_dispatch_status)
             .service(get_dispatch_summary)
+            .service(ask_assistant)
             .service(create_dispatch_invoice)
             .service(get_dispatch_invoice)
             .service(update_invoice)
@@ -6236,6 +6314,67 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 403);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(!body.success);
+    }
+
+    // ── POST /api/orgs/{id}/assistant/ask ─────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_ask_assistant_without_token_returns_401() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/assistant/ask", Uuid::new_v4()))
+            .set_json(&AssistantAskPayload { question: "anything?".to_string() })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_ask_assistant_returns_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _auth) = setup_org(&app, "Assistant Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Assistant Intruder Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/assistant/ask", org.id))
+            .insert_header(("Authorization", other_auth))
+            .set_json(&AssistantAskPayload { question: "anything?".to_string() })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_ask_assistant_rejects_an_empty_question_with_400() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Assistant Empty Question Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/assistant/ask", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&AssistantAskPayload { question: "   ".to_string() })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_ask_assistant_returns_a_canned_answer_when_nothing_is_indexed() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Assistant Empty Index Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/assistant/ask", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&AssistantAskPayload { question: "what happened to my orders?".to_string() })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<AssistantAnswer> = test::read_body_json(resp).await;
+        let answer = body.data.unwrap();
+        assert!(answer.sources.is_empty());
+        assert!(answer.answer.to_lowercase().contains("indexed yet"));
     }
 
     // ── PUT /api/dispatches/{id}/status ───────────────────────────────────────
