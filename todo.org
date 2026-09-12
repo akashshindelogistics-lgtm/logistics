@@ -330,3 +330,136 @@
   deploy-backend.yml are release/deploy automation, not CI, and are left on
   master / tag / manual triggers. All four edited workflows pass actionlint.
   Plan/context: [[file:docs/ci-on-branch-push.md]]
+* AI opportunities in the logistics system - where generative AI can genuinely help run this business, and where it would just be a gimmick
+  The one existing AI feature (generate_dispatch_summary, src/logistics/ai/status.rs)
+  is prompt templating over already-fetched fields - no retrieval, no embeddings,
+  despite a commit calling it "RAG". Most of this app's data is structured (dispatches,
+  stock, invoices, reports), which Claude can narrate directly without retrieval;
+  genuine retrieval only pays off over the actual free-text corpus that already
+  exists - Notification.body, VehicleDocument.notes - plus narratives synthesized
+  from structured status history. Kept as a checklist, roughly in priority order.
+  No new AI vendor: everything below uses only ANTHROPIC_API_KEY, already the
+  app's one AI dependency.
+** TODO Org-scoped "ask your data" assistant - a natural-language Q&A widget grounded in retrieval over the org's own notifications, compliance notes and dispatch history. The one genuine RAG opportunity in this system.
+   Retrieval via MySQL FULLTEXT search (no embeddings, no second AI vendor):
+   a new AiChunks table (org_id, kind, source_id, text, updated_at) with a
+   FULLTEXT INDEX on `text`, ensure_table'd and kept in sync with
+   test_support::migrate like every other table. v1 chunk kinds, one row each:
+     - notification: one chunk per Notification row (already free text).
+     - vehicle_document: one chunk per VehicleDocument row (doc_type + notes).
+     - dispatch_narrative: one chunk per DispatchOrder, REGENERATED WHOLE
+       (not appended) on every status change - synthesizes customer + line
+       items + full status_history + proof of delivery into one narrative
+       paragraph, since "what happened with dispatch X" needs the structured
+       history turned into text somewhere.
+     - stock_snapshot: one chunk per Stock row (godown + description),
+       regenerated on add/update/transfer - covers "what's low on stock"
+       questions. source_id = "{godown_id}:{description}" (Stock has no own
+       id, matching Vehicle's use of a non-UUID string key elsewhere).
+   Explicitly out of v1: OpsReport-derived chunks (too volatile to keep
+   indexed - see Phase 4 below instead), org_directory (customer/godown/
+   vehicle address chunks - Phase 3), persisting AI-generated summaries as a
+   new corpus source.
+   Indexing is write-through and best-effort: whenever a route already
+   writes one of the source rows, it also upserts (INSERT ... ON DUPLICATE
+   KEY UPDATE, keyed on (org_id, kind, source_id)) the corresponding chunk -
+   no background job/scheduler. No embedding call, so nothing to fail
+   loudly on; this is just an extra INSERT alongside the write that already
+   happens.
+   Retrieval flow (src/logistics/ai/index.rs): given a question, run
+   `SELECT *, MATCH(text) AGAINST (:q IN NATURAL LANGUAGE MODE) AS score
+   FROM AiChunks WHERE org_id = :org_id HAVING score > 0 ORDER BY score DESC
+   LIMIT 8` (org_id filter is the tenant-isolation boundary, same as every
+   other list_by_org). If zero rows match, skip straight to a canned "no
+   data yet" answer rather than calling Claude with empty context.
+   Generation (src/logistics/ai/assistant.rs): reuse the exact Anthropic
+   call shape from ai/status.rs (same model, same reqwest pattern, same
+   x-api-key/anthropic-workspace-id headers) with a new pure
+   build_answer_prompt(question, chunks) function - "answer only using the
+   facts below, say so plainly if they don't contain the answer" - so it's
+   unit-testable without a live call, same as build_prompt today.
+   Route: POST /api/orgs/{id}/assistant/ask, AuthenticatedOrg-gated with the
+   same org_id-path-param 403 check get_ops_report uses. Request
+   {question}, response {answer, sources: [{kind, source_id, excerpt}]}.
+   Frontend: a global floating widget (frontend/src/components/
+   AssistantWidget.tsx), not a page or Sidebar link - the target questions
+   ("what happened with dispatch X") come up while already looking at some
+   other page. Bottom-right circular launcher reusing .btn-ai's indigo
+   gradient and "✦" glyph; expands a fixed panel styled like
+   .ai-summary-card with a scrollable Q&A history, a text input, and the
+   existing .ai-summary-loading/.ai-pulse loading state. New API client
+   frontend/src/api/assistant.ts following the flat-arrow-function
+   convention every other api/*.ts file uses.
+   Testing (matches this codebase's "don't hit live APIs in tests"
+   convention): the per-kind chunk-text builders, build_answer_prompt, and
+   (new, since there's no embedding step to test instead) nothing needs a
+   cosine-similarity unit test now - MySQL does the ranking. Route tests:
+   403/401/400 shapes like the existing dispatch-summary tests, plus a
+   TestDb-backed org-isolation test on AiChunks (mirrors Customer::list_by_org's
+   scoping test).
+   Phasing (one PR each, backend+frontend+tests together per this repo's
+   convention):
+     Phase 1: notification + vehicle_document chunks, the full retrieval/
+       generation/route/widget vertical slice. A complete, demoable feature
+       even though only two chunk kinds are indexed.
+     Phase 2: dispatch_narrative + stock_snapshot chunks and their
+       write-through hooks (on DispatchOrder::transition_to and
+       Stock update/transfer). No frontend changes - the widget already
+       renders whatever sources[] come back generically.
+     Phase 3: org_directory chunks (customer/godown/vehicle address/identity)
+       plus a reindex_org(org_id) backfill function for orgs whose existing
+       rows predate this feature (nothing re-triggers their write-through
+       hook until next touched).
+     Phase 4 (optional): for aggregate-shaped questions ("what's my fleet
+       utilization"), inject a small always-current OpsReport::for_org
+       snapshot directly into the generation prompt alongside retrieved
+       chunks, rather than trying to keep volatile numbers indexed as
+       chunks that go stale every dispatch.
+** TODO "Explain this report" - an AI-narrated summary on the Reports page, same shape as the existing AI dispatch summary but pointed at OpsReport instead of one dispatch
+   Not RAG - straight prompt-over-structured-data, exactly like
+   generate_dispatch_summary already does for one dispatch. New
+   build_report_prompt(report: &OpsReport) -> String (pure, unit-testable)
+   feeding fleet utilization, delivery performance, 14-day volume trend and
+   per-godown inventory into Claude, asking it to call out what's actually
+   worth a dispatcher's attention (e.g. "3 vehicles are idle, utilization
+   is unusually low this week" or "on-time rate dropped from last period") -
+   the kind of narrative-over-numbers judgment call is exactly what an LLM
+   is good at and a static dashboard tile can't do. Same GET-on-demand route
+   shape as /api/dispatches/{id}/summary; same .btn-ai/.ai-summary-card
+   frontend treatment, placed above the stat-tile grid on Reports.tsx.
+** TODO Daily ops digest - an on-demand (not scheduled) AI summary of "what needs attention today" across dispatches, compliance and stock
+   Also prompt-over-structured-data, one level broader than the report
+   narration above: pulls together dispatches stuck in a status too long
+   (compare status_history's last-changed timestamp against now), vehicles
+   with ExpiringSoon/Expired compliance documents, and godown stock rows
+   with below_threshold set - all already-computed fields, no new queries
+   of consequence - and asks Claude to prioritize them into a short
+   actionable list. Natural home: a dashboard card, or fold into the
+   assistant widget above as a canned starter question once that exists.
+   Worth building this one AFTER the assistant widget (previous item) even
+   though it doesn't need retrieval, since the widget gives it a place to
+   live for free.
+** TODO Smart reorder suggestions - narrate low-stock godowns with a suggested reorder quantity based on recent dispatch velocity, not just the current below_threshold flag
+   Needs one new piece of structured computation this system doesn't have
+   yet - per-item dispatch velocity (units of a given stock description
+   dispatched per week, derived from existing DispatchLineItems +
+   dispatched_at, no new table) - before AI narration is useful here; the
+   AI part itself is again prompt-over-structured-data. Lower priority than
+   the two items above since it requires that extra computation first and
+   below_threshold already covers the "something needs attention" signal;
+   this only adds "by how much."
+** TODO (lower priority, blocked on missing infra) Proof-of-delivery photo verification via a vision-capable model
+   ProofOfDelivery.signature_or_photo_url is free-form and, per
+   docs/dispatch-lifecycle.md, has no real file-storage backing it today -
+   callers pass a URL or inline data: URI with nothing validating it's
+   actually a photo/signature. A vision-capable Claude call could flag
+   "this doesn't look like a signature or package photo" before a dispatch
+   is marked DELIVERED, but it's not worth building until proof-of-delivery
+   has real file storage behind it - otherwise there's nothing reliable to
+   verify.
+** TODO (blocked on notification delivery) AI-personalized notification copy
+   Notification.body is already free text (currently a fixed template), but
+   per docs/notifications.md nothing in this repo actually sends a
+   notification anywhere - no Twilio/SMTP is wired up. Personalizing the
+   copy with AI before delivery exists to receive it is solving the wrong
+   problem first; revisit once notifications are actually sent.
