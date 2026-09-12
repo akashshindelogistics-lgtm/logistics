@@ -254,3 +254,18 @@ export interface ApiResponse<T> {
   message: string;
   data?: T;
 }
+
+// One fact an assistant answer was grounded in. Mirrors AssistantSource in
+// src/logistics/ai/assistant.rs.
+export interface AssistantSource {
+  kind: string;
+  source_id: string;
+  excerpt: string;
+}
+
+// The org-scoped "ask your data" assistant's answer to one question.
+// Mirrors AssistantAnswer in src/logistics/ai/assistant.rs.
+export interface AssistantAnswer {
+  answer: string;
+  sources: AssistantSource[];
+}

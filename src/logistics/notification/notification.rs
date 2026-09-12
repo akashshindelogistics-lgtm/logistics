@@ -289,6 +289,15 @@ impl Notification {
         Self::ensure_table(&mut conn)?;
         for n in notifs {
             Self::insert(&mut conn, n)?;
+            // Best-effort: index this notification for the "ask your data"
+            // assistant. Never allowed to fail recording the notification
+            // itself — see chunk::upsert_best_effort.
+            crate::logistics::ai::chunk::upsert_best_effort(
+                n.org_id,
+                crate::logistics::ai::chunk::ChunkKind::Notification,
+                &n.id.to_string(),
+                crate::logistics::ai::chunk::notification_chunk_text(n),
+            );
         }
         Ok(())
     }

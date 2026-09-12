@@ -397,24 +397,43 @@
    403/401/400 shapes like the existing dispatch-summary tests, plus a
    TestDb-backed org-isolation test on AiChunks (mirrors Customer::list_by_org's
    scoping test).
-   Phasing (one PR each, backend+frontend+tests together per this repo's
+   Phased (one PR each, backend+frontend+tests together per this repo's
    convention):
-     Phase 1: notification + vehicle_document chunks, the full retrieval/
-       generation/route/widget vertical slice. A complete, demoable feature
-       even though only two chunk kinds are indexed.
-     Phase 2: dispatch_narrative + stock_snapshot chunks and their
-       write-through hooks (on DispatchOrder::transition_to and
-       Stock update/transfer). No frontend changes - the widget already
-       renders whatever sources[] come back generically.
-     Phase 3: org_directory chunks (customer/godown/vehicle address/identity)
-       plus a reindex_org(org_id) backfill function for orgs whose existing
-       rows predate this feature (nothing re-triggers their write-through
-       hook until next touched).
-     Phase 4 (optional): for aggregate-shaped questions ("what's my fleet
-       utilization"), inject a small always-current OpsReport::for_org
-       snapshot directly into the generation prompt alongside retrieved
-       chunks, rather than trying to keep volatile numbers indexed as
-       chunks that go stale every dispatch.
+*** DONE Phase 1: notification + vehicle_document chunks, the full retrieval/generation/route/widget vertical slice
+    A complete, demoable feature even though only two chunk kinds are
+    indexed. AiChunks table (src/logistics/ai/chunk.rs, FULLTEXT INDEX on
+    text, kept in sync with test_support::migrate) with a ChunkKind enum
+    (Notification | VehicleDocument), upsert/upsert_best_effort/
+    delete_by_source_best_effort, and search_by_org (the MATCH...AGAINST
+    query). Write-through hooks added to Notification::persist and
+    VehicleDocument::create/update/delete. Generation in
+    src/logistics/ai/assistant.rs (build_answer_prompt + answer_question),
+    reusing ai/status.rs's exact Anthropic call shape; returns a canned
+    "nothing indexed yet" answer without calling Claude when retrieval
+    finds nothing. Route: POST /api/orgs/{id}/assistant/ask. Frontend: a
+    global AssistantWidget (frontend/src/components/AssistantWidget.tsx),
+    mounted once in AppShell outside the routed pages, reusing the .btn-ai/
+    .ai-summary-card/.ai-summary-loading/.ai-pulse AI visual language; new
+    frontend/src/api/assistant.ts. 16 new Rust unit tests (chunk-text
+    builders, build_answer_prompt, retrieval org-isolation/ranking/upsert
+    semantics, missing-API-key path) + 2 write-through integration tests
+    (recording a notification / creating a vehicle document indexes it,
+    deleting the document removes it) + 4 route tests, 2 new frontend
+    api-client tests, 4 new AssistantWidget component tests, 3 new
+    Playwright flows, a standalone `npm run test:e2e:demo:assistant`. No
+    step added to e2e-full-flow.spec.ts, matching the existing AI
+    dispatch-summary feature's precedent - the live-answer path needs
+    ANTHROPIC_API_KEY, not configured in this environment.
+*** TODO Phase 2: dispatch_narrative + stock_snapshot chunks and their write-through hooks (on DispatchOrder::transition_to and Stock update/transfer)
+    No frontend changes needed - the widget already renders whatever
+    sources[] come back generically.
+*** TODO Phase 3: org_directory chunks (customer/godown/vehicle address/identity) plus a reindex_org(org_id) backfill function
+    For orgs whose existing rows predate this feature - nothing re-triggers
+    their write-through hook until next touched.
+*** TODO (optional) Phase 4: structured OpsReport grounding for aggregate-shaped questions ("what's my fleet utilization")
+    Inject a small always-current OpsReport::for_org snapshot directly into
+    the generation prompt alongside retrieved chunks, rather than trying to
+    keep volatile numbers indexed as chunks that go stale every dispatch.
 ** TODO "Explain this report" - an AI-narrated summary on the Reports page, same shape as the existing AI dispatch summary but pointed at OpsReport instead of one dispatch
    Not RAG - straight prompt-over-structured-data, exactly like
    generate_dispatch_summary already does for one dispatch. New
