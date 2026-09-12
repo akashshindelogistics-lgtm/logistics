@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getOpsReport } from '../api/reports';
+import { getOpsReport, getOpsReportSummary } from '../api/reports';
 import { getOrgId } from '../api/auth';
 import { IconChart, IconTruck, IconDispatch, IconClock, IconCheck, IconPackage } from '../components/Icons';
 import type { OpsReport } from '../types';
@@ -14,6 +14,8 @@ export default function Reports() {
   const [report, setReport] = useState<OpsReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
     const orgId = getOrgId();
@@ -27,6 +29,21 @@ export default function Reports() {
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleExplainReport() {
+    const orgId = getOrgId();
+    if (!orgId) return;
+
+    setSummaryLoading(true);
+    try {
+      const r = await getOpsReportSummary(orgId);
+      setSummary(r.data || r.message || 'No summary available.');
+    } catch {
+      setSummary('Could not generate summary. Ensure ANTHROPIC_API_KEY is set on the server.');
+    } finally {
+      setSummaryLoading(false);
+    }
+  }
 
   const tiles = report && [
     { label: 'Fleet utilization', value: fmtPct(report.vehicle_utilization.utilization_percent),
@@ -64,6 +81,34 @@ export default function Reports() {
         </div>
       ) : (
         <>
+          <div className="section-card" style={{ marginBottom: 20 }}>
+            <div className="section-card-header">
+              <span className="section-card-title">✦ Explain this report</span>
+              <button
+                type="button"
+                className="btn btn-sm btn-ai"
+                onClick={handleExplainReport}
+                disabled={summaryLoading}
+              >
+                {summaryLoading ? 'Generating…' : summary ? 'Regenerate' : 'Explain this report'}
+              </button>
+            </div>
+            {(summaryLoading || summary) && (
+              <div style={{ padding: '0 16px 16px' }}>
+                <div className="ai-summary-card">
+                  {summaryLoading ? (
+                    <div className="ai-summary-loading">
+                      <span className="ai-pulse" />
+                      Generating briefing…
+                    </div>
+                  ) : (
+                    <p className="ai-summary-text">{summary}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="stat-grid">
             {tiles!.map(({ label, value, sub, Icon, cls }) => (
               <div key={label} className={`stat-card ${cls}`}>
