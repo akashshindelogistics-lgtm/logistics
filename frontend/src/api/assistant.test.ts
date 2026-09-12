@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
-import { askAssistant, reindexAssistant } from './assistant';
+import { askAssistant, reindexAssistant, getDailyDigest } from './assistant';
 
-vi.mock('./client', () => ({ default: { post: vi.fn() } }));
+vi.mock('./client', () => ({ default: { post: vi.fn(), get: vi.fn() } }));
 
 const envelope = <T,>(data: T) => ({ data: { success: true, message: '', data } });
 
@@ -24,5 +24,12 @@ describe('assistant api client', () => {
     const res = await reindexAssistant('org1');
     expect(api.post).toHaveBeenCalledWith('/orgs/org1/assistant/reindex');
     expect(res.data?.chunks_indexed).toBe(12);
+  });
+
+  it('getDailyDigest GETs /orgs/{id}/assistant/digest and unwraps the envelope', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope('3 vehicles need attention today.'));
+    const res = await getDailyDigest('org1');
+    expect(api.get).toHaveBeenCalledWith('/orgs/org1/assistant/digest');
+    expect(res.data).toBe('3 vehicles need attention today.');
   });
 });

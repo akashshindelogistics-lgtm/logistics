@@ -11,3 +11,9 @@ export const askAssistant = (orgId: string, question: string) =>
  *  predates this feature and so never triggered a write-through index hook. */
 export const reindexAssistant = (orgId: string) =>
   api.post<ApiResponse<AssistantReindexResult>>(`/orgs/${orgId}/assistant/reindex`).then(r => r.data);
+
+/** An on-demand AI summary of "what needs attention today" across
+ *  dispatches, compliance and stock — not grounded in retrieval, so it has
+ *  no sources, unlike askAssistant's answers. */
+export const getDailyDigest = (orgId: string) =>
+  api.get<ApiResponse<string>>(`/orgs/${orgId}/assistant/digest`).then(r => r.data);
