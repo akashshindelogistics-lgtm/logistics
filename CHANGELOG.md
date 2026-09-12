@@ -4,6 +4,20 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.4.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.3.0...v0.4.0) (2026-09-12)
+
+
+### Features
+
+* **ai:** org-scoped "ask your data" assistant (Phase 1) ([93d0544](https://github.com/akashshindelogistics-lgtm/logistics/commit/93d0544597f9f8b0faeecd35c7adcd9421683631))
+* **ai:** org-scoped "ask your data" assistant (Phase 1) ([261cbb9](https://github.com/akashshindelogistics-lgtm/logistics/commit/261cbb9f2a768aea29bb4ce555cb92633e2f8c90))
+
+
+### Documentation
+
+* **todo:** add AI/RAG roadmap ([7d41cd9](https://github.com/akashshindelogistics-lgtm/logistics/commit/7d41cd9ac1a543fc5a09a64a703b840e7fb87a48))
+* **todo:** add AI/RAG roadmap ([293bcc2](https://github.com/akashshindelogistics-lgtm/logistics/commit/293bcc26f9ee15106c54df905e3a48eba404fd70))
+
 ## [0.3.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.2.1...v0.3.0) (2026-09-11)
 
 
