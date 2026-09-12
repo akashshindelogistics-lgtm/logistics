@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
-import { askAssistant } from './assistant';
+import { askAssistant, reindexAssistant } from './assistant';
 
 vi.mock('./client', () => ({ default: { post: vi.fn() } }));
 
@@ -17,5 +17,12 @@ describe('assistant api client', () => {
     expect(api.post).toHaveBeenCalledWith('/orgs/org1/assistant/ask', { question: 'what happened to my order?' });
     expect(res.data?.answer).toBe('Your order was delivered.');
     expect(res.data?.sources).toHaveLength(1);
+  });
+
+  it('reindexAssistant POSTs to /orgs/{id}/assistant/reindex and unwraps the envelope', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({ chunks_indexed: 12 }));
+    const res = await reindexAssistant('org1');
+    expect(api.post).toHaveBeenCalledWith('/orgs/org1/assistant/reindex');
+    expect(res.data?.chunks_indexed).toBe(12);
   });
 });

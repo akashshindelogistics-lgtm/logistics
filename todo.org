@@ -448,9 +448,32 @@
     chunks (and deletes the source chunk when fully drained), and
     dispatch_stock_to_customer's draw-down reflects in the stock chunk.
     Full `cargo test --lib` suite (284 tests) green with no regressions.
-*** TODO Phase 3: org_directory chunks (customer/godown/vehicle address/identity) plus a reindex_org(org_id) backfill function
+*** DONE Phase 3: org_directory chunks (customer/godown/vehicle address/identity) plus a reindex_org(org_id) backfill function
     For orgs whose existing rows predate this feature - nothing re-triggers
-    their write-through hook until next touched.
+    their write-through hook until next touched. Added ChunkKind::OrgDirectory
+    (source_id prefixed "customer:"/"godown:"/"vehicle:" so the three entity
+    types can't collide under the shared kind) with customer_directory_text,
+    godown_directory_text and vehicle_directory_text (the latter looks up the
+    vehicle's currently assigned driver, if any, via Driver::get_by_id) in
+    src/logistics/ai/chunk.rs. Write-through hooks wired into
+    Customer::create_customer/set_contact/delete, Godown::create/update/
+    remove, and Vehicle::add_new_vehicle_to_org/update_vehicle/assign_driver/
+    remove_vehicle (update_location was deliberately left unhooked on all
+    three - it only ever changes `location`, never the `address`/identity
+    fields the directory text is built from, so reindexing there would be a
+    silent no-op write). reindex_org(org_id) added as a full backfill,
+    rebuilding every chunk kind (org directory + notifications + vehicle
+    documents + dispatch narratives + stock snapshots) from scratch in one
+    call - exposed via POST /api/orgs/{id}/assistant/reindex (AuthenticatedOrg-
+    gated, same org_id-path-param 403 check as ask_assistant) and a "Reindex
+    my data" link in the AssistantWidget panel footer. 8 new pure unit tests
+    (3 directory-text builders x2 each, plus reindex_org's own backfill
+    test) + 3 new write-through integration tests (Customer/Godown/Vehicle
+    each keep their chunk in sync through create/update/delete) + 3 new
+    route tests + 2 new frontend api-client/component tests + 1 new
+    Playwright flow. Full `cargo test --lib` (297 tests), `npm run
+    test:unit` (185 tests) and `npm run test:e2e` (62 tests) all green with
+    no regressions.
 *** TODO (optional) Phase 4: structured OpsReport grounding for aggregate-shaped questions ("what's my fleet utilization")
     Inject a small always-current OpsReport::for_org snapshot directly into
     the generation prompt alongside retrieved chunks, rather than trying to

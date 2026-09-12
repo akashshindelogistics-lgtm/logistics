@@ -79,6 +79,8 @@ impl Godown {
             },
         )?;
 
+        crate::logistics::ai::chunk::reindex_godown_best_effort(&godown);
+
         Ok(godown)
     }
 
@@ -107,6 +109,7 @@ impl Godown {
         self.name = new_name;
         self.address = new_address;
         self.max_capacity = max_capacity;
+        crate::logistics::ai::chunk::reindex_godown_best_effort(self);
         Ok(())
     }
 
@@ -258,6 +261,7 @@ impl Godown {
             "DELETE FROM Godowns WHERE id = :id",
             params! { "id" => self.id.to_string() },
         )?;
+        crate::logistics::ai::chunk::delete_godown_chunk_best_effort(self.id);
         Ok(())
     }
 }
@@ -303,6 +307,25 @@ mod tests {
         let loc = fetched.location.expect("location set");
         assert_eq!(loc.latitude, 19.07);
         assert_eq!(loc.address.as_deref(), Some("Bandra"));
+    }
+
+    #[test]
+    fn test_create_update_and_remove_keep_the_assistant_index_in_sync() {
+        use crate::logistics::ai::chunk;
+        let _db = TestDb::create();
+        let org = make_org();
+
+        let mut g = Godown::create(org.id, "Old Name", "Old Address", None).expect("create");
+        let results = chunk::search_by_org(org.id, "Old Name Old Address", 8).expect("search");
+        assert!(results.iter().any(|c| c.text.contains("Old Name") && c.text.contains("Old Address")), "{results:?}");
+
+        g.update("New Name", "New Address", Some(5_000)).expect("update");
+        let results = chunk::search_by_org(org.id, "New Name New Address", 8).expect("search");
+        assert!(results.iter().any(|c| c.text.contains("New Name") && c.text.contains("Maximum capacity: 5000")), "{results:?}");
+
+        g.remove().expect("remove");
+        let results = chunk::search_by_org(org.id, "New Name New Address", 8).expect("search");
+        assert!(!results.iter().any(|c| c.text.contains("New Name")), "removing a godown should drop its chunk: {results:?}");
     }
 
     #[test]

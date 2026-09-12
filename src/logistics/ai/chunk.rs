@@ -8,20 +8,26 @@
 //! design and phasing.
 //!
 //! v1 (Phase 1) indexed [`Notification`] and [`VehicleDocument`]. Phase 2
-//! adds [`DispatchOrder`] (as a synthesized narrative — "what happened with
+//! added [`DispatchOrder`] (as a synthesized narrative — "what happened with
 //! dispatch X" needs the structured status history turned into text
 //! somewhere) and [`Stock`] (one chunk per godown+item, covering "what's low
-//! on stock"). Indexing is write-through and best-effort — see
-//! [`upsert_best_effort`] — never a background job, and never allowed to
-//! fail the write it's attached to.
+//! on stock"). Phase 3 adds an org directory — one chunk each for every
+//! [`Customer`], [`Godown`], and [`Vehicle`] (address/identity, not their
+//! stock or dispatch history, which are already covered above) — plus
+//! [`reindex_org`], a backfill for orgs whose rows predate this feature and
+//! so never triggered a write-through hook. Indexing is write-through and
+//! best-effort — see [`upsert_best_effort`] — never a background job, and
+//! never allowed to fail the write it's attached to.
 
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
 use crate::logistics::dispatch::dispatch::DispatchOrder;
+use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::notification::notification::Notification;
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::document::VehicleDocument;
+use crate::logistics::vehicle::vehicle::Vehicle;
 use mysql::prelude::*;
 use mysql::*;
 use serde::{Deserialize, Serialize};
@@ -44,6 +50,7 @@ pub enum ChunkKind {
     VehicleDocument,
     DispatchNarrative,
     StockSnapshot,
+    OrgDirectory,
 }
 
 impl ChunkKind {
@@ -53,6 +60,7 @@ impl ChunkKind {
             ChunkKind::VehicleDocument => "vehicle_document",
             ChunkKind::DispatchNarrative => "dispatch_narrative",
             ChunkKind::StockSnapshot => "stock_snapshot",
+            ChunkKind::OrgDirectory => "org_directory",
         }
     }
 
@@ -61,6 +69,7 @@ impl ChunkKind {
             "vehicle_document" => ChunkKind::VehicleDocument,
             "dispatch_narrative" => ChunkKind::DispatchNarrative,
             "stock_snapshot" => ChunkKind::StockSnapshot,
+            "org_directory" => ChunkKind::OrgDirectory,
             _ => ChunkKind::Notification,
         }
     }
@@ -310,6 +319,191 @@ pub fn reindex_stock_by_description_best_effort(godown_id: Uuid, description: &s
     }
 }
 
+/// The `AiChunks.source_id` for a [`Customer`] directory chunk. Prefixed so
+/// it can't collide with a godown's or vehicle's id under the shared
+/// [`ChunkKind::OrgDirectory`] kind.
+fn customer_source_id(id: Uuid) -> String {
+    format!("customer:{id}")
+}
+
+/// The `AiChunks.source_id` for a [`Godown`] directory chunk.
+fn godown_source_id(id: Uuid) -> String {
+    format!("godown:{id}")
+}
+
+/// The `AiChunks.source_id` for a [`Vehicle`] directory chunk. Vehicles have
+/// no id of their own — the registration number is already their primary
+/// key everywhere else in this codebase.
+fn vehicle_source_id(registration_number: &str) -> String {
+    format!("vehicle:{registration_number}")
+}
+
+/// The narrative text for a [`Customer`] directory chunk — address and
+/// contact details, not their dispatch history (see
+/// [`dispatch_narrative_text`] for that).
+pub fn customer_directory_text(c: &Customer) -> String {
+    let contact = match (&c.phone, &c.email) {
+        (Some(p), Some(e)) => format!(" Contact: {p}, {e}."),
+        (Some(p), None) => format!(" Contact: {p}."),
+        (None, Some(e)) => format!(" Contact: {e}."),
+        (None, None) => String::new(),
+    };
+    format!("Customer '{}' is located at {}.{}", c.name, c.address, contact)
+}
+
+/// The narrative text for a [`Godown`] directory chunk — address and
+/// capacity, not its held stock (see [`stock_snapshot_text`] for that).
+pub fn godown_directory_text(g: &Godown) -> String {
+    let capacity_note = g
+        .max_capacity
+        .map(|c| format!(" Maximum capacity: {c}."))
+        .unwrap_or_default();
+    format!("Godown '{}' is located at {}.{}", g.name, g.address, capacity_note)
+}
+
+/// The narrative text for a [`Vehicle`] directory chunk — capacity and its
+/// currently assigned driver, if any.
+pub fn vehicle_directory_text(v: &Vehicle, driver: Option<&Driver>) -> String {
+    let driver_note = match driver {
+        Some(d) => format!(
+            " Assigned driver: {} ({}).",
+            d.name,
+            if d.is_active { "active" } else { "inactive" }
+        ),
+        None => " No driver currently assigned.".to_string(),
+    };
+    format!(
+        "Vehicle {} has a capacity of {} {}.{}",
+        v.registration_number,
+        v.capacity,
+        v.unit.as_str(),
+        driver_note
+    )
+}
+
+/// Re-index a customer's directory chunk.
+pub fn reindex_customer_best_effort(customer: &Customer) {
+    upsert_best_effort(
+        customer.org_id,
+        ChunkKind::OrgDirectory,
+        &customer_source_id(customer.id),
+        customer_directory_text(customer),
+    );
+}
+
+/// Remove a customer's directory chunk (the customer was deleted).
+pub fn delete_customer_chunk_best_effort(customer_id: Uuid) {
+    delete_by_source_best_effort(ChunkKind::OrgDirectory, &customer_source_id(customer_id));
+}
+
+/// Re-index a godown's directory chunk.
+pub fn reindex_godown_best_effort(godown: &Godown) {
+    upsert_best_effort(
+        godown.org_id,
+        ChunkKind::OrgDirectory,
+        &godown_source_id(godown.id),
+        godown_directory_text(godown),
+    );
+}
+
+/// Remove a godown's directory chunk (the godown was deleted).
+pub fn delete_godown_chunk_best_effort(godown_id: Uuid) {
+    delete_by_source_best_effort(ChunkKind::OrgDirectory, &godown_source_id(godown_id));
+}
+
+/// Re-index a vehicle's directory chunk, looking up its assigned driver (if
+/// any) for the narrative. `org_id` is passed in rather than read off
+/// `Vehicle` because [`Vehicle`] doesn't carry its own org — callers that
+/// don't already have it on hand can get it via
+/// [`Vehicle::org_of`](crate::logistics::vehicle::vehicle::Vehicle::org_of).
+pub fn reindex_vehicle_best_effort(vehicle: &Vehicle, org_id: Uuid) {
+    let driver = vehicle
+        .assigned_driver_id
+        .and_then(|id| Driver::get_by_id(id).ok().flatten());
+    upsert_best_effort(
+        org_id,
+        ChunkKind::OrgDirectory,
+        &vehicle_source_id(&vehicle.registration_number),
+        vehicle_directory_text(vehicle, driver.as_ref()),
+    );
+}
+
+/// Remove a vehicle's directory chunk (the vehicle was deleted).
+pub fn delete_vehicle_chunk_best_effort(registration_number: &str) {
+    delete_by_source_best_effort(ChunkKind::OrgDirectory, &vehicle_source_id(registration_number));
+}
+
+/// Rebuild every chunk for an org from scratch, across every source kind.
+/// For an org whose rows all predate this feature, nothing has ever
+/// triggered a write-through hook — this backfills it in one call. Safe to
+/// re-run at any time (every underlying write is an upsert, keyed on
+/// `(org_id, kind, source_id)`). Returns the number of chunks written.
+/// Listing failures propagate (something is actually wrong with the org's
+/// data); a single row's indexing failure does not, per the usual
+/// best-effort contract.
+pub fn reindex_org(org_id: Uuid) -> Result<usize, Box<dyn Error>> {
+    let mut count = 0usize;
+
+    for customer in Customer::list_by_org(org_id)? {
+        reindex_customer_best_effort(&customer);
+        count += 1;
+    }
+
+    let godowns = Godown::list_by_org(org_id)?;
+    for godown in &godowns {
+        reindex_godown_best_effort(godown);
+        count += 1;
+        for stock in &godown.stock {
+            upsert_best_effort(
+                org_id,
+                ChunkKind::StockSnapshot,
+                &format!("{}:{}", godown.id, stock.description),
+                stock_snapshot_text(godown, stock),
+            );
+            count += 1;
+        }
+    }
+
+    for vehicle in Vehicle::list_by_org(org_id)? {
+        reindex_vehicle_best_effort(&vehicle, org_id);
+        count += 1;
+    }
+
+    for notification in Notification::list_by_org(org_id, u32::MAX)? {
+        upsert_best_effort(
+            org_id,
+            ChunkKind::Notification,
+            &notification.id.to_string(),
+            notification_chunk_text(&notification),
+        );
+        count += 1;
+    }
+
+    for document in VehicleDocument::list_by_org(org_id)? {
+        upsert_best_effort(
+            org_id,
+            ChunkKind::VehicleDocument,
+            &document.id.to_string(),
+            vehicle_document_chunk_text(&document),
+        );
+        count += 1;
+    }
+
+    for dispatch in DispatchOrder::list_by_org(org_id)? {
+        if let Ok(Some(customer)) = Customer::get_by_id(dispatch.customer_id) {
+            upsert_best_effort(
+                org_id,
+                ChunkKind::DispatchNarrative,
+                &dispatch.id.to_string(),
+                dispatch_narrative_text(&dispatch, &customer),
+            );
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +513,7 @@ mod tests {
     use crate::logistics::orgs::orgs::Organization;
     use crate::logistics::test_support::TestDb;
     use crate::logistics::vehicle::document::{ComplianceDocType, ComplianceStatus};
+    use crate::logistics::vehicle::vehicle::Unit;
 
     fn sample_notification() -> Notification {
         Notification {
@@ -488,6 +683,73 @@ mod tests {
     }
 
     #[test]
+    fn customer_directory_text_includes_name_address_and_contact() {
+        let mut c = sample_customer();
+        c.phone = Some("+91 90000 00000".to_string());
+        c.email = Some("acme@example.com".to_string());
+        let text = customer_directory_text(&c);
+        assert!(text.contains("Acme Corp"));
+        assert!(text.contains("5 Market Road, Bengaluru"));
+        assert!(text.contains("+91 90000 00000"));
+        assert!(text.contains("acme@example.com"));
+    }
+
+    #[test]
+    fn customer_directory_text_omits_contact_when_absent() {
+        let text = customer_directory_text(&sample_customer());
+        assert!(!text.contains("Contact:"));
+    }
+
+    #[test]
+    fn godown_directory_text_includes_name_address_and_capacity() {
+        let mut g = sample_godown();
+        g.max_capacity = Some(500);
+        let text = godown_directory_text(&g);
+        assert!(text.contains("Chennai Central"));
+        assert!(text.contains("12 Anna Salai, Chennai"));
+        assert!(text.contains("Maximum capacity: 500"));
+    }
+
+    #[test]
+    fn godown_directory_text_omits_capacity_when_unlimited() {
+        let text = godown_directory_text(&sample_godown());
+        assert!(!text.contains("Maximum capacity"));
+    }
+
+    fn sample_vehicle() -> Vehicle {
+        Vehicle::new("MH12AB1234", 10_000, Unit::MetricTon)
+    }
+
+    fn sample_driver() -> Driver {
+        Driver {
+            id: Uuid::new_v4(),
+            org_id: Uuid::new_v4(),
+            name: "Ravi Kumar".to_string(),
+            license_number: "LIC-1".to_string(),
+            phone: "9999999999".to_string(),
+            is_active: true,
+        }
+    }
+
+    #[test]
+    fn vehicle_directory_text_includes_capacity_and_no_driver_note() {
+        let text = vehicle_directory_text(&sample_vehicle(), None);
+        assert!(text.contains("MH12AB1234"));
+        assert!(text.contains("10000"));
+        assert!(text.contains("MetricTon"));
+        assert!(text.contains("No driver currently assigned."));
+    }
+
+    #[test]
+    fn vehicle_directory_text_includes_the_assigned_drivers_name_and_active_status() {
+        let mut driver = sample_driver();
+        driver.is_active = false;
+        let text = vehicle_directory_text(&sample_vehicle(), Some(&driver));
+        assert!(text.contains("Ravi Kumar"));
+        assert!(text.contains("inactive"));
+    }
+
+    #[test]
     fn search_by_org_is_scoped_and_ranks_by_relevance() {
         let _db = TestDb::create();
         let org_a = Organization::create_organization("Org A", "1 Rd").unwrap();
@@ -532,5 +794,43 @@ mod tests {
         let org = Organization::create_organization("Org D", "4 Rd").unwrap();
         let results = search_by_org(org.id, "anything", 8).unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn reindex_org_backfills_every_source_kind_for_rows_that_predate_the_feature() {
+        use crate::logistics::customer::customer::Customer;
+        use crate::logistics::godown::godown::Godown;
+
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Backfill Co", "1 Depot Rd").unwrap();
+
+        // Simulate rows that predate this feature: created directly against
+        // the DB models (which, post-Phase-3, already index themselves), then
+        // wipe the index to stand in for a pre-existing, never-indexed org.
+        let customer = Customer::create_customer(org.id, "Old Customer", "9 Legacy Ln").unwrap();
+        let godown = Godown::create(org.id, "Old Godown", "10 Legacy Ln", None).unwrap();
+        Stock::new(1, 20, "Legacy Widgets").add_to_godown(godown.id).unwrap();
+        conn_delete_all_chunks(org.id);
+
+        let count = reindex_org(org.id).expect("backfill");
+        assert!(count >= 3, "expected at least customer + godown + stock chunks, got {count}");
+
+        let results = search_by_org(org.id, "Old Customer Old Godown Legacy Widgets", 8).unwrap();
+        assert!(results.iter().any(|c| c.text.contains("Old Customer")), "{results:?}");
+        assert!(results.iter().any(|c| c.text.contains("Old Godown")), "{results:?}");
+        assert!(results.iter().any(|c| c.text.contains("Legacy Widgets")), "{results:?}");
+        let _ = customer;
+    }
+
+    /// Test-only helper: delete every chunk for an org, standing in for an
+    /// org whose rows predate this feature and were never indexed.
+    fn conn_delete_all_chunks(org_id: Uuid) {
+        let mut conn = DbConnection::from_env().get_connection().expect("connect");
+        ensure_table(&mut conn).expect("ensure table");
+        conn.exec_drop(
+            "DELETE FROM AiChunks WHERE org_id = :org_id",
+            params! { "org_id" => org_id.to_string() },
+        )
+        .expect("delete");
     }
 }

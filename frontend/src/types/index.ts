@@ -269,3 +269,9 @@ export interface AssistantAnswer {
   answer: string;
   sources: AssistantSource[];
 }
+
+// Result of a full reindex backfill. Mirrors AssistantReindexResult in
+// src/logistics/server/routes.rs.
+export interface AssistantReindexResult {
+  chunks_indexed: number;
+}
