@@ -4,6 +4,16 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.5.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.4.0...v0.5.0) (2026-09-12)
+
+
+### Features
+
+* **ai:** index dispatch narratives and stock snapshots for the assistant ([e3ebe22](https://github.com/akashshindelogistics-lgtm/logistics/commit/e3ebe22db4ade44bd322499a1f2467e0af022be5))
+* **ai:** index dispatch narratives and stock snapshots for the assistant ([727f915](https://github.com/akashshindelogistics-lgtm/logistics/commit/727f915efe709c7ca0617cf184371deb68c44d93))
+* **ai:** index the org directory and add a full reindex backfill ([ce3191e](https://github.com/akashshindelogistics-lgtm/logistics/commit/ce3191ebff788521f6f10365c1856f71b2c86337))
+* **ai:** index the org directory and add a full reindex backfill ([fa1de13](https://github.com/akashshindelogistics-lgtm/logistics/commit/fa1de137d8691560d6330bf4dc899a5ce1ca001b))
+
 ## [0.4.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.3.0...v0.4.0) (2026-09-12)
 
 
