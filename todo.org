@@ -474,10 +474,30 @@
     Playwright flow. Full `cargo test --lib` (297 tests), `npm run
     test:unit` (185 tests) and `npm run test:e2e` (62 tests) all green with
     no regressions.
-*** TODO (optional) Phase 4: structured OpsReport grounding for aggregate-shaped questions ("what's my fleet utilization")
+*** DONE (optional) Phase 4: structured OpsReport grounding for aggregate-shaped questions ("what's my fleet utilization")
     Inject a small always-current OpsReport::for_org snapshot directly into
     the generation prompt alongside retrieved chunks, rather than trying to
     keep volatile numbers indexed as chunks that go stale every dispatch.
+    src/logistics/ai/assistant.rs's answer_question now always loads
+    OpsReport::for_org(org_id) alongside the usual chunk::search_by_org
+    retrieval, and build_answer_prompt gained a third parameter -
+    build_ops_snapshot_text(&report), a pure, compact one-paragraph summary
+    (fleet utilization, delivered/returned counts, 30-day volume, godown
+    inventory) - injected into every generation call as a "Current
+    operational snapshot" section ahead of the retrieved facts. The
+    "nothing indexed yet" short-circuit changed accordingly: it now only
+    fires when retrieval finds nothing AND ops_report_is_empty(&report) -
+    no vehicles, no dispatches, no godowns - since an org with any real
+    operational data always has something to ground an aggregate-shaped
+    answer in, even with zero matching chunks. No route or frontend changes
+    needed - same request/response shape, the widget already renders
+    whatever comes back. 6 new unit tests (snapshot-text content,
+    ops_report_is_empty true/false, updated build_answer_prompt tests) + 1
+    new integration test proving an org with a godown but no matching chunk
+    now attempts real generation instead of returning the canned answer +
+    1 new Playwright flow verifying the same end-to-end. Full `cargo test
+    --lib` (328 tests) and `npm run test:e2e` (65 tests) all green with no
+    regressions.
 ** DONE "Explain this report" - an AI-narrated summary on the Reports page, same shape as the existing AI dispatch summary but pointed at OpsReport instead of one dispatch
    Not RAG - straight prompt-over-structured-data, exactly like
    generate_dispatch_summary already does for one dispatch. New

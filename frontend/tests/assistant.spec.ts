@@ -75,4 +75,27 @@ test.describe('AI assistant widget', () => {
     await expect(page.getByText('Any reorder suggestions?')).toBeVisible();
     await expect(page.getByText(/no godowns are below their reorder threshold/i)).toBeVisible({ timeout: 10000 });
   });
+
+  test('attempts real generation (not the canned answer) for an aggregate question once the org has any operational data', async ({ page }) => {
+    const org = await registerOrg(page, `Assistant Ops Snapshot ${uid()}`);
+    await page.goto(`/orgs/${org.id}`);
+
+    // A godown never matches a FULLTEXT search for "fleet utilization", but
+    // Phase 4 injects a fresh OpsReport snapshot into every generation call
+    // regardless of retrieval, so this org should no longer get the canned
+    // "nothing indexed yet" answer once it has any operational data at all.
+    const godownName = `Warehouse ${uid()}`;
+    await page.getByLabel('Godown Name').fill(godownName);
+    await page.getByLabel('Address').fill('Plot 5, Industrial Area');
+    await page.getByRole('button', { name: /add godown/i }).click();
+    await expect(page.getByText(godownName)).toBeVisible({ timeout: 8000 });
+
+    await page.getByRole('button', { name: /open assistant/i }).click();
+    await page.getByLabel(/question for the assistant/i).fill("what's my fleet utilization?");
+    await page.getByRole('button', { name: /^ask$/i }).click();
+
+    // No ANTHROPIC_API_KEY in this environment, so real generation surfaces
+    // the deterministic error path instead of a live answer.
+    await expect(page.getByText(/could not reach the assistant/i)).toBeVisible({ timeout: 10000 });
+  });
 });
