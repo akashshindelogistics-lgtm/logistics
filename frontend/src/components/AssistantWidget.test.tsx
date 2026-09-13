@@ -124,4 +124,32 @@ describe('AssistantWidget', () => {
 
     expect(await screen.findByText(/could not reach the assistant/i)).toBeInTheDocument();
   });
+
+  it('answers the reorder-suggestions starter question as a turn with no sources', async () => {
+    vi.mocked(isLoggedIn).mockReturnValue(true);
+    vi.mocked(assistantApi.getReorderSuggestions).mockResolvedValue(
+      ok('Cement at Chennai Central is low; consider reordering about 30 units.'),
+    );
+
+    const user = userEvent.setup();
+    render(<AssistantWidget />);
+    await user.click(screen.getByRole('button', { name: /open assistant/i }));
+    await user.click(screen.getByRole('button', { name: /any reorder suggestions/i }));
+
+    expect(assistantApi.getReorderSuggestions).toHaveBeenCalledWith('org1');
+    expect(await screen.findByText('Any reorder suggestions?')).toBeInTheDocument();
+    expect(screen.getByText(/consider reordering about 30 units/i)).toBeInTheDocument();
+  });
+
+  it('shows an error when the reorder-suggestions call fails', async () => {
+    vi.mocked(isLoggedIn).mockReturnValue(true);
+    vi.mocked(assistantApi.getReorderSuggestions).mockRejectedValue(new Error('network error'));
+
+    const user = userEvent.setup();
+    render(<AssistantWidget />);
+    await user.click(screen.getByRole('button', { name: /open assistant/i }));
+    await user.click(screen.getByRole('button', { name: /any reorder suggestions/i }));
+
+    expect(await screen.findByText(/could not reach the assistant/i)).toBeInTheDocument();
+  });
 });
