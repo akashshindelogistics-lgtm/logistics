@@ -4,8 +4,16 @@
 //! using only those facts. Mirrors `ai::status::generate_dispatch_summary`'s
 //! call shape exactly — same model, same reqwest pattern, same header
 //! handling — this is the second and last AI integration in the app.
+//!
+//! Phase 4 also injects a small always-current [`OpsReport`] snapshot into
+//! the prompt alongside retrieved chunks, so aggregate-shaped questions
+//! ("what's my fleet utilization") are answerable even though nothing in
+//! the FULLTEXT index could ever match them — those numbers change on every
+//! dispatch, so they're computed fresh on every call rather than kept as
+//! chunks that would go stale immediately.
 
 use crate::logistics::ai::chunk::{self, AiChunk};
+use crate::logistics::reports::OpsReport;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -26,11 +34,56 @@ pub struct AssistantAnswer {
     pub sources: Vec<AssistantSource>,
 }
 
-/// Build the prompt sent to Claude: the retrieved facts, then the question,
-/// with an explicit instruction not to answer beyond what the facts say.
-/// Pulled out as a pure function (mirrors `ai::status::build_prompt`) so it's
-/// unit-testable without a network call.
-fn build_answer_prompt(question: &str, chunks: &[AiChunk]) -> String {
+/// A compact, always-current summary of an org's [`OpsReport`] — fleet
+/// utilization, delivery performance, recent volume and godown inventory —
+/// suitable for dropping straight into a prompt. Pure, so it's unit-testable
+/// without a database.
+fn build_ops_snapshot_text(report: &OpsReport) -> String {
+    let utilization = &report.vehicle_utilization;
+    let delivery = &report.delivery_performance;
+
+    let inventory = if report.godown_inventory.is_empty() {
+        "no godowns recorded".to_string()
+    } else {
+        report
+            .godown_inventory
+            .iter()
+            .map(|g| format!("{} holds {} units across {} item(s)", g.godown_name, g.units_on_hand, g.distinct_items))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+
+    format!(
+        "Fleet utilization: {}/{} vehicles on an active trip ({}%). Delivered dispatches: {}. \
+        Returned: {}. Units dispatched in the last 30 days: {}. Godown inventory: {}.",
+        utilization.vehicles_on_active_trip,
+        utilization.total_vehicles,
+        utilization.utilization_percent,
+        delivery.delivered_count,
+        delivery.returned_count,
+        report.units_dispatched_recently,
+        inventory
+    )
+}
+
+/// Whether an org's [`OpsReport`] carries no real activity at all — no
+/// vehicles, no dispatches, no godowns. Used to decide whether the canned
+/// "nothing indexed yet" answer still applies when retrieval also found
+/// nothing: an org with real operational data always has *something* to
+/// ground an answer in, even without a single matching chunk.
+fn ops_report_is_empty(report: &OpsReport) -> bool {
+    report.vehicle_utilization.total_vehicles == 0
+        && report.delivery_performance.delivered_count == 0
+        && report.delivery_performance.returned_count == 0
+        && report.units_dispatched_recently == 0
+        && report.godown_inventory.is_empty()
+}
+
+/// Build the prompt sent to Claude: the current operational snapshot, the
+/// retrieved facts, then the question, with an explicit instruction not to
+/// answer beyond what's given. Pulled out as a pure function (mirrors
+/// `ai::status::build_prompt`) so it's unit-testable without a network call.
+fn build_answer_prompt(question: &str, chunks: &[AiChunk], ops_snapshot: &str) -> String {
     let facts = chunks
         .iter()
         .enumerate()
@@ -40,20 +93,23 @@ fn build_answer_prompt(question: &str, chunks: &[AiChunk]) -> String {
 
     format!(
         "You are a logistics assistant answering questions about one organization's own data.\n\
-        Answer only using the facts below. If the facts don't contain the answer, say so plainly \
-        \u{2014} do not guess or use outside knowledge.\n\n\
+        Answer only using the snapshot and facts below. If they don't contain the answer, say so \
+        plainly \u{2014} do not guess or use outside knowledge.\n\n\
+        Current operational snapshot: {ops_snapshot}\n\n\
         Facts:\n{facts}\n\n\
         Question: {question}"
     )
 }
 
-/// Answer `question` for `org_id`, grounded in that org's indexed data.
-/// Returns a canned "nothing indexed yet" answer without calling Claude if
-/// retrieval finds nothing to ground the answer in.
+/// Answer `question` for `org_id`, grounded in that org's indexed data plus
+/// a fresh [`OpsReport`] snapshot. Returns a canned "nothing indexed yet"
+/// answer without calling Claude only when retrieval finds nothing *and*
+/// the org has no operational data at all to fall back on.
 pub async fn answer_question(org_id: Uuid, question: &str) -> Result<AssistantAnswer, String> {
     let chunks = chunk::search_by_org(org_id, question, TOP_K).map_err(|e| e.to_string())?;
+    let report = OpsReport::for_org(org_id).map_err(|e| e.to_string())?;
 
-    if chunks.is_empty() {
+    if chunks.is_empty() && ops_report_is_empty(&report) {
         return Ok(AssistantAnswer {
             answer: "I don't have anything indexed yet that matches that question — try again \
                      once there's some activity (notifications, vehicle documents) to draw on."
@@ -65,7 +121,8 @@ pub async fn answer_question(org_id: Uuid, question: &str) -> Result<AssistantAn
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .map_err(|_| "ANTHROPIC_API_KEY environment variable not set".to_string())?;
 
-    let prompt = build_answer_prompt(question, &chunks);
+    let ops_snapshot = build_ops_snapshot_text(&report);
+    let prompt = build_answer_prompt(question, &chunks, &ops_snapshot);
 
     let client = reqwest::Client::new();
     let mut request = client
@@ -138,12 +195,16 @@ mod tests {
     }
 
     #[test]
-    fn build_answer_prompt_includes_the_question_and_every_fact() {
+    fn build_answer_prompt_includes_the_question_every_fact_and_the_snapshot() {
         let chunks = vec![
             sample_chunk(ChunkKind::Notification, "Order abcd1234 was dispatched"),
             sample_chunk(ChunkKind::VehicleDocument, "MH12AB1234 insurance expires 2026-10-02"),
         ];
-        let prompt = build_answer_prompt("What happened to order abcd1234?", &chunks);
+        let prompt = build_answer_prompt(
+            "What happened to order abcd1234?",
+            &chunks,
+            "Fleet utilization: 1/4 vehicles on an active trip (25%).",
+        );
 
         assert!(prompt.contains("What happened to order abcd1234?"));
         assert!(prompt.contains("Order abcd1234 was dispatched"));
@@ -151,13 +212,53 @@ mod tests {
         assert!(prompt.contains("notification"));
         assert!(prompt.contains("vehicle_document"));
         assert!(prompt.contains("do not guess"));
+        assert!(prompt.contains("Fleet utilization: 1/4 vehicles on an active trip (25%)."));
     }
 
     #[test]
     fn build_answer_prompt_handles_no_facts() {
-        let prompt = build_answer_prompt("anything?", &[]);
+        let prompt = build_answer_prompt("anything?", &[], "no snapshot data");
         assert!(prompt.contains("anything?"));
         assert!(prompt.contains("Facts:"));
+        assert!(prompt.contains("no snapshot data"));
+    }
+
+    fn sample_report() -> OpsReport {
+        use crate::logistics::reports::{DeliveryPerformance, VehicleUtilization};
+        OpsReport {
+            vehicle_utilization: VehicleUtilization { total_vehicles: 4, vehicles_on_active_trip: 1, utilization_percent: 25.0 },
+            delivery_performance: DeliveryPerformance {
+                delivered_count: 10, returned_count: 2, avg_hours_to_deliver: Some(18.5), on_time_rate_percent: Some(80.0),
+            },
+            units_dispatched_recently: 340,
+            godown_inventory: Vec::new(),
+            dispatch_volume: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn build_ops_snapshot_text_includes_utilization_delivery_and_volume_figures() {
+        let text = build_ops_snapshot_text(&sample_report());
+        assert!(text.contains("1/4 vehicles on an active trip (25%)"));
+        assert!(text.contains("Delivered dispatches: 10"));
+        assert!(text.contains("Returned: 2"));
+        assert!(text.contains("340"));
+        assert!(text.contains("no godowns recorded"));
+    }
+
+    #[test]
+    fn ops_report_is_empty_is_true_for_an_org_with_no_activity_at_all() {
+        let mut report = sample_report();
+        report.vehicle_utilization.total_vehicles = 0;
+        report.delivery_performance.delivered_count = 0;
+        report.delivery_performance.returned_count = 0;
+        report.units_dispatched_recently = 0;
+        assert!(ops_report_is_empty(&report));
+    }
+
+    #[test]
+    fn ops_report_is_empty_is_false_when_any_field_has_data() {
+        assert!(!ops_report_is_empty(&sample_report()));
     }
 
     #[actix_web::test]
@@ -195,6 +296,30 @@ mod tests {
         let err = answer_question(org_id, "widgets")
             .await
             .expect_err("should fail without an API key once there are chunks to answer from");
+        assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
+    }
+
+    #[actix_web::test]
+    async fn answer_question_does_not_short_circuit_when_the_org_has_operational_data_even_without_a_matching_chunk() {
+        use crate::logistics::godown::godown::Godown;
+        use crate::logistics::orgs::orgs::Organization;
+
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Ops Snapshot Org", "1 Depot Rd").expect("org");
+        // A godown with no matching chunk content, but enough to make the
+        // OpsReport non-empty (a real "what's my fleet utilization"-shaped
+        // question has nothing in the FULLTEXT index to match, ever).
+        Godown::create(org.id, "Chennai Central", "12 Anna Salai", None).expect("godown");
+
+        // SAFETY: this module is the only code that reads ANTHROPIC_API_KEY,
+        // and no other test sets it, so this doesn't race with anything else.
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+
+        let err = answer_question(org.id, "what's my fleet utilization?")
+            .await
+            .expect_err("an org with real operational data should attempt generation, not short-circuit");
         assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
     }
 }
