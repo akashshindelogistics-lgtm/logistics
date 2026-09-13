@@ -4,6 +4,15 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.7.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.6.0...v0.7.0) (2026-09-13)
+
+
+### Features
+
+* **ai:** personalize notification copy with Claude, falling back to the fixed template ([575d9b8](https://github.com/akashshindelogistics-lgtm/logistics/commit/575d9b8a5961d3d955c7f3c60ddf9b39b16b1e8c))
+* **ai:** personalize notification copy with Claude, falling back to the fixed template ([d60b8d2](https://github.com/akashshindelogistics-lgtm/logistics/commit/d60b8d2fe90e0f9a48fe7b99a271b0e89f61e2d2))
+* **notifications:** actually deliver notifications via Twilio and Resend ([61ff27a](https://github.com/akashshindelogistics-lgtm/logistics/commit/61ff27a189794ff7bdeab71ba57d15456d4acb1a))
+
 ## [0.6.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.5.0...v0.6.0) (2026-09-13)
 
 
