@@ -1,9 +1,12 @@
 //! Dispatch notifications to the customer and driver.
 //!
 //! When a dispatch is created, and again when it's delivered, the system
-//! records a notification for each party it should tell, then immediately
-//! attempts to actually send it via [`crate::logistics::notification::delivery`]
-//! (Twilio for SMS, Resend for email). Every row lands with status `QUEUED`
+//! builds a notification for each party it should tell — its body
+//! AI-personalized via [`crate::logistics::ai::notification_copy`] when
+//! `ANTHROPIC_API_KEY` is configured, falling back to a fixed template on
+//! any error — records it, then immediately attempts to actually send it via
+//! [`crate::logistics::notification::delivery`] (Twilio for SMS, Resend for
+//! email). Every row lands with status `QUEUED`
 //! (ready to send), `SKIPPED` (no phone/email on file for that party),
 //! `SENT` (delivery succeeded), or `FAILED` (delivery was attempted and the
 //! provider reported an error). A `QUEUED` row whose channel has no
@@ -250,57 +253,76 @@ impl Notification {
 
     /// Record the "your shipment is on its way" notifications for a new
     /// dispatch: one for the customer, one for the driver (via `driver_phone`).
-    pub fn record_dispatch_created(
+    /// The body for each is AI-personalized when `ANTHROPIC_API_KEY` is
+    /// configured (see `crate::logistics::ai::notification_copy`), falling
+    /// back to a fixed template on any error — a misconfigured or
+    /// rate-limited environment must never block recording a dispatch.
+    /// Generation is skipped entirely for a row with no contact to send to,
+    /// since nobody will ever see that copy.
+    pub async fn record_dispatch_created(
         org_id: Uuid,
         dispatch_id: Uuid,
         customer: &Customer,
         driver_phone: Option<&str>,
     ) -> Result<Vec<Notification>, Box<dyn Error>> {
         let short_id = &dispatch_id.to_string()[..8];
+        let customer_target = Self::customer_target(customer);
+        let driver_target = driver_phone
+            .filter(|s| !s.is_empty())
+            .map(|p| (NotificationChannel::Sms, p.to_string()));
+
+        let customer_body = if customer_target.is_some() {
+            crate::logistics::ai::notification_copy::generate_dispatch_created_customer_body(&customer.name, short_id)
+                .await
+                .unwrap_or_else(|_| {
+                    format!("Hi {}, your order (ref {short_id}) has been dispatched and is on its way.", customer.name)
+                })
+        } else {
+            format!("Hi {}, your order (ref {short_id}) has been dispatched and is on its way.", customer.name)
+        };
+
+        let driver_body = if driver_target.is_some() {
+            crate::logistics::ai::notification_copy::generate_dispatch_created_driver_body(&customer.name, short_id)
+                .await
+                .unwrap_or_else(|_| format!("New trip assigned: dispatch {short_id} to {}.", customer.name))
+        } else {
+            format!("New trip assigned: dispatch {short_id} to {}.", customer.name)
+        };
+
         let notifs = vec![
-            Self::build(
-                org_id,
-                dispatch_id,
-                NotificationEvent::DispatchCreated,
-                "customer",
-                Self::customer_target(customer),
-                format!(
-                    "Hi {}, your order (ref {short_id}) has been dispatched and is on its way.",
-                    customer.name
-                ),
-            ),
-            Self::build(
-                org_id,
-                dispatch_id,
-                NotificationEvent::DispatchCreated,
-                "driver",
-                driver_phone
-                    .filter(|s| !s.is_empty())
-                    .map(|p| (NotificationChannel::Sms, p.to_string())),
-                format!("New trip assigned: dispatch {short_id} to {}.", customer.name),
-            ),
+            Self::build(org_id, dispatch_id, NotificationEvent::DispatchCreated, "customer", customer_target, customer_body),
+            Self::build(org_id, dispatch_id, NotificationEvent::DispatchCreated, "driver", driver_target, driver_body),
         ];
         Self::persist(&notifs)?;
         Ok(notifs)
     }
 
-    /// Record the "your shipment was delivered" notification for the customer.
-    pub fn record_dispatch_delivered(
+    /// Record the "your shipment was delivered" notification for the
+    /// customer. AI-personalized / fallback behavior matches
+    /// [`Self::record_dispatch_created`].
+    pub async fn record_dispatch_delivered(
         org_id: Uuid,
         dispatch_id: Uuid,
         customer: &Customer,
     ) -> Result<Vec<Notification>, Box<dyn Error>> {
         let short_id = &dispatch_id.to_string()[..8];
+        let customer_target = Self::customer_target(customer);
+
+        let customer_body = if customer_target.is_some() {
+            crate::logistics::ai::notification_copy::generate_dispatch_delivered_customer_body(&customer.name, short_id)
+                .await
+                .unwrap_or_else(|_| format!("Hi {}, your order (ref {short_id}) has been delivered. Thank you!", customer.name))
+        } else {
+            format!("Hi {}, your order (ref {short_id}) has been delivered. Thank you!", customer.name)
+        };
+
         let notifs = vec![Self::build(
             org_id,
             dispatch_id,
             NotificationEvent::DispatchDelivered,
             "customer",
-            Self::customer_target(customer),
-            format!(
-                "Hi {}, your order (ref {short_id}) has been delivered. Thank you!",
-                customer.name
-            ),
+            customer_target,
+            customer_body,
         )];
         Self::persist(&notifs)?;
         Ok(notifs)

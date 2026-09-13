@@ -2745,7 +2745,9 @@ pub async fn dispatch_stock(
                 order.id,
                 &customer,
                 driver_phone.as_deref(),
-            ) {
+            )
+            .await
+            {
                 Notification::deliver_queued_best_effort(&notifs).await;
             }
             HttpResponse::Ok().json(ApiResponse {
@@ -2867,7 +2869,9 @@ pub async fn create_trip(
                         stop.id,
                         customer,
                         phone.as_deref(),
-                    ) {
+                    )
+                    .await
+                    {
                         Notification::deliver_queued_best_effort(&notifs).await;
                     }
                 }
@@ -3003,7 +3007,7 @@ pub async fn update_dispatch_status(
             if dispatch.status == DispatchStatus::Delivered {
                 if let Ok(Some(customer)) = Customer::get_by_id(dispatch.customer_id) {
                     if let Ok(notifs) =
-                        Notification::record_dispatch_delivered(auth.org_id, dispatch.id, &customer)
+                        Notification::record_dispatch_delivered(auth.org_id, dispatch.id, &customer).await
                     {
                         Notification::deliver_queued_best_effort(&notifs).await;
                     }
