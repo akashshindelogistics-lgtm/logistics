@@ -4,6 +4,32 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.6.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.5.0...v0.6.0) (2026-09-13)
+
+
+### Features
+
+* **ai:** add an AI-narrated "explain this report" summary ([f14ccd1](https://github.com/akashshindelogistics-lgtm/logistics/commit/f14ccd175f5e9267dcc9afa1dc63861755c16f27))
+* **ai:** add an AI-narrated "explain this report" summary ([fa24244](https://github.com/akashshindelogistics-lgtm/logistics/commit/fa242442d0ac678b8dbb0196840665bbb24743d9))
+* **ai:** add an on-demand daily ops digest to the assistant widget ([a1ac138](https://github.com/akashshindelogistics-lgtm/logistics/commit/a1ac138b75cd6a2e6d888d4433a359be3bedaba8))
+* **ai:** add an on-demand daily ops digest to the assistant widget ([476c7e0](https://github.com/akashshindelogistics-lgtm/logistics/commit/476c7e0d7c17aedfe728dac5b00a29cb9d693c12))
+* **ai:** add smart reorder suggestions based on dispatch velocity ([0c666f3](https://github.com/akashshindelogistics-lgtm/logistics/commit/0c666f336f248d08f6bab44d79e25e0e0507be65))
+* **ai:** add smart reorder suggestions based on dispatch velocity ([eb09481](https://github.com/akashshindelogistics-lgtm/logistics/commit/eb094812f7a11b398089acc68dd7450e73310ac6))
+* **ai:** ground the assistant in a live OpsReport snapshot (Phase 4) ([16d77b6](https://github.com/akashshindelogistics-lgtm/logistics/commit/16d77b623802d5c72054bb63abfbac47bed63a26))
+* **ai:** ground the assistant in a live OpsReport snapshot (Phase 4) ([e5aac68](https://github.com/akashshindelogistics-lgtm/logistics/commit/e5aac68150222d30ce1de986cab7eebc6a20e9af))
+
+
+### Bug Fixes
+
+* **assistant:** keep the digest/reorder suggestions reachable after the first question ([94d76d9](https://github.com/akashshindelogistics-lgtm/logistics/commit/94d76d9bca0f2ce0e2a69de907a2324e7fa7faef))
+* **assistant:** keep the digest/reorder suggestions reachable after the first question ([ba68949](https://github.com/akashshindelogistics-lgtm/logistics/commit/ba689499cc1b4a27bf7301c7a87b6d9a4670a61e))
+
+
+### Documentation
+
+* **todo:** mark the "ask your data" assistant parent item done ([6d0e90f](https://github.com/akashshindelogistics-lgtm/logistics/commit/6d0e90f5c30588644d68342a5f9465210d7cb3f0))
+* **todo:** mark the "ask your data" assistant parent item done ([380652b](https://github.com/akashshindelogistics-lgtm/logistics/commit/380652b2e586ea69a29d492838844ef1ad5dbaec))
+
 ## [0.5.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.4.0...v0.5.0) (2026-09-12)
 
 
