@@ -65,4 +65,14 @@ test.describe('AI assistant widget', () => {
     await expect(page.getByText('What needs my attention today?')).toBeVisible();
     await expect(page.getByText(/nothing needs your attention/i)).toBeVisible({ timeout: 10000 });
   });
+
+  test('answers the reorder-suggestions starter question with a canned response for a well-stocked org', async ({ page }) => {
+    await registerOrg(page, `Assistant Reorder ${uid()}`);
+
+    await page.getByRole('button', { name: /open assistant/i }).click();
+    await page.getByRole('button', { name: /any reorder suggestions/i }).click();
+
+    await expect(page.getByText('Any reorder suggestions?')).toBeVisible();
+    await expect(page.getByText(/no godowns are below their reorder threshold/i)).toBeVisible({ timeout: 10000 });
+  });
 });

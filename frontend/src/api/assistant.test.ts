@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
-import { askAssistant, reindexAssistant, getDailyDigest } from './assistant';
+import { askAssistant, reindexAssistant, getDailyDigest, getReorderSuggestions } from './assistant';
 
 vi.mock('./client', () => ({ default: { post: vi.fn(), get: vi.fn() } }));
 
@@ -31,5 +31,12 @@ describe('assistant api client', () => {
     const res = await getDailyDigest('org1');
     expect(api.get).toHaveBeenCalledWith('/orgs/org1/assistant/digest');
     expect(res.data).toBe('3 vehicles need attention today.');
+  });
+
+  it('getReorderSuggestions GETs /orgs/{id}/assistant/reorder-suggestions and unwraps the envelope', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope('Reorder about 30 units of Cement.'));
+    const res = await getReorderSuggestions('org1');
+    expect(api.get).toHaveBeenCalledWith('/orgs/org1/assistant/reorder-suggestions');
+    expect(res.data).toBe('Reorder about 30 units of Cement.');
   });
 });

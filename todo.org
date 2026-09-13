@@ -539,7 +539,7 @@
    Playwright flow. Full `cargo test --lib` (304 tests), `npm run test:unit`
    (188 tests) and `npm run test:e2e` (63 tests) all green with no
    regressions.
-** TODO Smart reorder suggestions - narrate low-stock godowns with a suggested reorder quantity based on recent dispatch velocity, not just the current below_threshold flag
+** DONE Smart reorder suggestions - narrate low-stock godowns with a suggested reorder quantity based on recent dispatch velocity, not just the current below_threshold flag
    Needs one new piece of structured computation this system doesn't have
    yet - per-item dispatch velocity (units of a given stock description
    dispatched per week, derived from existing DispatchLineItems +
@@ -548,6 +548,28 @@
    the two items above since it requires that extra computation first and
    below_threshold already covers the "something needs attention" signal;
    this only adds "by how much."
+   Implemented as a new src/logistics/ai/reorder.rs module: pure
+   weekly_velocity(dispatches, description, now, lookback_days) - sums
+   DispatchLineItem quantities for that description across all of the org's
+   dispatches in the last 30 days, divided into a units/week rate (dispatches
+   aren't attributed to a source godown, so this is an org-wide rate, the
+   same simplification OpsReport::units_dispatched_recently already makes) -
+   and suggested_quantity(velocity, quantity_on_hand), which targets 2 weeks
+   of cover above what's on hand, or 0 when there's no recent velocity to
+   estimate from. compute_reorder_suggestions(org_id) applies both to every
+   godown stock row with below_threshold set. build_reorder_prompt (pure) +
+   generate_reorder_narration(org_id) ask Claude to turn the suggestions into
+   a short briefing, short-circuiting to a canned "no godowns are below
+   their reorder threshold" answer when the list is empty - same pattern as
+   generate_daily_digest. Route: GET /api/orgs/{id}/assistant/reorder-
+   suggestions (AuthenticatedOrg-gated, same org_id-path-param 403 check as
+   the other assistant routes). Folded into the AssistantWidget as a second
+   "✦ Any reorder suggestions?" starter suggestion alongside the daily
+   digest, answered as a normal turn (no sources). 10 new backend unit
+   tests, 3 new route tests, 3 new frontend api-client/component tests, 1
+   new Playwright flow. Full `cargo test --lib` (324 tests), `npm run
+   test:unit` (194 tests) and `npm run test:e2e` (64 tests) all green with
+   no regressions.
 ** TODO (lower priority, blocked on missing infra) Proof-of-delivery photo verification via a vision-capable model
    ProofOfDelivery.signature_or_photo_url is free-form and, per
    docs/dispatch-lifecycle.md, has no real file-storage backing it today -

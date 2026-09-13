@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { askAssistant, reindexAssistant, getDailyDigest } from '../api/assistant';
+import { askAssistant, reindexAssistant, getDailyDigest, getReorderSuggestions } from '../api/assistant';
 import { isLoggedIn, getOrgId } from '../api/auth';
 import type { AssistantSource } from '../types';
-
-const DIGEST_QUESTION = "What needs my attention today?";
 import '../pages/page.css';
 import './AssistantWidget.css';
+
+const DIGEST_QUESTION = "What needs my attention today?";
+const REORDER_QUESTION = "Any reorder suggestions?";
 
 interface Turn {
   question: string;
@@ -31,6 +32,7 @@ export default function AssistantWidget() {
   const [reindexing, setReindexing] = useState(false);
   const [reindexStatus, setReindexStatus] = useState<string | null>(null);
   const [digestLoading, setDigestLoading] = useState(false);
+  const [reorderLoading, setReorderLoading] = useState(false);
 
   if (!isLoggedIn()) return null;
 
@@ -47,6 +49,22 @@ export default function AssistantWidget() {
       setError('Could not reach the assistant. Ensure ANTHROPIC_API_KEY is set on the server.');
     } finally {
       setDigestLoading(false);
+    }
+  };
+
+  const handleReorderSuggestions = async () => {
+    const orgId = getOrgId();
+    if (!orgId) return;
+
+    setReorderLoading(true);
+    setError(null);
+    try {
+      const res = await getReorderSuggestions(orgId);
+      setTurns(prev => [{ question: REORDER_QUESTION, answer: res.data || res.message, sources: [] }, ...prev]);
+    } catch {
+      setError('Could not reach the assistant. Ensure ANTHROPIC_API_KEY is set on the server.');
+    } finally {
+      setReorderLoading(false);
     }
   };
 
@@ -106,7 +124,7 @@ export default function AssistantWidget() {
           </div>
 
           <div className="assistant-history">
-            {turns.length === 0 && !loading && !digestLoading && (
+            {turns.length === 0 && !loading && !digestLoading && !reorderLoading && (
               <div className="assistant-empty">
                 <p className="muted">
                   Ask a question about your organization's own data — dispatches, notifications, vehicle
@@ -115,12 +133,15 @@ export default function AssistantWidget() {
                 <button type="button" className="assistant-suggestion" onClick={handleDigest}>
                   ✦ {DIGEST_QUESTION}
                 </button>
+                <button type="button" className="assistant-suggestion" onClick={handleReorderSuggestions}>
+                  ✦ {REORDER_QUESTION}
+                </button>
               </div>
             )}
-            {(loading || digestLoading) && (
+            {(loading || digestLoading || reorderLoading) && (
               <div className="ai-summary-loading">
                 <span className="ai-pulse" />
-                {digestLoading ? 'Building your digest…' : 'Thinking…'}
+                {digestLoading ? 'Building your digest…' : reorderLoading ? 'Checking stock levels…' : 'Thinking…'}
               </div>
             )}
             {error && <p className="errortxt">{error}</p>}
@@ -154,7 +175,7 @@ export default function AssistantWidget() {
               onChange={e => setQuestion(e.target.value)}
               aria-label="Question for the assistant"
             />
-            <button className="btn btn-ai" type="submit" disabled={loading || digestLoading || !question.trim()}>
+            <button className="btn btn-ai" type="submit" disabled={loading || digestLoading || reorderLoading || !question.trim()}>
               Ask
             </button>
           </form>

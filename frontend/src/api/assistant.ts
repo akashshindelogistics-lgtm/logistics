@@ -17,3 +17,9 @@ export const reindexAssistant = (orgId: string) =>
  *  no sources, unlike askAssistant's answers. */
 export const getDailyDigest = (orgId: string) =>
   api.get<ApiResponse<string>>(`/orgs/${orgId}/assistant/digest`).then(r => r.data);
+
+/** Smart reorder suggestions: godowns below their reorder threshold, each
+ *  with a suggested quantity based on recent dispatch velocity — also not
+ *  grounded in retrieval, so it has no sources. */
+export const getReorderSuggestions = (orgId: string) =>
+  api.get<ApiResponse<string>>(`/orgs/${orgId}/assistant/reorder-suggestions`).then(r => r.data);

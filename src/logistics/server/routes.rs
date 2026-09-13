@@ -3219,6 +3219,49 @@ pub async fn get_daily_digest(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> 
     }
 }
 
+/// Smart reorder suggestions: narrates godowns below their reorder
+/// threshold with a suggested reorder quantity based on recent dispatch
+/// velocity, not just the bare below-threshold flag. Folded into the
+/// assistant widget as a canned starter question, same as the daily digest —
+/// see `crate::logistics::ai::reorder`.
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/assistant/reorder-suggestions",
+    tag = "AI Assistant",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "AI-generated reorder-suggestion briefing", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/assistant/reorder-suggestions")]
+pub async fn get_reorder_suggestions(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only view reorder suggestions for your own organization"
+                .to_string(),
+            data: None,
+        });
+    }
+
+    match crate::logistics::ai::reorder::generate_reorder_narration(org_id).await {
+        Ok(narration) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Reorder suggestions generated".to_string(),
+            data: Some(narration),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to generate reorder suggestions: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── Freight billing handlers (protected) ─────────────────────────────────────
 //
 // One invoice per dispatch. Every route checks the underlying dispatch (or the
@@ -3961,6 +4004,7 @@ impl Modify for SecurityAddon {
         ask_assistant,
         reindex_assistant,
         get_daily_digest,
+        get_reorder_suggestions,
         create_dispatch_invoice,
         get_dispatch_invoice,
         update_invoice,
@@ -4087,6 +4131,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(ask_assistant)
             .service(reindex_assistant)
             .service(get_daily_digest)
+            .service(get_reorder_suggestions)
             .service(create_dispatch_invoice)
             .service(get_dispatch_invoice)
             .service(update_invoice)
@@ -6616,6 +6661,48 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 200);
         let body: ApiResponse<String> = test::read_body_json(resp).await;
         assert!(body.data.unwrap().contains("Nothing needs your attention"));
+    }
+
+    // ── GET /api/orgs/{id}/assistant/reorder-suggestions ──────────────────────
+
+    #[actix_web::test]
+    async fn test_get_reorder_suggestions_without_token_returns_401() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/assistant/reorder-suggestions", Uuid::new_v4()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_get_reorder_suggestions_returns_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _auth) = setup_org(&app, "Reorder Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Reorder Intruder Org").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/assistant/reorder-suggestions", org.id))
+            .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_get_reorder_suggestions_returns_a_canned_answer_when_nothing_is_low() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Reorder Quiet Org").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/assistant/reorder-suggestions", org.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<String> = test::read_body_json(resp).await;
+        assert!(body.data.unwrap().contains("No godowns are below their reorder threshold"));
     }
 
     // ── GET /api/orgs/{id}/reports/summary ────────────────────────────────────
