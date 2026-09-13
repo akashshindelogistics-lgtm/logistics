@@ -602,7 +602,8 @@
    "this doesn't look like a signature or package photo" before a dispatch
    is marked DELIVERED, but it's not worth building until proof-of-delivery
    has real file storage behind it - otherwise there's nothing reliable to
-   verify.
+   verify. See "Real file storage for proof-of-delivery photos" below -
+   once that lands, this item is unblocked.
 ** DONE AI-personalized notification copy
    Notification.body is already free text (currently a fixed template).
    This item was blocked on nothing in this repo actually sending a
@@ -634,3 +635,57 @@
    pair of dispatches.spec.ts tests confirmed unrelated to this change
    (reproduces identically on unmodified master, and passed cleanly in
    CI on PR #58).
+* TODO Real file storage for proof-of-delivery photos - replace the free-form signature_or_photo_url with an actual upload/serve pipeline
+  Current state (docs/dispatch-lifecycle.md): ProofOfDelivery.signature_or_
+  photo_url is a free-form TEXT column - a URL or inline data: URI - and
+  nothing in this repo stores or serves the actual image bytes. The
+  frontend's "Signature / Photo URL" field on the delivery-confirmation
+  form is a plain text input, so in a real deployment there's nowhere to
+  actually put the photo. This is the explicit prerequisite for the AI
+  opportunities list's "Proof-of-delivery photo verification via a
+  vision-capable model" item - there's nothing reliable for a vision model
+  to verify until real bytes are stored somewhere this app controls.
+  Storage choice: local disk under a configurable upload directory (e.g.
+  UPLOAD_DIR, default ./uploads), not a cloud object-storage vendor. This
+  repo has one paid external dependency today (ANTHROPIC_API_KEY) and
+  deliberately avoided a second one for AI embeddings (see the "ask your
+  data" assistant's FULLTEXT-over-embeddings design choice); the same
+  reasoning applies here - local disk needs zero new credentials and works
+  immediately in dev and a single-instance deployment. Revisit if/when the
+  "finish up manual deploy steps" item lands on a platform with an
+  ephemeral filesystem (most container platforms wipe local disk on
+  redeploy) - swapping to an S3-compatible bucket later is a contained
+  change (one new module behind the same store/serve interface), not a
+  rearchitecture.
+  New pieces:
+    - An UploadedFile model + table (id, org_id, content_type, byte_size,
+      storage_path, uploaded_at) - tracks ownership so a file can be
+      org-scoped and served securely, rather than trusting a bare
+      filesystem path from the client.
+    - POST /api/orgs/{id}/uploads (multipart/form-data, one file field,
+      needs the actix-multipart crate - a real new dependency, unlike the
+      AI features' "no new vendor" constraint, which was specifically
+      about paid AI vendors). Validates content-type (image/jpeg,
+      image/png, image/webp only - this is for a signature or package
+      photo, not arbitrary file upload) and size (cap at a few MB), writes
+      the file to disk under a UUID-derived path, inserts the UploadedFile
+      row, returns {id, url}.
+    - GET /api/uploads/{id} - AuthenticatedOrg-gated, 403s if the file's
+      org_id doesn't match the caller, streams the stored bytes back with
+      the stored content-type.
+  No schema change needed on ProofOfDelivery/DispatchOrder at all -
+  signature_or_photo_url keeps being "a URL", it's just now one our own
+  backend serves: the frontend calls the upload route first and passes
+  the returned url into the existing PUT /api/dispatches/{id}/status
+  payload exactly as today.
+  Frontend: replace the "Signature / Photo URL" text input in the
+  delivery-confirmation form with a real <input type="file"> (image/*),
+  uploading on selection and disabling "Confirm Delivery" until the
+  upload resolves; the existing "View signature/photo" link keeps working
+  unchanged since it's still just an <a href>.
+  Tests: Rust route tests for the upload/serve routes (401/403,
+  content-type/size rejection, org-scoping on GET - a different org's
+  token must not be able to fetch another org's file); a Playwright flow
+  uploading a real small test image through the delivery-confirmation
+  form and confirming the "View signature/photo" link resolves to the
+  uploaded image.
