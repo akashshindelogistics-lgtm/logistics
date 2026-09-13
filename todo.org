@@ -340,7 +340,7 @@
   from structured status history. Kept as a checklist, roughly in priority order.
   No new AI vendor: everything below uses only ANTHROPIC_API_KEY, already the
   app's one AI dependency.
-** TODO Org-scoped "ask your data" assistant - a natural-language Q&A widget grounded in retrieval over the org's own notifications, compliance notes and dispatch history. The one genuine RAG opportunity in this system.
+** DONE Org-scoped "ask your data" assistant - a natural-language Q&A widget grounded in retrieval over the org's own notifications, compliance notes and dispatch history. The one genuine RAG opportunity in this system.
    Retrieval via MySQL FULLTEXT search (no embeddings, no second AI vendor):
    a new AiChunks table (org_id, kind, source_id, text, updated_at) with a
    FULLTEXT INDEX on `text`, ensure_table'd and kept in sync with
@@ -398,7 +398,11 @@
    TestDb-backed org-isolation test on AiChunks (mirrors Customer::list_by_org's
    scoping test).
    Phased (one PR each, backend+frontend+tests together per this repo's
-   convention):
+   convention). All four phases below are done - the assistant now indexes
+   notifications, vehicle documents, dispatch narratives, stock snapshots
+   and the full org directory, backfillable via reindex_org, and grounds
+   aggregate-shaped questions in a live OpsReport snapshot on top of
+   retrieval:
 *** DONE Phase 1: notification + vehicle_document chunks, the full retrieval/generation/route/widget vertical slice
     A complete, demoable feature even though only two chunk kinds are
     indexed. AiChunks table (src/logistics/ai/chunk.rs, FULLTEXT INDEX on
