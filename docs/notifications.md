@@ -9,17 +9,35 @@ records a notification for each party it should tell:
 
 ## What "recording" means
 
-Recording is all this feature does today. Every notification lands in the
-`Notifications` table with a status:
+Every notification lands in the `Notifications` table with a status:
 
 | status | meaning |
 | --- | --- |
-| `QUEUED` | a message ready to send — we have a phone or email for this party |
+| `QUEUED` | ready to send, but no provider is configured for its channel yet |
 | `SKIPPED` | no contact on file for this party, nothing to send |
+| `SENT` | delivery succeeded |
+| `FAILED` | delivery was attempted and the provider reported an error |
 
-Wiring an actual SMS / email provider is a deployment concern: a sender reads
-the `QUEUED` rows, delivers them, and flips them to `SENT` / `FAILED`. Nothing
-in this repo talks to Twilio or an SMTP server.
+Recording and delivery happen in the same request: right after a `QUEUED`
+row is inserted, `Notification::deliver_queued_best_effort` calls
+[`crate::logistics::notification::delivery`] to actually send it — Twilio for
+SMS, [Resend](https://resend.com) for email (a JSON-over-HTTPS transactional
+email API, chosen over raw SMTP so this reuses the same reqwest-based
+HTTP-call shape already used for the Anthropic integration rather than
+adding a new client/protocol dependency). Both are optional and read their
+credentials from the environment:
+
+| Channel | Variables |
+| --- | --- |
+| SMS (Twilio) | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` |
+| Email (Resend) | `RESEND_API_KEY`, `RESEND_FROM_EMAIL` |
+
+A channel with no credentials configured behaves exactly as before this
+feature existed: the row is left `QUEUED` rather than marked `FAILED` —
+nothing was actually attempted, and it's ready to send the moment the
+provider is configured. Delivery is best-effort either way: a failure only
+updates that notification's own status, it never fails the dispatch
+create/deliver request it's attached to.
 
 ## Channel choice
 
@@ -59,7 +77,14 @@ Both are reads — any authenticated member of the org can see them.
 - Rust model (`notification/tests.rs`): created records customer + driver and
   prefers email; SMS fallback then `SKIPPED` with no contact; delivered
   notifies only the customer; `list_by_org` is scoped and newest-first;
-  cascade delete with the org. Plus `Customer::set_contact` normalisation.
+  cascade delete with the org; `deliver_queued_best_effort` leaves `QUEUED`
+  rows `QUEUED` without provider credentials and never touches a `SKIPPED`
+  row. Plus `Customer::set_contact` normalisation.
+- Rust delivery (`notification/delivery.rs`): `deliver` returns
+  `NotConfigured` for SMS/email without credentials (including a partial
+  Twilio credential set) — the only path tested, matching this codebase's
+  convention of never hitting a live third-party API in tests (see
+  `ai/status.rs`'s equivalent note about the Anthropic call).
 - Rust routes (`routes.rs`): creating a dispatch records two notifications
   (customer `SKIPPED`, driver `QUEUED` SMS); delivering records a
   `DISPATCH_DELIVERED` for the customer; the org feed is org-scoped (`403`

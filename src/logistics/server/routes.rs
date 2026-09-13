@@ -2740,12 +2740,14 @@ pub async fn dispatch_stock(
             // Best-effort: tell the customer and the assigned driver. A
             // recording failure must not fail the dispatch itself.
             let driver_phone = driver_phone_for_vehicle(&order.vehicle_registration_number, org_id);
-            let _ = Notification::record_dispatch_created(
+            if let Ok(notifs) = Notification::record_dispatch_created(
                 org_id,
                 order.id,
                 &customer,
                 driver_phone.as_deref(),
-            );
+            ) {
+                Notification::deliver_queued_best_effort(&notifs).await;
+            }
             HttpResponse::Ok().json(ApiResponse {
                 success: true,
                 message: "Stock dispatched successfully".to_string(),
@@ -2860,12 +2862,14 @@ pub async fn create_trip(
             for stop in &trip.stops {
                 if let Some((customer, _)) = resolved.iter().find(|(c, _)| c.id == stop.customer_id) {
                     let phone = driver_phone_for_vehicle(&stop.vehicle_registration_number, org_id);
-                    let _ = Notification::record_dispatch_created(
+                    if let Ok(notifs) = Notification::record_dispatch_created(
                         org_id,
                         stop.id,
                         customer,
                         phone.as_deref(),
-                    );
+                    ) {
+                        Notification::deliver_queued_best_effort(&notifs).await;
+                    }
                 }
             }
             HttpResponse::Ok().json(ApiResponse {
@@ -2998,11 +3002,11 @@ pub async fn update_dispatch_status(
         Ok(()) => {
             if dispatch.status == DispatchStatus::Delivered {
                 if let Ok(Some(customer)) = Customer::get_by_id(dispatch.customer_id) {
-                    let _ = Notification::record_dispatch_delivered(
-                        auth.org_id,
-                        dispatch.id,
-                        &customer,
-                    );
+                    if let Ok(notifs) =
+                        Notification::record_dispatch_delivered(auth.org_id, dispatch.id, &customer)
+                    {
+                        Notification::deliver_queued_best_effort(&notifs).await;
+                    }
                 }
             }
             HttpResponse::Ok().json(ApiResponse {

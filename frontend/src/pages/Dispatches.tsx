@@ -6,13 +6,20 @@ import { listDispatchNotifications } from '../api/notifications';
 import { getOrgId } from '../api/auth';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, type NextAction } from '../lib/dispatchLifecycle';
-import type { DispatchOrder, Invoice, Notification, PaymentStatus } from '../types';
+import type { DispatchOrder, Invoice, Notification, NotificationStatus, PaymentStatus } from '../types';
 import './page.css';
 
 const PAYMENT_TAG_CLASS: Record<PaymentStatus, string> = {
   PENDING: 'tag-amber',
   PAID: 'tag-green',
   OVERDUE: 'tag-red',
+};
+
+const NOTIFICATION_STATUS_TAG_CLASS: Record<NotificationStatus, string> = {
+  QUEUED: 'tag-blue',
+  SENT: 'tag-green',
+  FAILED: 'tag-red',
+  SKIPPED: '',
 };
 
 export default function Dispatches() {
@@ -522,7 +529,7 @@ export default function Dispatches() {
                               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {notifs[o.id].map(n => (
                                   <li key={n.id} style={{ fontSize: 13, display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                                    <span className={`status-tag ${n.status === 'QUEUED' ? 'tag-blue' : ''}`}>{n.status}</span>
+                                    <span className={`status-tag ${NOTIFICATION_STATUS_TAG_CLASS[n.status]}`}>{n.status}</span>
                                     <span className="badge">{n.recipient_kind}</span>
                                     <span className="muted">{n.channel} → {n.recipient}</span>
                                     <span>{n.body}</span>

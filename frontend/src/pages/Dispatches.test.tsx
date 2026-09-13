@@ -300,6 +300,8 @@ describe('Dispatches page', () => {
           recipient_kind: 'customer', recipient: 'asha@example.com', body: 'Your order is on its way.', status: 'QUEUED', created_at: 1_700_000_100 },
         { id: 'n2', org_id: 'org-1', dispatch_id: order.id, event: 'DISPATCH_CREATED', channel: 'SMS',
           recipient_kind: 'driver', recipient: '(no contact on file)', body: 'New trip assigned.', status: 'SKIPPED', created_at: 1_700_000_100 },
+        { id: 'n3', org_id: 'org-1', dispatch_id: order.id, event: 'DISPATCH_DELIVERED', channel: 'EMAIL',
+          recipient_kind: 'customer', recipient: 'asha-2@example.com', body: 'Your order has been delivered.', status: 'FAILED', created_at: 1_700_000_200 },
       ],
     });
 
@@ -311,5 +313,10 @@ describe('Dispatches page', () => {
     expect(await screen.findByText('Your order is on its way.')).toBeInTheDocument();
     expect(screen.getByText('asha@example.com', { exact: false })).toBeInTheDocument();
     expect(screen.getByText('New trip assigned.')).toBeInTheDocument();
+
+    // FAILED (an attempted, unsuccessful delivery) renders distinctly from
+    // QUEUED and SKIPPED.
+    const failedTag = screen.getByText('FAILED');
+    expect(failedTag).toHaveClass('tag-red');
   });
 });

@@ -114,6 +114,59 @@ fn deleting_the_org_cascades_to_its_notifications() {
     assert!(Notification::list_by_org(org.id, 100).expect("list").is_empty());
 }
 
+#[actix_web::test]
+async fn deliver_queued_best_effort_leaves_notifications_queued_without_provider_credentials() {
+    // SAFETY: no other test sets or reads these variables concurrently with
+    // this one — see notification::delivery's tests for the full rationale.
+    unsafe {
+        std::env::remove_var("TWILIO_ACCOUNT_SID");
+        std::env::remove_var("TWILIO_AUTH_TOKEN");
+        std::env::remove_var("TWILIO_FROM_NUMBER");
+        std::env::remove_var("RESEND_API_KEY");
+        std::env::remove_var("RESEND_FROM_EMAIL");
+    }
+
+    let _db = TestDb::create();
+    let org = org();
+    let mut customer = Customer::create_customer(org.id, "Asha Rao", "9 Market Rd").expect("customer");
+    customer.set_contact(Some("+91 90000 11111".into()), Some("asha@example.com".into())).expect("contact");
+    let dispatch_id = Uuid::new_v4();
+
+    let recorded = Notification::record_dispatch_created(org.id, dispatch_id, &customer, Some("+91 98888 22222"))
+        .expect("record");
+    assert!(recorded.iter().all(|n| n.status == NotificationStatus::Queued));
+
+    Notification::deliver_queued_best_effort(&recorded).await;
+
+    // Nothing is configured, so nothing was attempted — every row stays
+    // QUEUED, ready to send once a provider is set up, not FAILED.
+    let listed = Notification::list_by_dispatch(dispatch_id).expect("list");
+    assert!(listed.iter().all(|n| n.status == NotificationStatus::Queued), "{listed:?}");
+}
+
+#[actix_web::test]
+async fn deliver_queued_best_effort_does_not_touch_a_skipped_notification() {
+    // SAFETY: see above.
+    unsafe {
+        std::env::remove_var("TWILIO_ACCOUNT_SID");
+        std::env::remove_var("TWILIO_AUTH_TOKEN");
+        std::env::remove_var("TWILIO_FROM_NUMBER");
+    }
+
+    let _db = TestDb::create();
+    let org = org();
+    let no_contact = Customer::create_customer(org.id, "No Contact", "2 Rd").expect("customer");
+    let dispatch_id = Uuid::new_v4();
+
+    let recorded = Notification::record_dispatch_created(org.id, dispatch_id, &no_contact, None).expect("record");
+    assert!(recorded.iter().all(|n| n.status == NotificationStatus::Skipped));
+
+    Notification::deliver_queued_best_effort(&recorded).await;
+
+    let listed = Notification::list_by_dispatch(dispatch_id).expect("list");
+    assert!(listed.iter().all(|n| n.status == NotificationStatus::Skipped), "{listed:?}");
+}
+
 #[test]
 fn recording_a_notification_indexes_it_for_the_assistant() {
     use crate::logistics::ai::chunk;
