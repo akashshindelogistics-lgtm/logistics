@@ -1,11 +1,15 @@
 //! Dispatch notifications to the customer and driver.
 //!
 //! When a dispatch is created, and again when it's delivered, the system
-//! records a notification for each party it should tell. Recording is all
-//! this module does today: every row lands with status `QUEUED` (a message
-//! ready to send) or `SKIPPED` (we had no phone/email for that party). Wiring
-//! an actual SMS / email provider is a deployment concern — it reads the
-//! `QUEUED` rows and marks them `SENT` / `FAILED`. See `docs/notifications.md`.
+//! records a notification for each party it should tell, then immediately
+//! attempts to actually send it via [`crate::logistics::notification::delivery`]
+//! (Twilio for SMS, Resend for email). Every row lands with status `QUEUED`
+//! (ready to send), `SKIPPED` (no phone/email on file for that party),
+//! `SENT` (delivery succeeded), or `FAILED` (delivery was attempted and the
+//! provider reported an error). A `QUEUED` row whose channel has no
+//! provider credentials configured is left `QUEUED` rather than `FAILED` —
+//! nothing was actually attempted, and it's ready to send once configured.
+//! See `docs/notifications.md`.
 
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
@@ -38,6 +42,15 @@ impl NotificationEvent {
             NotificationEvent::DispatchDelivered => "DISPATCH_DELIVERED",
         }
     }
+
+    /// The email subject line for this event. Only used for
+    /// [`NotificationChannel::Email`] — SMS has no subject.
+    fn email_subject(&self) -> &'static str {
+        match self {
+            NotificationEvent::DispatchCreated => "Your order is on its way",
+            NotificationEvent::DispatchDelivered => "Your order has been delivered",
+        }
+    }
 }
 
 /// How a notification would be delivered.
@@ -66,10 +79,15 @@ impl NotificationChannel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NotificationStatus {
-    /// A message ready for a provider to send.
+    /// A message ready for a provider to send. Also the resting state for a
+    /// channel with no provider configured — an attempt was never made.
     Queued,
     /// No phone or email on file for this party — nothing to send.
     Skipped,
+    /// Delivery succeeded.
+    Sent,
+    /// Delivery was attempted and the provider reported an error.
+    Failed,
 }
 
 impl NotificationStatus {
@@ -77,11 +95,15 @@ impl NotificationStatus {
         match self {
             NotificationStatus::Queued => "QUEUED",
             NotificationStatus::Skipped => "SKIPPED",
+            NotificationStatus::Sent => "SENT",
+            NotificationStatus::Failed => "FAILED",
         }
     }
     fn from_str(s: &str) -> Self {
         match s {
             "SKIPPED" => NotificationStatus::Skipped,
+            "SENT" => NotificationStatus::Sent,
+            "FAILED" => NotificationStatus::Failed,
             _ => NotificationStatus::Queued,
         }
     }
@@ -300,6 +322,46 @@ impl Notification {
             );
         }
         Ok(())
+    }
+
+    fn update_status(id: Uuid, status: NotificationStatus) -> Result<(), Box<dyn Error>> {
+        let mut conn = DbConnection::from_env().get_connection()?;
+        conn.exec_drop(
+            "UPDATE Notifications SET status = :status WHERE id = :id",
+            params! { "status" => status.as_str(), "id" => id.to_string() },
+        )?;
+        Ok(())
+    }
+
+    /// Attempt to actually send every `QUEUED` notification in `notifs` via
+    /// [`crate::logistics::notification::delivery::deliver`], updating each
+    /// row's status to `SENT` or `FAILED` accordingly. Best-effort: a
+    /// delivery failure only updates that row's status, it never propagates
+    /// — the caller (recording a dispatch event) must not fail because a
+    /// downstream SMS/email provider had a bad day. Rows whose channel has
+    /// no provider configured are left `QUEUED`, not marked `FAILED`.
+    pub async fn deliver_queued_best_effort(notifs: &[Notification]) {
+        for n in notifs {
+            if n.status != NotificationStatus::Queued {
+                continue;
+            }
+            let subject = n.event.email_subject();
+            match crate::logistics::notification::delivery::deliver(n.channel, &n.recipient, subject, &n.body).await
+            {
+                Ok(()) => {
+                    if let Err(e) = Self::update_status(n.id, NotificationStatus::Sent) {
+                        eprintln!("notification delivery: sent {} but failed to update its status: {e}", n.id);
+                    }
+                }
+                Err(crate::logistics::notification::delivery::DeliveryError::NotConfigured) => {}
+                Err(err) => {
+                    eprintln!("notification delivery: failed to send {} to {}: {err}", n.id, n.recipient);
+                    if let Err(e) = Self::update_status(n.id, NotificationStatus::Failed) {
+                        eprintln!("notification delivery: also failed to mark {} as failed: {e}", n.id);
+                    }
+                }
+            }
+        }
     }
 
     pub fn list_by_dispatch(dispatch_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {

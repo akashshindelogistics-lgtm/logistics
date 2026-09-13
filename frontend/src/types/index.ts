@@ -110,7 +110,7 @@ export interface Customer {
 // Mirrors src/logistics/notification/notification.rs.
 export type NotificationEvent = 'DISPATCH_CREATED' | 'DISPATCH_DELIVERED';
 export type NotificationChannel = 'SMS' | 'EMAIL';
-export type NotificationStatus = 'QUEUED' | 'SKIPPED';
+export type NotificationStatus = 'QUEUED' | 'SKIPPED' | 'SENT' | 'FAILED';
 
 export interface Notification {
   id: string;

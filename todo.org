@@ -603,9 +603,22 @@
    is marked DELIVERED, but it's not worth building until proof-of-delivery
    has real file storage behind it - otherwise there's nothing reliable to
    verify.
-** TODO (blocked on notification delivery) AI-personalized notification copy
-   Notification.body is already free text (currently a fixed template), but
-   per docs/notifications.md nothing in this repo actually sends a
-   notification anywhere - no Twilio/SMTP is wired up. Personalizing the
-   copy with AI before delivery exists to receive it is solving the wrong
-   problem first; revisit once notifications are actually sent.
+** TODO AI-personalized notification copy
+   Notification.body is already free text (currently a fixed template).
+   This item was blocked on nothing in this repo actually sending a
+   notification anywhere - personalizing copy with AI before delivery
+   exists to receive it would have been solving the wrong problem first.
+   That's no longer true: delivery is now wired up (Twilio for SMS, Resend
+   for email - see docs/notifications.md and
+   src/logistics/notification/delivery.rs), best-effort and optional (a
+   channel with no provider configured just leaves its notifications
+   QUEUED, same as before). Recording a notification now immediately
+   attempts to send it via Notification::deliver_queued_best_effort,
+   updating its status to SENT or FAILED. Still to do: replace the fixed
+   per-event templates in notification.rs (record_dispatch_created /
+   record_dispatch_delivered) with an AI-generated body - prompt-over-
+   structured-data, same shape as the other AI features, fed the customer
+   name, dispatch line items and status - with the exact same fixed
+   templates as a fallback whenever ANTHROPIC_API_KEY isn't set or the call
+   fails, so a misconfigured/rate-limited environment never blocks sending
+   a notification outright.

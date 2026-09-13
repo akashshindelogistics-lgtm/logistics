@@ -144,6 +144,14 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # the workspace to bill the request to, e.g. wrkspc_01ABC...
 export ANTHROPIC_WORKSPACE_ID="wrkspc_..."
 
+# Optional: actually deliver notifications instead of just recording them.
+# Without these, notifications stay QUEUED — see docs/notifications.md.
+export TWILIO_ACCOUNT_SID="AC..."
+export TWILIO_AUTH_TOKEN="..."
+export TWILIO_FROM_NUMBER="+15551234567"
+export RESEND_API_KEY="re_..."
+export RESEND_FROM_EMAIL="dispatch@yourdomain.com"
+
 cargo run
 ```
 
