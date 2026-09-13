@@ -96,4 +96,32 @@ describe('AssistantWidget', () => {
 
     expect(await screen.findByText(/could not reindex right now/i)).toBeInTheDocument();
   });
+
+  it('answers the daily-digest starter question as a turn with no sources', async () => {
+    vi.mocked(isLoggedIn).mockReturnValue(true);
+    vi.mocked(assistantApi.getDailyDigest).mockResolvedValue(
+      ok('3 vehicle documents are expiring soon and 2 godowns are low on stock.'),
+    );
+
+    const user = userEvent.setup();
+    render(<AssistantWidget />);
+    await user.click(screen.getByRole('button', { name: /open assistant/i }));
+    await user.click(screen.getByRole('button', { name: /what needs my attention today/i }));
+
+    expect(assistantApi.getDailyDigest).toHaveBeenCalledWith('org1');
+    expect(await screen.findByText('What needs my attention today?')).toBeInTheDocument();
+    expect(screen.getByText(/3 vehicle documents are expiring soon/i)).toBeInTheDocument();
+  });
+
+  it('shows an error when the daily-digest call fails', async () => {
+    vi.mocked(isLoggedIn).mockReturnValue(true);
+    vi.mocked(assistantApi.getDailyDigest).mockRejectedValue(new Error('network error'));
+
+    const user = userEvent.setup();
+    render(<AssistantWidget />);
+    await user.click(screen.getByRole('button', { name: /open assistant/i }));
+    await user.click(screen.getByRole('button', { name: /what needs my attention today/i }));
+
+    expect(await screen.findByText(/could not reach the assistant/i)).toBeInTheDocument();
+  });
 });

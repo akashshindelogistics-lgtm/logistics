@@ -55,4 +55,14 @@ test.describe('AI assistant widget', () => {
 
     await expect(page.getByText(/reindexed \d+ fact\(s\)\./i)).toBeVisible({ timeout: 10000 });
   });
+
+  test('answers the daily-digest starter question with a canned response for a quiet org', async ({ page }) => {
+    await registerOrg(page, `Assistant Digest ${uid()}`);
+
+    await page.getByRole('button', { name: /open assistant/i }).click();
+    await page.getByRole('button', { name: /what needs my attention today/i }).click();
+
+    await expect(page.getByText('What needs my attention today?')).toBeVisible();
+    await expect(page.getByText(/nothing needs your attention/i)).toBeVisible({ timeout: 10000 });
+  });
 });

@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { askAssistant, reindexAssistant } from '../api/assistant';
+import { askAssistant, reindexAssistant, getDailyDigest } from '../api/assistant';
 import { isLoggedIn, getOrgId } from '../api/auth';
 import type { AssistantSource } from '../types';
+
+const DIGEST_QUESTION = "What needs my attention today?";
 import '../pages/page.css';
 import './AssistantWidget.css';
 
@@ -28,8 +30,25 @@ export default function AssistantWidget() {
   const [error, setError] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState(false);
   const [reindexStatus, setReindexStatus] = useState<string | null>(null);
+  const [digestLoading, setDigestLoading] = useState(false);
 
   if (!isLoggedIn()) return null;
+
+  const handleDigest = async () => {
+    const orgId = getOrgId();
+    if (!orgId) return;
+
+    setDigestLoading(true);
+    setError(null);
+    try {
+      const res = await getDailyDigest(orgId);
+      setTurns(prev => [{ question: DIGEST_QUESTION, answer: res.data || res.message, sources: [] }, ...prev]);
+    } catch {
+      setError('Could not reach the assistant. Ensure ANTHROPIC_API_KEY is set on the server.');
+    } finally {
+      setDigestLoading(false);
+    }
+  };
 
   const handleReindex = async () => {
     const orgId = getOrgId();
@@ -87,16 +106,21 @@ export default function AssistantWidget() {
           </div>
 
           <div className="assistant-history">
-            {turns.length === 0 && !loading && (
-              <p className="muted assistant-empty">
-                Ask a question about your organization's own data — dispatches, notifications, vehicle
-                compliance documents.
-              </p>
+            {turns.length === 0 && !loading && !digestLoading && (
+              <div className="assistant-empty">
+                <p className="muted">
+                  Ask a question about your organization's own data — dispatches, notifications, vehicle
+                  compliance documents.
+                </p>
+                <button type="button" className="assistant-suggestion" onClick={handleDigest}>
+                  ✦ {DIGEST_QUESTION}
+                </button>
+              </div>
             )}
-            {loading && (
+            {(loading || digestLoading) && (
               <div className="ai-summary-loading">
                 <span className="ai-pulse" />
-                Thinking…
+                {digestLoading ? 'Building your digest…' : 'Thinking…'}
               </div>
             )}
             {error && <p className="errortxt">{error}</p>}
@@ -130,7 +154,7 @@ export default function AssistantWidget() {
               onChange={e => setQuestion(e.target.value)}
               aria-label="Question for the assistant"
             />
-            <button className="btn btn-ai" type="submit" disabled={loading || !question.trim()}>
+            <button className="btn btn-ai" type="submit" disabled={loading || digestLoading || !question.trim()}>
               Ask
             </button>
           </form>

@@ -75,8 +75,27 @@
 }
 
 .assistant-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   font-size: 13px;
+}
+.assistant-empty p {
   margin: 0;
+}
+
+.assistant-suggestion {
+  align-self: flex-start;
+  background: color-mix(in srgb, #6366f1 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, #6366f1 25%, var(--border));
+  color: var(--text-1);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.assistant-suggestion:hover {
+  background: color-mix(in srgb, #6366f1 14%, var(--surface));
 }
 
 .assistant-turn {
