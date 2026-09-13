@@ -152,4 +152,28 @@ describe('AssistantWidget', () => {
 
     expect(await screen.findByText(/could not reach the assistant/i)).toBeInTheDocument();
   });
+
+  it('keeps the digest and reorder-suggestion starter buttons usable after asking a normal question', async () => {
+    vi.mocked(isLoggedIn).mockReturnValue(true);
+    vi.mocked(assistantApi.askAssistant).mockResolvedValue(
+      ok({ answer: 'Order abcd1234 was delivered yesterday.', sources: [] }),
+    );
+    vi.mocked(assistantApi.getDailyDigest).mockResolvedValue(ok('Nothing needs your attention right now.'));
+
+    const user = userEvent.setup();
+    render(<AssistantWidget />);
+    await user.click(screen.getByRole('button', { name: /open assistant/i }));
+
+    await user.type(screen.getByLabelText(/question for the assistant/i), 'what happened to order abcd1234?');
+    await user.click(screen.getByRole('button', { name: /^ask$/i }));
+    expect(await screen.findByText('Order abcd1234 was delivered yesterday.')).toBeInTheDocument();
+
+    // The starter suggestions must still be there and clickable, not hidden
+    // once a turn exists — they're the only way to reach these two features.
+    const digestButton = screen.getByRole('button', { name: /what needs my attention today/i });
+    expect(digestButton).toBeEnabled();
+    await user.click(digestButton);
+    expect(assistantApi.getDailyDigest).toHaveBeenCalledWith('org1');
+    expect(await screen.findByText('Nothing needs your attention right now.')).toBeInTheDocument();
+  });
 });

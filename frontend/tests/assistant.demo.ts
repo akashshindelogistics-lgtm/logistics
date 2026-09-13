@@ -5,17 +5,21 @@ import { registerOrg, uid } from './helpers';
  * A short narrated walk through the org-scoped **"ask your data" assistant**
  * on its own — a global widget, available from any page, that answers
  * natural-language questions grounded in retrieval over the org's own
- * indexed data (dispatch notifications, vehicle compliance documents) rather
- * than the LLM's general knowledge.
+ * indexed data (dispatch notifications, vehicle compliance documents,
+ * dispatch narratives, stock snapshots, and the org directory) plus a live
+ * OpsReport snapshot for aggregate-shaped questions, rather than the LLM's
+ * general knowledge. Also covers the two canned starter questions (daily
+ * digest, reorder suggestions) and the manual reindex backfill.
  *
- * Like the pre-existing AI dispatch-summary feature, the final answer step
+ * Like the pre-existing AI dispatch-summary feature, a live-answer step
  * needs ANTHROPIC_API_KEY configured on the server (not set in this
  * environment — see todo.org) — this demo shows the deterministic parts
  * that don't depend on it: the widget UI, indexing a real compliance
- * document, and retrieval actually finding it (visible in the "based on N
+ * document, retrieval actually finding it (visible in the "based on N
  * facts" footer once an answer comes back, or the same honest
  * "could not reach the assistant" message the AI summary feature already
- * shows when unconfigured).
+ * shows when unconfigured), and the fully canned answers (nothing indexed
+ * yet, nothing needs attention, no godowns below threshold).
  *
  * Watch it with `npm run test:e2e:demo:assistant` (headed, slowed).
  */
@@ -53,10 +57,20 @@ test('ask your data assistant', async ({ page }) => {
     await page.waitForTimeout(500);
   });
 
-  await test.step('Ask a question with nothing relevant indexed yet', async () => {
-    await page.getByLabel(/question for the assistant/i).fill('what is my delivery performance like?');
+  const panel = page.getByRole('dialog', { name: /ask your data/i });
+
+  await test.step('Ask an aggregate question nothing in retrieval could ever match — Phase 4 grounds it in a live OpsReport snapshot instead', async () => {
+    // Registering the vehicle above already makes the org's OpsReport
+    // non-empty (one vehicle, even idle), so this no longer short-circuits
+    // to the canned "nothing indexed yet" answer the way it would for a
+    // truly empty org — it attempts real generation grounded in the
+    // snapshot, same as any other question.
+    await page.getByLabel(/question for the assistant/i).fill('what is my fleet utilization like?');
     await page.getByRole('button', { name: /^ask$/i }).click();
-    await expect(page.getByText(/indexed yet/i)).toBeVisible({ timeout: 10000 });
+    await Promise.race([
+      panel.getByText(/based on \d+ fact|utiliz/i).waitFor({ timeout: 15000 }),
+      panel.getByText(/could not reach the assistant/i).waitFor({ timeout: 15000 }),
+    ]);
     await page.waitForTimeout(1200);
   });
 
@@ -69,9 +83,39 @@ test('ask your data assistant', async ({ page }) => {
     // "could not reach" message the pre-existing AI summary feature shows
     // when it isn't — both are real, demonstrable outcomes of this feature.
     await Promise.race([
-      page.getByText(/based on \d+ fact/i).waitFor({ timeout: 15000 }),
-      page.getByText(/could not reach the assistant/i).waitFor({ timeout: 15000 }),
+      panel.getByText(/based on \d+ fact/i).waitFor({ timeout: 15000 }),
+      panel.getByText(/could not reach the assistant/i).waitFor({ timeout: 15000 }),
     ]);
     await page.waitForTimeout(1500);
+  });
+
+  await test.step('Reindex on demand — rebuilds every chunk for the org from scratch', async () => {
+    await page.getByRole('button', { name: /reindex my data/i }).click();
+    await expect(page.getByText(/reindexed \d+ fact\(s\)\./i)).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1200);
+  });
+
+  await test.step('Ask "what needs my attention today?" — the daily digest starter question', async () => {
+    // The vehicle's insurance expires in 20 days, inside the 30-day
+    // ExpiringSoon window, so the digest has real content to narrate —
+    // unlike the reorder-suggestions question below, it does not
+    // short-circuit to a canned answer here. That means this step's outcome
+    // depends on ANTHROPIC_API_KEY: with it, a real turn is added (the exact
+    // question text becomes visible); without it, the call fails and only
+    // the generic "could not reach" error shows — no turn is added at all,
+    // so the two outcomes are asserted as alternatives, not in sequence.
+    await page.getByRole('button', { name: /what needs my attention today/i }).click();
+    await Promise.race([
+      panel.getByText('What needs my attention today?', { exact: true }).waitFor({ timeout: 15000 }),
+      panel.getByText(/could not reach the assistant/i).waitFor({ timeout: 15000 }),
+    ]);
+    await page.waitForTimeout(1500);
+  });
+
+  await test.step('Ask "any reorder suggestions?" — nothing is low, so this is a fully canned answer', async () => {
+    await page.getByRole('button', { name: /any reorder suggestions/i }).click();
+    await expect(panel.getByText('Any reorder suggestions?', { exact: true })).toBeVisible();
+    await expect(panel.getByText(/no godowns are below their reorder threshold/i)).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1200);
   });
 });

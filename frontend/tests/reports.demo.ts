@@ -91,4 +91,16 @@ test('operations reporting', async ({ page }) => {
     await expect(page.getByRole('row', { name: /South Godown/ }).getByText('no cap')).toBeVisible();
     await page.waitForTimeout(1000);
   });
+
+  await test.step('Ask the AI to explain the report', async () => {
+    await page.getByRole('button', { name: /explain this report/i }).click();
+    // Either a real narration (ANTHROPIC_API_KEY configured) or the same
+    // honest "could not generate" message the AI dispatch-summary feature
+    // already shows when it isn't — both are real, demonstrable outcomes.
+    await Promise.race([
+      page.getByText(/regenerate/i).waitFor({ timeout: 15000 }),
+      page.getByText(/ensure anthropic_api_key is set on the server/i).waitFor({ timeout: 15000 }),
+    ]);
+    await page.waitForTimeout(1500);
+  });
 });

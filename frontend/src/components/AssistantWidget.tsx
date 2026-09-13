@@ -125,18 +125,10 @@ export default function AssistantWidget() {
 
           <div className="assistant-history">
             {turns.length === 0 && !loading && !digestLoading && !reorderLoading && (
-              <div className="assistant-empty">
-                <p className="muted">
-                  Ask a question about your organization's own data — dispatches, notifications, vehicle
-                  compliance documents.
-                </p>
-                <button type="button" className="assistant-suggestion" onClick={handleDigest}>
-                  ✦ {DIGEST_QUESTION}
-                </button>
-                <button type="button" className="assistant-suggestion" onClick={handleReorderSuggestions}>
-                  ✦ {REORDER_QUESTION}
-                </button>
-              </div>
+              <p className="muted assistant-empty">
+                Ask a question about your organization's own data — dispatches, notifications, vehicle
+                compliance documents.
+              </p>
             )}
             {(loading || digestLoading || reorderLoading) && (
               <div className="ai-summary-loading">
@@ -165,6 +157,25 @@ export default function AssistantWidget() {
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="assistant-suggestions-row">
+            <button
+              type="button"
+              className="assistant-suggestion"
+              onClick={handleDigest}
+              disabled={loading || digestLoading || reorderLoading}
+            >
+              ✦ {DIGEST_QUESTION}
+            </button>
+            <button
+              type="button"
+              className="assistant-suggestion"
+              onClick={handleReorderSuggestions}
+              disabled={loading || digestLoading || reorderLoading}
+            >
+              ✦ {REORDER_QUESTION}
+            </button>
           </div>
 
           <form className="assistant-input-row" onSubmit={handleAsk}>
