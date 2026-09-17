@@ -3,7 +3,9 @@ import { registerOrg, uid } from './helpers';
 
 /**
  * A short narrated walk through **multi-stop trips** on its own — one truck
- * planned to visit three customers in a row, each getting their own stock.
+ * planned to visit three customers in a row, each getting their own stock —
+ * then a look at the trip's live route map, showing the truck's GPS
+ * position alongside its planned stops.
  *
  * Watch it with `npm run test:e2e:demo:trips` (headed, slowed).
  */
@@ -19,9 +21,9 @@ test('multi-stop trips', async ({ page }) => {
   const org = await registerOrg(page, `Trips Demo ${uid()}`);
   const stock = `Cement ${uid()}`;
   const names = [`North Store ${uid()}`, `East Store ${uid()}`, `South Store ${uid()}`];
+  const reg = `TD${uid().toUpperCase()}`;
 
   await test.step('Set up a truck and stock, and three customers', async () => {
-    const reg = `TD${uid().toUpperCase()}`;
     await api(page, 'post', `/api/orgs/${org.id}/vehicles`, { registration_number: reg, capacity: 100000, unit: 'MetricTon' });
     const d = await api(page, 'post', `/api/orgs/${org.id}/drivers`, { name: 'Ravi Kumar', license_number: `L${uid()}`, phone: '0' });
     await api(page, 'put', `/api/vehicles/${encodeURIComponent(reg)}/driver`, { driver_id: d.data.id });
@@ -32,6 +34,11 @@ test('multi-stop trips', async ({ page }) => {
         name, address: `${i} Market Rd`, latitude: 19 + i * 0.02, longitude: 72.8,
       });
     }
+    // A GPS tracker fitted to the truck reports it's already on the road —
+    // the same push a real device would make to POST /api/track/{tracker_key},
+    // done here as the equivalent manual update so the demo doesn't need a
+    // real device.
+    await api(page, 'put', `/api/vehicles/${encodeURIComponent(reg)}/location`, { latitude: 19.01, longitude: 72.8 });
   });
 
   await test.step('Open the Trips page', async () => {
@@ -71,5 +78,15 @@ test('multi-stop trips', async ({ page }) => {
     await expect(page.getByText('Trip · stop 1')).toBeVisible({ timeout: 8000 });
     await expect(page.getByText('Trip · stop 3')).toBeVisible();
     await page.waitForTimeout(1200);
+  });
+
+  await test.step("Back on Trips, open the route map to see the truck's live position alongside its stops", async () => {
+    await page.goto('/trips');
+    const card = page.locator('.section-card').first();
+    await expect(card).toBeVisible({ timeout: 8000 });
+    await card.getByRole('button', { name: /route map/i }).click();
+    await expect(card.locator('.leaflet-container')).toBeVisible();
+    await expect(card.locator('.leaflet-marker-icon')).toHaveCount(1 + names.length);
+    await page.waitForTimeout(1800);
   });
 });

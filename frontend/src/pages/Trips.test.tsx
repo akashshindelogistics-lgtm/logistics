@@ -5,11 +5,16 @@ import { MemoryRouter } from 'react-router-dom';
 import Trips from './Trips';
 import * as tripsApi from '../api/trips';
 import * as customersApi from '../api/customers';
+import * as vehiclesApi from '../api/vehicles';
 import type { Trip } from '../types';
 
 vi.mock('../api/trips');
 vi.mock('../api/customers');
+vi.mock('../api/vehicles');
 vi.mock('../api/auth', () => ({ getOrgId: () => 'org1' }));
+vi.mock('../components/LocationMap', () => ({
+  default: ({ pins }: { pins: unknown[] }) => <div data-testid="map">{pins.length} pins</div>,
+}));
 
 const ok = <T,>(data: T) => ({ success: true, message: '', data });
 
@@ -40,6 +45,7 @@ describe('Trips page', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(customersApi.listCustomers).mockResolvedValue(ok(customers) as never);
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(ok([]));
   });
 
   it('shows an empty state when there are no trips', async () => {
@@ -96,5 +102,44 @@ describe('Trips page', () => {
       { customer_id: 'c2', line_items: [{ stock_description: 'Cement', requested_quantity: 5 }] },
     ]);
     await waitFor(() => expect(screen.getByText('MH12 AB 1234')).toBeInTheDocument());
+  });
+
+  it('shows a route map with the vehicle and every located stop when toggled on', async () => {
+    const user = userEvent.setup();
+    vi.mocked(tripsApi.listOrgTrips).mockResolvedValue(ok([trip()]));
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(
+      ok([
+        { ...customers[0], location: { latitude: 19.0, longitude: 72.8, timestamp: 1_700_000_000 } },
+        customers[1], // no location on file
+      ]) as never,
+    );
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(
+      ok([
+        { registration_number: 'MH12 AB 1234', capacity: 10, unit: 'MetricTon',
+          location: { latitude: 19.05, longitude: 72.85, timestamp: 1_700_000_500 } },
+      ]),
+    );
+    render(<Trips />, { wrapper: MemoryRouter });
+    await screen.findByText('MH12 AB 1234');
+
+    expect(screen.queryByTestId('map')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /route map/i }));
+
+    // One pin for the vehicle, one for the single located stop (c2 has none).
+    expect(screen.getByTestId('map')).toHaveTextContent('2 pins');
+
+    await user.click(screen.getByRole('button', { name: /hide map/i }));
+    expect(screen.queryByTestId('map')).not.toBeInTheDocument();
+  });
+
+  it('shows a fallback message when no vehicle or stop has a location on file', async () => {
+    const user = userEvent.setup();
+    vi.mocked(tripsApi.listOrgTrips).mockResolvedValue(ok([trip()]));
+    render(<Trips />, { wrapper: MemoryRouter });
+    await screen.findByText('MH12 AB 1234');
+
+    await user.click(screen.getByRole('button', { name: /route map/i }));
+    expect(screen.getByText(/no location data yet/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('map')).not.toBeInTheDocument();
   });
 });

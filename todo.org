@@ -594,15 +594,16 @@
    new Playwright flow. Full `cargo test --lib` (324 tests), `npm run
    test:unit` (194 tests) and `npm run test:e2e` (64 tests) all green with
    no regressions.
-** TODO (lower priority, blocked on missing infra) Proof-of-delivery photo verification via a vision-capable model
-   ProofOfDelivery.signature_or_photo_url is free-form and, per
-   docs/dispatch-lifecycle.md, has no real file-storage backing it today -
-   callers pass a URL or inline data: URI with nothing validating it's
-   actually a photo/signature. A vision-capable Claude call could flag
-   "this doesn't look like a signature or package photo" before a dispatch
-   is marked DELIVERED, but it's not worth building until proof-of-delivery
-   has real file storage behind it - otherwise there's nothing reliable to
-   verify.
+** TODO Proof-of-delivery photo verification via a vision-capable model
+   ProofOfDelivery.signature_or_photo_url is free-form - callers pass a URL
+   or inline data: URI with nothing validating it's actually a
+   photo/signature. A vision-capable Claude call could flag "this doesn't
+   look like a signature or package photo" before a dispatch is marked
+   DELIVERED. Was blocked on proof-of-delivery having real file storage
+   behind it (otherwise there was nothing reliable to verify) - unblocked
+   now that "Real file storage for proof-of-delivery photos" has landed
+   (see docs/file-uploads.md): a vision call could fetch the bytes straight
+   from GET /api/uploads/{id} instead of trusting an arbitrary URL.
 ** DONE AI-personalized notification copy
    Notification.body is already free text (currently a fixed template).
    This item was blocked on nothing in this repo actually sending a
@@ -634,3 +635,199 @@
    pair of dispatches.spec.ts tests confirmed unrelated to this change
    (reproduces identically on unmodified master, and passed cleanly in
    CI on PR #58).
+* DONE Real file storage for proof-of-delivery photos - replace the free-form signature_or_photo_url with an actual upload/serve pipeline
+  Current state (docs/dispatch-lifecycle.md): ProofOfDelivery.signature_or_
+  photo_url is a free-form TEXT column - a URL or inline data: URI - and
+  nothing in this repo stores or serves the actual image bytes. The
+  frontend's "Signature / Photo URL" field on the delivery-confirmation
+  form is a plain text input, so in a real deployment there's nowhere to
+  actually put the photo. This is the explicit prerequisite for the AI
+  opportunities list's "Proof-of-delivery photo verification via a
+  vision-capable model" item - there's nothing reliable for a vision model
+  to verify until real bytes are stored somewhere this app controls.
+  Storage choice: local disk under a configurable upload directory (e.g.
+  UPLOAD_DIR, default ./uploads), not a cloud object-storage vendor. This
+  repo has one paid external dependency today (ANTHROPIC_API_KEY) and
+  deliberately avoided a second one for AI embeddings (see the "ask your
+  data" assistant's FULLTEXT-over-embeddings design choice); the same
+  reasoning applies here - local disk needs zero new credentials and works
+  immediately in dev and a single-instance deployment. Revisit if/when the
+  "finish up manual deploy steps" item lands on a platform with an
+  ephemeral filesystem (most container platforms wipe local disk on
+  redeploy) - swapping to an S3-compatible bucket later is a contained
+  change (one new module behind the same store/serve interface), not a
+  rearchitecture.
+  New pieces:
+    - An UploadedFile model + table (id, org_id, content_type, byte_size,
+      storage_path, uploaded_at) - tracks ownership so a file can be
+      org-scoped and served securely, rather than trusting a bare
+      filesystem path from the client.
+    - POST /api/orgs/{id}/uploads (multipart/form-data, one file field,
+      needs the actix-multipart crate - a real new dependency, unlike the
+      AI features' "no new vendor" constraint, which was specifically
+      about paid AI vendors). Validates content-type (image/jpeg,
+      image/png, image/webp only - this is for a signature or package
+      photo, not arbitrary file upload) and size (cap at a few MB), writes
+      the file to disk under a UUID-derived path, inserts the UploadedFile
+      row, returns {id, url}.
+    - GET /api/uploads/{id} - AuthenticatedOrg-gated, 403s if the file's
+      org_id doesn't match the caller, streams the stored bytes back with
+      the stored content-type.
+  No schema change needed on ProofOfDelivery/DispatchOrder at all -
+  signature_or_photo_url keeps being "a URL", it's just now one our own
+  backend serves: the frontend calls the upload route first and passes
+  the returned url into the existing PUT /api/dispatches/{id}/status
+  payload exactly as today.
+  Frontend: replace the "Signature / Photo URL" text input in the
+  delivery-confirmation form with a real <input type="file"> (image/*),
+  uploading on selection and disabling "Confirm Delivery" until the
+  upload resolves; the existing "View signature/photo" link keeps working
+  unchanged since it's still just an <a href>.
+  Tests: Rust route tests for the upload/serve routes (401/403,
+  content-type/size rejection, org-scoping on GET - a different org's
+  token must not be able to fetch another org's file); a Playwright flow
+  uploading a real small test image through the delivery-confirmation
+  form and confirming the "View signature/photo" link resolves to the
+  uploaded image.
+  Implemented per the plan above. New src/logistics/upload/upload.rs:
+  UploadedFile (id, org_id, content_type, byte_size, storage_path,
+  uploaded_at) + UploadedFiles table; `store()` validates content type
+  (image/jpeg, image/png, image/webp only) and size (5 MiB cap), writes to
+  `{UPLOAD_DIR}/{uuid}.{ext}` (UPLOAD_DIR env var, default ./uploads), and
+  records the row; `get_by_id` / `read_bytes` for serving it back. Routes
+  (routes.rs): POST /api/orgs/{id}/uploads (Admin | Dispatcher, matching
+  who can mark a dispatch DELIVERED) takes actix-multipart's Multipart
+  stream, validates the single `file` field's content type and a running
+  byte count against the cap while streaming (never buffers past the
+  limit), stores it, returns {id, url: "/api/uploads/{id}"}; GET
+  /api/uploads/{id} (any authenticated org member) streams the bytes back
+  with the stored content type, 403 if the file belongs to a different
+  org, 404 if unknown. No schema change on ProofOfDelivery/DispatchOrder -
+  signature_or_photo_url is still just a URL string, now one this backend
+  serves. Frontend: the "Signature / Photo URL" text input became a real
+  <input type="file" accept="image/jpeg,image/png,image/webp"> (new
+  src/api/uploads.ts: uploadFile unsets the shared client's default
+  JSON Content-Type header so the browser computes the multipart boundary
+  itself; uploadedFileHref resolves the backend-relative path to a link
+  usable from the frontend's own origin in dev, or prefixed with the API's
+  origin when VITE_API_BASE_URL points at a separate domain - the backend
+  has no config for its own public URL). "Confirm Delivery" stays disabled
+  until the upload resolves, with an inline error on failure. Docker: the
+  runtime image gets a WORKDIR /app and a chown'd uploads dir so the
+  non-root `app` user can actually write to it; deploy/docker-compose.yml
+  gained a uploads-data volume mounted at /app/uploads so files survive a
+  redeploy on the Oracle VM target (this repo's actual deploy target is a
+  persistent VM, not an ephemeral-filesystem PaaS, so this was addressed
+  now rather than deferred). 5 new Rust unit tests (upload.rs: rejects bad
+  content type / empty / oversized bytes, a real store round-trips through
+  get_by_id including reading real bytes off disk, unknown id -> None), 8
+  new Rust route tests (stores and serves back byte-for-byte with the
+  right content type; 401 with no token; 403 for a different org's token
+  on both POST and GET; 403 for a non-dispatch role; 400 for an
+  unsupported content type / oversized file; 404 for an unknown id), 2 new
+  frontend api-client tests, 4 new/updated Dispatches page tests (upload
+  succeeds and unblocks Confirm Delivery, upload fails and keeps it
+  disabled, the pre-existing lifecycle test switched from typing a URL to
+  uploading a file). Playwright: dispatches.spec.ts's delivery-lifecycle
+  flow and e2e-full-flow.spec.ts's delivery step both switched to
+  `setInputFiles` with a real small in-memory PNG and now also follow the
+  "View signature/photo" link and fetch it directly to confirm it resolves
+  to the uploaded bytes; new standalone demo file-uploads.demo.ts
+  (`npm run test:e2e:demo:uploads`). Full `cargo test --lib` (363 tests),
+  `npm run test:unit` (209 tests) and `npm run test:e2e` (67 tests) all
+  green, apart from a pre-existing flaky pair in dispatches.spec.ts
+  ("dispatches table shows vehicle, customer and order details" / "dispatch
+  several stock lines in one order") already flagged as unrelated
+  pre-existing flakiness by an earlier todo entry (AI-personalized
+  notification copy) - confirmed again here: they don't touch upload code,
+  my diff doesn't touch them, and DB inspection after a failing run showed
+  the vehicle/driver data was actually correct (a timing race between the
+  test and a UI re-fetch, not a logic bug). README, docs/dispatch-lifecycle.md
+  and deploy/README.md updated; new docs/file-uploads.md.
+  Plan/context: [[file:docs/file-uploads.md]]
+* DONE Route optimization for multi-stop trips - auto-order a trip's stops by proximity instead of always visiting them in the exact order the caller gave
+  docs/multi-stop-routes.md's "Not done here" section flagged this
+  explicitly: "No optimise the stop order - the sequence is exactly what
+  the caller gives." Implemented as an opt-in `optimize_route` flag on
+  trip creation rather than a change of default behaviour, so every
+  existing caller/test that doesn't ask for it keeps the exact order it
+  always got.
+  New pure module src/logistics/dispatch/route.rs (no DB, no I/O):
+  `haversine_distance_km` (moved out of orgs.rs, which now imports it) and
+  `nearest_neighbor_order(start, points)` - a greedy nearest-neighbour
+  heuristic, hopping to whichever remaining point is closest to wherever
+  the walk currently is. True "shortest tour visiting every point" (TSP)
+  is NP-hard; nearest-neighbour is a fast, standard approximation that's
+  good enough for the handful of stops a real delivery trip has.
+  `Organization::dispatch_trip_to_customers` gained an `optimize_route:
+  bool` parameter. When true, stops 2..N are reordered by
+  `nearest_neighbor_order` *before* stock is planned - stop 1 always stays
+  the fixed starting point (and the point vehicle selection still anchors
+  on, so which vehicle gets picked never changes). Reordering has to
+  happen before planning, not as a cosmetic re-sort of the result
+  afterward, because which stop's request gets satisfied first matters
+  when two stops on the trip's shared, decrementing stock snapshot want
+  more of an item than is on hand.
+  Route (Admin | Dispatcher): `POST /api/orgs/{id}/trips` gained an
+  `optimize_route` field on `CreateTripPayload` (`#[serde(default)]`,
+  defaults false), threaded straight through.
+  Frontend: an "Optimize stop order" checkbox on the Trips page's trip
+  planning form; `createTrip(orgId, stops, optimizeRoute = false)` sends
+  it as `optimize_route`.
+  7 new Rust unit tests for the pure route module (haversine sanity, an
+  already-sorted input is the identity, an out-of-order input gets
+  reordered, permutation-of-every-index, empty/single-point input, and
+  optimized-never-worse-than-given-order on a scattered case), 2 new
+  `dispatch_trip_to_customers` tests (optimize reorders keeping stop 1
+  fixed / without the flag the caller's order is kept exactly), 1 new
+  route test exercising it end-to-end through the API. 2 new frontend
+  api-client tests, 2 new Trips page tests (checkbox wiring, and the
+  existing create-trip test updated for the new payload field). 2
+  Playwright flows (trips.spec.ts) plus the existing trips.demo.ts
+  standalone walkthrough (`npm run test:e2e:demo:trips`) updated to give
+  its three stops out of nearest-first order and check the box, so the
+  reordering is visibly demonstrated rather than a no-op. Full `cargo test
+  --lib` (350 tests), `npm run test:unit` (203 tests) and `npm run
+  test:e2e` (67 tests) all green with no regressions. README's
+  multi-stop-trips bullet and docs/multi-stop-routes.md updated (new
+  "Route optimization" section; the "Not done here" line about it
+  removed).
+  Plan/context: [[file:docs/multi-stop-routes.md]]
+* TODO Investigate how to raise invoice, what should be the due date ?
+* DONE [#B] Vehicle-to-trip live location tracking - show a trip's assigned vehicle moving across its planned stops on a live map, instead of GPS location only being visible in isolation on the Vehicles page
+  The Vehicles page (LocationMap.tsx) and the GPS tracker-key push endpoint
+  (POST /api/track/{tracker_key}) already exist, but a trip's stops
+  (Trips/Dispatches pages) show no map at all - there's no way to watch a
+  vehicle progress through a planned multi-stop route. Surfaced while
+  researching feature gaps against real-world TMS/fleet platforms.
+  No backend changes needed - Vehicle.location, Customer.location and
+  Trip.vehicle_registration_number/stops already carried everything
+  required; this was purely wiring existing data together on the frontend.
+  Trips.tsx now also fetches listVehicles() alongside trips/customers, and
+  each trip card gets a "📍 Route map" toggle (matching the existing
+  toggle-on-click convention used by the Dispatches page's notifications
+  column) that renders the shared LocationMap component with one pin for
+  the assigned vehicle's last-reported GPS position (label + last-reported
+  timestamp) plus one pin per stop whose customer has a location on file
+  (label + dispatch status), falling back to an inline message when neither
+  the vehicle nor any stop has location data yet. 2 new Trips.tsx unit
+  tests (pins render correctly with mixed located/unlocated data; the
+  fallback message when nothing is located) plus the existing suite updated
+  to mock listVehicles/LocationMap, 1 new Playwright flow (trips.spec.ts)
+  pushing a manual vehicle location update and asserting the map's marker
+  count, and the standalone `npm run test:e2e:demo:trips` walkthrough
+  extended with a GPS push + a closing step opening the route map. `npx tsc
+  -b` and `npm run test:unit` (211 tests) both clean; trips.spec.ts (4
+  tests) and the demo both pass headed and headless.
+* TODO Delay/ETA-drift alerts - notify when an in-transit dispatch is running late against its planned schedule
+  Reuses the existing Twilio/Resend notification delivery pipeline
+  (src/logistics/notification) verbatim - just a new trigger condition, no
+  new delivery mechanism. Needs a "planned/expected" time reference to
+  compare against, which OpsReport's on-time-rate calculation already
+  assumes (currently a fixed 72h target, see docs/reports.md) - may need a
+  per-dispatch promised-date field instead of the fixed target.
+* TODO Preventive maintenance scheduling - service due by mileage/date, with alerts, for vehicles
+  Reuses the existing VehicleDocument compliance-expiry pattern
+  (src/logistics/vehicle/document.rs: ExpiringSoon/Expired status,
+  days_until_expiry, renewal reminders on the org detail page) almost
+  exactly, just for maintenance due-dates instead of paperwork expiry.

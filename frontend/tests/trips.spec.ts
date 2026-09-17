@@ -50,4 +50,47 @@ test.describe('Multi-stop trips', () => {
     await expect(page.getByText('Trip · stop 1')).toBeVisible({ timeout: 8000 });
     await expect(page.getByText('Trip · stop 2')).toBeVisible();
   });
+
+  test('the route map shows the vehicle and every located stop, and hides again on toggle', async ({ page }) => {
+    const org = await registerOrg(page, `Trip Map ${uid()}`);
+    const stock = `Cement ${uid()}`;
+
+    const reg = `TM${uid().toUpperCase()}`;
+    await api(page, 'post', `/api/orgs/${org.id}/vehicles`, { registration_number: reg, capacity: 100000, unit: 'MetricTon' });
+    const driver = await api(page, 'post', `/api/orgs/${org.id}/drivers`, { name: 'Trip Driver', license_number: `L${uid()}`, phone: '0' });
+    await api(page, 'put', `/api/vehicles/${encodeURIComponent(reg)}/driver`, { driver_id: driver.data.id });
+    const godown = await api(page, 'post', `/api/orgs/${org.id}/godowns`, { name: 'G', address: '1 Rd' });
+    await api(page, 'post', `/api/godowns/${godown.data.id}/stock`, { description: stock, quantity: 500, volume_in_size: 1 });
+
+    // A trip requires every stop's customer to already have a delivery
+    // location, so both need one here; the vehicle's own GPS location comes
+    // from a separate manual location update, same as a tracker push would.
+    const c1 = `North ${uid()}`;
+    const c2 = `South ${uid()}`;
+    await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: c1, address: 'a', latitude: 19.0, longitude: 72.8 });
+    await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: c2, address: 'b', latitude: 19.1, longitude: 72.9 });
+    await api(page, 'put', `/api/vehicles/${encodeURIComponent(reg)}/location`, { latitude: 19.02, longitude: 72.82 });
+
+    await page.goto('/trips');
+    await page.getByRole('button', { name: /plan a trip/i }).click();
+    await page.getByLabel(/stop 1 — customer/i).selectOption({ label: c1 });
+    await page.getByLabel(/stock item/i).first().fill(stock);
+    await page.getByLabel(/quantity/i).first().fill('10');
+    await page.getByLabel(/stop 2 — customer/i).selectOption({ label: c2 });
+    await page.getByLabel(/stock item/i).nth(1).fill(stock);
+    await page.getByLabel(/quantity/i).nth(1).fill('10');
+    await page.getByRole('button', { name: /^plan trip$/i }).click();
+
+    const card = page.locator('.section-card', { hasText: reg });
+    await expect(card).toBeVisible({ timeout: 8000 });
+    await expect(card.locator('.leaflet-container')).toHaveCount(0);
+
+    await card.getByRole('button', { name: /route map/i }).click();
+    await expect(card.locator('.leaflet-container')).toBeVisible();
+    // One pin for the vehicle's current location, one per stop.
+    await expect(card.locator('.leaflet-marker-icon')).toHaveCount(3);
+
+    await card.getByRole('button', { name: /hide map/i }).click();
+    await expect(card.locator('.leaflet-container')).toHaveCount(0);
+  });
 });
