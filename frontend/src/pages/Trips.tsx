@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listOrgTrips, createTrip, type TripStopInput } from '../api/trips';
 import { listCustomers } from '../api/customers';
+import { listVehicles } from '../api/vehicles';
 import { getOrgId } from '../api/auth';
 import { IconDispatch, IconPlus, IconX, IconTruck } from '../components/Icons';
 import { STATUS_TAG_CLASS, formatStatus } from '../lib/dispatchLifecycle';
-import type { Customer, Trip, TripStatus } from '../types';
+import LocationMap, { type MapPin } from '../components/LocationMap';
+import type { Customer, Trip, TripStatus, Vehicle } from '../types';
 import './page.css';
 
 const TRIP_TAG: Record<TripStatus, string> = {
@@ -24,17 +26,20 @@ const emptyStop = (): StopDraft => ({ customerId: '', description: '', quantity:
 export default function Trips() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [stops, setStops] = useState<StopDraft[]>([emptyStop(), emptyStop()]);
+  const [optimizeRoute, setOptimizeRoute] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [mapOpenId, setMapOpenId] = useState<string | null>(null);
 
   const load = () => {
     const orgId = getOrgId();
     if (!orgId) { setLoading(false); return; }
-    Promise.all([listOrgTrips(orgId), listCustomers()])
-      .then(([t, c]) => { setTrips(t.data ?? []); setCustomers(c.data ?? []); })
+    Promise.all([listOrgTrips(orgId), listCustomers(), listVehicles()])
+      .then(([t, c, v]) => { setTrips(t.data ?? []); setCustomers(c.data ?? []); setVehicles(v.data ?? []); })
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -42,6 +47,34 @@ export default function Trips() {
   const custName = (id: string) => customers.find(c => c.id === id)?.name ?? id.slice(0, 8);
   const setStop = (i: number, patch: Partial<StopDraft>) =>
     setStops(prev => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+
+  // The trip's assigned vehicle (if its GPS tracker has reported a location)
+  // plus every stop whose customer has a location on file — so the map shows
+  // where the truck is relative to where it's still headed.
+  const tripPins = (t: Trip): MapPin[] => {
+    const pins: MapPin[] = [];
+    const vehicle = vehicles.find(v => v.registration_number === t.vehicle_registration_number);
+    if (vehicle?.location) {
+      pins.push({
+        lat: vehicle.location.latitude,
+        lng: vehicle.location.longitude,
+        label: `🚚 ${vehicle.registration_number}`,
+        detail: `Last reported ${new Date(vehicle.location.timestamp * 1000).toLocaleString()}`,
+      });
+    }
+    for (const s of t.stops) {
+      const c = customers.find(cust => cust.id === s.customer_id);
+      if (c?.location) {
+        pins.push({
+          lat: c.location.latitude,
+          lng: c.location.longitude,
+          label: `Stop ${s.stop_sequence}: ${c.name}`,
+          detail: formatStatus(s.status),
+        });
+      }
+    }
+    return pins;
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,8 +96,9 @@ export default function Trips() {
     setSubmitting(true);
     setError('');
     try {
-      await createTrip(orgId, payload);
+      await createTrip(orgId, payload, optimizeRoute);
       setStops([emptyStop(), emptyStop()]);
+      setOptimizeRoute(false);
       setShowForm(false);
       load();
     } catch (err) {
@@ -118,6 +152,15 @@ export default function Trips() {
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStops(prev => [...prev, emptyStop()])} style={{ marginBottom: 12 }}>
               <IconPlus size={12} />Add another stop
             </button>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={optimizeRoute}
+                onChange={e => setOptimizeRoute(e.target.checked)}
+                style={{ width: 15, height: 15 }}
+              />
+              Optimize stop order (visit the nearest stops first, after Stop 1)
+            </label>
             {error && <div className="errortxt" style={{ marginBottom: 12 }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" type="submit" disabled={submitting}>
@@ -150,8 +193,26 @@ export default function Trips() {
                     <IconTruck size={15} />{t.vehicle_registration_number}
                     <span className="mono muted" style={{ marginLeft: 8 }}>{t.id.slice(0, 8)}…</span>
                   </span>
-                  <span className={`status-tag ${TRIP_TAG[t.status]}`}>{t.status.replace('_', ' ')}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span className={`status-tag ${TRIP_TAG[t.status]}`}>{t.status.replace('_', ' ')}</span>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setMapOpenId(mapOpenId === t.id ? null : t.id)}
+                      aria-label={mapOpenId === t.id ? `Hide map for ${t.vehicle_registration_number}` : `Route map for ${t.vehicle_registration_number}`}
+                    >
+                      {mapOpenId === t.id ? 'Hide map' : '📍 Route map'}
+                    </button>
+                  </div>
                 </div>
+                {mapOpenId === t.id && (
+                  tripPins(t).length > 0 ? (
+                    <LocationMap pins={tripPins(t)} height="280px" />
+                  ) : (
+                    <p className="muted" style={{ padding: '0 16px' }}>
+                      No location data yet — the vehicle hasn't reported GPS coordinates and none of this trip's customers have a location on file.
+                    </p>
+                  )
+                )}
                 <div className="table-wrap">
                   <table>
                     <thead>
