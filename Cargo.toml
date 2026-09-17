@@ -20,6 +20,8 @@ edition = "2024"
  jsonwebtoken = "9"
  bcrypt = "0.15"
  reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+ actix-multipart = "0.7"
+ futures-util = "0.3"
 
 [dev-dependencies]
  actix-http = "3"

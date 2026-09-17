@@ -3,6 +3,7 @@ import { listDispatches, getDispatchSummary, updateDispatchStatus } from '../api
 import { getOrg } from '../api/orgs';
 import { listOrgInvoices, createDispatchInvoice, payInvoice } from '../api/billing';
 import { listDispatchNotifications } from '../api/notifications';
+import { uploadFile, uploadedFileHref } from '../api/uploads';
 import { getOrgId } from '../api/auth';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, type NextAction } from '../lib/dispatchLifecycle';
@@ -34,6 +35,8 @@ export default function Dispatches() {
   const [podDraft, setPodDraft] = useState<{ order: DispatchOrder; action: NextAction } | null>(null);
   const [podReceiver, setPodReceiver] = useState('');
   const [podUrl, setPodUrl] = useState('');
+  const [podUploading, setPodUploading] = useState(false);
+  const [podUploadError, setPodUploadError] = useState('');
 
   const [godowns, setGodowns] = useState<{ id: string; name: string }[]>([]);
   const [returnDraft, setReturnDraft] = useState<{ order: DispatchOrder; action: NextAction } | null>(null);
@@ -153,6 +156,7 @@ export default function Dispatches() {
         setPodDraft(null);
         setPodReceiver('');
         setPodUrl('');
+        setPodUploadError('');
         setReturnDraft(null);
         setReturnGodownId('');
       } else {
@@ -173,6 +177,7 @@ export default function Dispatches() {
       setPodDraft({ order, action });
       setPodReceiver('');
       setPodUrl('');
+      setPodUploadError('');
       return;
     }
     if (action.isReturn) {
@@ -181,6 +186,27 @@ export default function Dispatches() {
       return;
     }
     applyStatus(order, action);
+  }
+
+  async function handlePodFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const orgId = getOrgId();
+    if (!file || !orgId) return;
+    setPodUploading(true);
+    setPodUploadError('');
+    setPodUrl('');
+    try {
+      const res = await uploadFile(orgId, file);
+      if (res.data) {
+        setPodUrl(uploadedFileHref(res.data.url));
+      } else {
+        setPodUploadError(res.message || 'Upload failed.');
+      }
+    } catch {
+      setPodUploadError('Upload failed — only JPEG, PNG or WEBP images up to 5MB are accepted.');
+    } finally {
+      setPodUploading(false);
+    }
   }
 
   function handleConfirmDelivery() {
@@ -413,18 +439,21 @@ export default function Dispatches() {
                               />
                             </div>
                             <div className="field" style={{ marginBottom: 0 }}>
-                              <label htmlFor={`pod-url-${o.id}`}>Signature / Photo URL</label>
+                              <label htmlFor={`pod-file-${o.id}`}>Signature / Photo</label>
                               <input
-                                id={`pod-url-${o.id}`}
-                                value={podUrl}
-                                onChange={e => setPodUrl(e.target.value)}
-                                placeholder="https://…"
+                                id={`pod-file-${o.id}`}
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={handlePodFileChange}
                               />
+                              {podUploading && <span className="muted" style={{ fontSize: 12 }}>Uploading…</span>}
+                              {!podUploading && podUrl && <span className="successtxt" style={{ fontSize: 12 }}>Uploaded ✓</span>}
+                              {podUploadError && <div className="errortxt" style={{ fontSize: 12 }}>{podUploadError}</div>}
                             </div>
                             <button
                               className="btn btn-primary btn-sm"
                               onClick={handleConfirmDelivery}
-                              disabled={!podReceiver.trim() || !podUrl.trim() || actionLoadingId === o.id}
+                              disabled={!podReceiver.trim() || !podUrl.trim() || podUploading || actionLoadingId === o.id}
                             >
                               <IconCheck size={13} /> Confirm Delivery
                             </button>

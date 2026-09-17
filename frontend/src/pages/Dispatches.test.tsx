@@ -8,6 +8,7 @@ import * as orgsApi from '../api/orgs';
 import * as billingApi from '../api/billing';
 import * as notificationsApi from '../api/notifications';
 import * as authApi from '../api/auth';
+import * as uploadsApi from '../api/uploads';
 import type { DispatchOrder, Invoice } from '../types';
 
 vi.mock('../api/dispatches');
@@ -15,6 +16,7 @@ vi.mock('../api/orgs');
 vi.mock('../api/billing');
 vi.mock('../api/notifications');
 vi.mock('../api/auth');
+vi.mock('../api/uploads');
 
 function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
   return {
@@ -132,6 +134,10 @@ describe('Dispatches page', () => {
       ],
     });
     vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+    vi.mocked(uploadsApi.uploadFile).mockResolvedValue({
+      success: true, message: '', data: { id: 'file-1', url: '/api/uploads/file-1' },
+    });
+    vi.mocked(uploadsApi.uploadedFileHref).mockImplementation(path => path);
     vi.mocked(dispatchesApi.updateDispatchStatus).mockResolvedValue({
       success: true,
       message: 'Dispatch status updated to DELIVERED',
@@ -140,7 +146,7 @@ describe('Dispatches page', () => {
         status: 'DELIVERED',
         proof_of_delivery: {
           receiver_name: 'Priya Sharma',
-          signature_or_photo_url: 'https://example.com/sig.png',
+          signature_or_photo_url: '/api/uploads/file-1',
           delivered_at: 3,
         },
       },
@@ -157,17 +163,18 @@ describe('Dispatches page', () => {
     expect(confirmBtn).toBeDisabled();
 
     await user.type(screen.getByLabelText(/receiver name/i), 'Priya Sharma');
-    expect(confirmBtn).toBeDisabled(); // still missing the photo/signature URL
+    expect(confirmBtn).toBeDisabled(); // still missing the photo/signature
 
-    await user.type(screen.getByLabelText(/signature.*photo url/i), 'https://example.com/sig.png');
-    expect(confirmBtn).toBeEnabled();
+    const file = new File(['fake-bytes'], 'sig.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText(/signature \/ photo/i), file);
+    await waitFor(() => expect(confirmBtn).toBeEnabled());
 
     await user.click(confirmBtn);
 
     expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith(
       'order-1',
       'DELIVERED',
-      { receiver_name: 'Priya Sharma', signature_or_photo_url: 'https://example.com/sig.png' },
+      { receiver_name: 'Priya Sharma', signature_or_photo_url: '/api/uploads/file-1' },
       undefined,
     );
     await waitFor(() => expect(screen.getByText('DELIVERED')).toBeInTheDocument());
@@ -318,5 +325,65 @@ describe('Dispatches page', () => {
     // QUEUED and SKIPPED.
     const failedTag = screen.getByText('FAILED');
     expect(failedTag).toHaveClass('tag-red');
+  });
+
+  it('uploads a proof-of-delivery photo and confirms delivery with the uploaded URL', async () => {
+    const user = userEvent.setup();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true, message: '', data: [makeOrder({ status: 'IN_TRANSIT' })],
+    });
+    vi.mocked(uploadsApi.uploadFile).mockResolvedValue({
+      success: true, message: '', data: { id: 'file-1', url: '/api/uploads/file-1' },
+    });
+    vi.mocked(uploadsApi.uploadedFileHref).mockImplementation(path => path);
+    vi.mocked(dispatchesApi.updateDispatchStatus).mockResolvedValue({
+      success: true, message: '', data: makeOrder({ status: 'DELIVERED' }),
+    });
+
+    render(<Dispatches />);
+    await user.click(await screen.findByRole('button', { name: /mark delivered/i }));
+    await user.type(screen.getByLabelText(/receiver name/i), 'Ramesh');
+
+    const confirmBtn = screen.getByRole('button', { name: /confirm delivery/i });
+    expect(confirmBtn).toBeDisabled();
+
+    const file = new File(['fake-bytes'], 'pod.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText(/signature \/ photo/i), file);
+
+    expect(uploadsApi.uploadFile).toHaveBeenCalledWith('org-1', file);
+    await waitFor(() => expect(confirmBtn).not.toBeDisabled());
+    expect(screen.getByText(/uploaded/i)).toBeInTheDocument();
+
+    await user.click(confirmBtn);
+    await waitFor(() =>
+      expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith(
+        'order-1',
+        'DELIVERED',
+        { receiver_name: 'Ramesh', signature_or_photo_url: '/api/uploads/file-1' },
+        undefined,
+      ),
+    );
+  });
+
+  it('shows an error and keeps Confirm Delivery disabled when the upload fails', async () => {
+    const user = userEvent.setup();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true, message: '', data: [makeOrder({ status: 'IN_TRANSIT' })],
+    });
+    vi.mocked(uploadsApi.uploadFile).mockRejectedValue(new Error('unsupported content type'));
+
+    render(<Dispatches />);
+    await user.click(await screen.findByRole('button', { name: /mark delivered/i }));
+    await user.type(screen.getByLabelText(/receiver name/i), 'Ramesh');
+
+    // A valid image type — the point of this test is the server rejecting
+    // the upload (e.g. it decides the bytes aren't really an image), which
+    // the browser's `accept` filter wouldn't catch anyway.
+    const file = new File(['not actually an image'], 'pod.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText(/signature \/ photo/i), file);
+
+    expect(await screen.findByText(/upload failed/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm delivery/i })).toBeDisabled();
+    expect(dispatchesApi.updateDispatchStatus).not.toHaveBeenCalled();
   });
 });

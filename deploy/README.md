@@ -107,7 +107,10 @@ After the first release publishes the image, either:
 
 ## Backups
 
-MySQL data lives in the `db-data` Docker volume on the VM. A minimal daily dump:
+MySQL data lives in the `db-data` Docker volume on the VM; uploaded files
+(e.g. proof-of-delivery photos — see `docs/file-uploads.md`) live in
+`uploads-data`, mounted at `/app/uploads` in the `api` container. A minimal
+daily dump of the database:
 ```bash
 mkdir -p ~/backups
 ( crontab -l 2>/dev/null; echo '15 2 * * * cd ~/logistics-deploy && docker compose --env-file .env exec -T db sh -c "mysqldump -uroot -p\$MYSQL_ROOT_PASSWORD \$MYSQL_DATABASE" | gzip > ~/backups/logistics-$(date +\%F).sql.gz && find ~/backups -name "*.sql.gz" -mtime +14 -delete' ) | crontab -

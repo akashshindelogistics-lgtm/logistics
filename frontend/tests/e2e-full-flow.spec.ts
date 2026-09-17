@@ -233,8 +233,12 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     const confirmDeliveryBtn = page.getByRole('button', { name: /confirm delivery/i });
     await expect(confirmDeliveryBtn).toBeDisabled();
     await page.getByLabel(/receiver name/i).fill('Anita Rao');
-    await page.getByLabel(/signature.*photo url/i).fill('https://example.com/pod/sig.png');
-    await expect(confirmDeliveryBtn).toBeEnabled();
+    await page.getByLabel(/signature \/ photo/i).setInputFiles({
+      name: 'signature.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('fake png bytes for the e2e test'),
+    });
+    await expect(confirmDeliveryBtn).toBeEnabled({ timeout: 8000 });
     await confirmDeliveryBtn.click();
 
     await expect(row.getByText('DELIVERED', { exact: true })).toBeVisible({ timeout: 8000 });

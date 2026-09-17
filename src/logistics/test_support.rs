@@ -344,6 +344,19 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
         )",
     )
     .expect("migrate: create OrgUsers");
+
+    conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS UploadedFiles (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            content_type VARCHAR(64) NOT NULL,
+            byte_size BIGINT NOT NULL,
+            storage_path VARCHAR(512) NOT NULL,
+            uploaded_at BIGINT NOT NULL,
+            CONSTRAINT fk_uploaded_file_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create UploadedFiles");
 }
 
 /// A private, uniquely-named MySQL database scoped to exactly one test.

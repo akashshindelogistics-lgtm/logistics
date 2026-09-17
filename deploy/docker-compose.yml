@@ -35,6 +35,9 @@ services:
       # Required — the release binary refuses to start without it.
       JWT_SECRET: ${JWT_SECRET}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads-data:/app/uploads
     expose:
       - "8080"
 
@@ -65,5 +68,6 @@ services:
 
 volumes:
   db-data:
+  uploads-data:
   caddy-data:
   caddy-config:

@@ -30,6 +30,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -r -u 10001 app
 
+# Uploaded files (e.g. proof-of-delivery photos — see docs/file-uploads.md)
+# are written under UPLOAD_DIR, which defaults to ./uploads — i.e. relative
+# to WORKDIR. Owned by the non-root `app` user so it's actually writable.
+WORKDIR /app
+RUN mkdir -p /app/uploads && chown app:app /app/uploads
+
 COPY --from=builder /usr/local/bin/logistics-system /usr/local/bin/logistics-system
 
 USER app

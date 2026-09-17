@@ -43,8 +43,9 @@ operations, live location maps, and AI-generated dispatch summaries.
   lifecycle (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/
   `RETURNED`/`CANCELLED`) with a full timestamped status history. Marking one
   `DELIVERED` requires proof of delivery (receiver name plus a
-  signature/photo); marking one `RETURNED` credits the shipment's stock back
-  into a godown.
+  signature/photo, uploaded and stored by the backend — see
+  [`docs/file-uploads.md`](docs/file-uploads.md)); marking one `RETURNED`
+  credits the shipment's stock back into a godown.
 - **Multi-stop trips** — plan one vehicle to visit several customers in a
   sequence; each stop is a normal dispatch with its own lifecycle, linked
   under a trip whose status is derived from its stops. Optionally
@@ -153,6 +154,10 @@ export TWILIO_AUTH_TOKEN="..."
 export TWILIO_FROM_NUMBER="+15551234567"
 export RESEND_API_KEY="re_..."
 export RESEND_FROM_EMAIL="dispatch@yourdomain.com"
+
+# Optional: where uploaded files (e.g. proof-of-delivery photos) are stored
+# on disk — see docs/file-uploads.md. Defaults to ./uploads.
+export UPLOAD_DIR="./uploads"
 
 cargo run
 ```
