@@ -852,13 +852,47 @@
   persistence) and Sidebar.test.tsx coverage for the toggle button; new
   Playwright flow frontend/tests/theme.spec.ts (switches to dark mode and
   confirms it persists across a reload).
-* TODO Delay/ETA-drift alerts - notify when an in-transit dispatch is running late against its planned schedule
+* DONE Delay/ETA-drift alerts - notify when an in-transit dispatch is running late against its planned schedule
   Reuses the existing Twilio/Resend notification delivery pipeline
   (src/logistics/notification) verbatim - just a new trigger condition, no
-  new delivery mechanism. Needs a "planned/expected" time reference to
-  compare against, which OpsReport's on-time-rate calculation already
-  assumes (currently a fixed 72h target, see docs/reports.md) - may need a
-  per-dispatch promised-date field instead of the fixed target.
+  new delivery mechanism. Rather than add a per-dispatch promised-date field
+  (a real schema/API change nobody has asked to customize yet), reused
+  OpsReport's existing fixed 72h target as its own constant,
+  `PROMISED_DELIVERY_HOURS` in src/logistics/dispatch/dispatch.rs - not
+  stored, computed from `dispatched_at` on every check, same as
+  `reports::ON_TIME_TARGET_HOURS` (a separate, ==-valued constant, not wired
+  together with it).
+  New `DispatchOrder::is_running_late()` (true when still IN_TRANSIT and
+  more than PROMISED_DELIVERY_HOURS past dispatched_at - never true once a
+  dispatch reaches a terminal status, however old), `hours_late()`, and
+  `list_in_transit()`. New src/logistics/notification/delay_alerts.rs:
+  `scan_and_alert()` loads every IN_TRANSIT dispatch, keeps the late ones,
+  skips any that already carry a DISPATCH_RUNNING_LATE notification (making
+  repeated/concurrent scans idempotent - never double-sends), and otherwise
+  records + delivers one via a new `Notification::record_dispatch_running_late`
+  (customer only, AI-personalized with the same fixed-template fallback as
+  every other notification). main.rs spawns this on a 15-minute tokio timer
+  for the process's lifetime - this app's actual deploy target is a
+  persistent VM, not an ephemeral-per-request platform, so no new
+  infrastructure was needed. No new route; nothing else calls it.
+  Frontend: no new API call - frontend/src/lib/dispatchLifecycle.ts's
+  `isRunningLate()` mirrors the same PROMISED_DELIVERY_HOURS check
+  client-side from data a dispatch already carries, and the Dispatches page
+  shows a red "⚠ Running late" badge next to the status tag.
+  4 new Rust unit tests (dispatch.rs: is_running_late/hours_late true/false
+  cases, including every terminal status staying false regardless of age),
+  4 new Rust integration tests (delay_alerts.rs: sends exactly one alert for
+  a real, backdated dispatch; never double-sends on a second scan; skips one
+  still within its window; skips one no longer IN_TRANSIT), 2 new AI
+  notification-copy tests. 2 new frontend unit tests
+  (dispatchLifecycle.test.ts) plus 3 new Dispatches.test.tsx cases (badge
+  shows for an overdue IN_TRANSIT order, not for a recent one, not for an old
+  but terminal one). No Playwright coverage of the badge itself -
+  `dispatched_at` is stamped server-side and isn't caller-settable through
+  the public API, so there's no way to backdate a dispatch from a real
+  browser flow without a test-only backdoor; see docs/delay-alerts.md's
+  "Known limitations". `cargo test --lib` and `npm run test:unit` both green.
+  Plan/context: [[file:docs/delay-alerts.md]]
 * TODO Preventive maintenance scheduling - service due by mileage/date, with alerts, for vehicles
   Reuses the existing VehicleDocument compliance-expiry pattern
   (src/logistics/vehicle/document.rs: ExpiringSoon/Expired status,

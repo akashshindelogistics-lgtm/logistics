@@ -87,6 +87,49 @@ describe('Dispatches page', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
+  it('shows a "Running late" badge for an IN_TRANSIT order past its promised delivery window', async () => {
+    const longAgo = Math.floor(Date.now() / 1000) - 100 * 3600; // 100h ago > 72h target
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true,
+      message: '',
+      data: [makeOrder({ status: 'IN_TRANSIT', dispatched_at: longAgo })],
+    });
+    render(<Dispatches />);
+
+    await screen.findByText('IN TRANSIT');
+    expect(screen.getByText(/running late/i)).toBeInTheDocument();
+  });
+
+  it('does not show a "Running late" badge for a recent IN_TRANSIT order', async () => {
+    const recently = Math.floor(Date.now() / 1000) - 3600; // 1h ago, well under 72h
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true,
+      message: '',
+      data: [makeOrder({ status: 'IN_TRANSIT', dispatched_at: recently })],
+    });
+    render(<Dispatches />);
+
+    await screen.findByText('IN TRANSIT');
+    expect(screen.queryByText(/running late/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show a "Running late" badge for an old but terminal (DELIVERED) order', async () => {
+    const longAgo = Math.floor(Date.now() / 1000) - 500 * 3600;
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true,
+      message: '',
+      data: [makeOrder({
+        status: 'DELIVERED',
+        dispatched_at: longAgo,
+        proof_of_delivery: { receiver_name: 'R', signature_or_photo_url: 'https://x/y.png', delivered_at: longAgo },
+      })],
+    });
+    render(<Dispatches />);
+
+    await screen.findByText('DELIVERED');
+    expect(screen.queryByText(/running late/i)).not.toBeInTheDocument();
+  });
+
   it('shows no lifecycle actions for a terminal status', async () => {
     vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
       success: true,

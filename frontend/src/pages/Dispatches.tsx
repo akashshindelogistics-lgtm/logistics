@@ -6,7 +6,7 @@ import { listDispatchNotifications } from '../api/notifications';
 import { uploadFile, uploadedFileHref } from '../api/uploads';
 import { getOrgId } from '../api/auth';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
-import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, type NextAction } from '../lib/dispatchLifecycle';
+import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, isRunningLate, type NextAction } from '../lib/dispatchLifecycle';
 import type { DispatchOrder, Invoice, Notification, NotificationStatus, PaymentStatus } from '../types';
 import './page.css';
 
@@ -308,7 +308,14 @@ export default function Dispatches() {
                         </span>
                         <span className="muted" style={{ marginLeft: 4 }}>units</span>
                       </td>
-                      <td><span className={`status-tag ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span></td>
+                      <td>
+                        <span className={`status-tag ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span>
+                        {isRunningLate(o) && (
+                          <span className="status-tag tag-red" style={{ marginLeft: 6 }} title="Still in transit past its expected delivery window">
+                            ⚠ Running late
+                          </span>
+                        )}
+                      </td>
                       <td data-testid="billing-cell">
                         {invoices[o.id] ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>

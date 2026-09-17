@@ -401,11 +401,40 @@ pub struct DispatchOrder {
     pub stop_sequence: Option<i64>,
 }
 
+/// A dispatch is expected to reach `DELIVERED` within this many hours of
+/// being created — the same fleet-wide target `reports::ON_TIME_TARGET_HOURS`
+/// uses for the on-time rate (there is no per-order promised-date field yet;
+/// see docs/delay-alerts.md). Drives [`DispatchOrder::is_running_late`],
+/// which the delay-alert scan (`notification::delay_alerts`) uses to notify a
+/// customer whose shipment has overrun it while still `IN_TRANSIT`.
+pub const PROMISED_DELIVERY_HOURS: f64 = 72.0;
+
 impl DispatchOrder {
     /// Total units across every line item — the old single `quantity` field's
     /// closest equivalent, for summaries and display.
     pub fn total_quantity(&self) -> i64 {
         self.line_items.iter().map(|li| li.quantity).sum()
+    }
+
+    /// Whether this dispatch has overrun [`PROMISED_DELIVERY_HOURS`] since it
+    /// was created and is still `IN_TRANSIT` — i.e. still on the road, later
+    /// than it should be. A dispatch that has already reached a terminal
+    /// status (delivered, returned, cancelled) is never "late", however old
+    /// it is; there's nothing left to alert anyone about.
+    pub fn is_running_late(&self) -> bool {
+        self.status == DispatchStatus::InTransit
+            && now_unix() - self.dispatched_at > (PROMISED_DELIVERY_HOURS * 3600.0) as i64
+    }
+
+    /// How many hours past [`PROMISED_DELIVERY_HOURS`] this dispatch is,
+    /// rounded down to whole hours for a human-readable alert. `None` when
+    /// [`Self::is_running_late`] is false.
+    pub fn hours_late(&self) -> Option<i64> {
+        if !self.is_running_late() {
+            return None;
+        }
+        let hours_since_dispatch = (now_unix() - self.dispatched_at) / 3600;
+        Some(hours_since_dispatch - PROMISED_DELIVERY_HOURS as i64)
     }
 
     /// Persist a newly created dispatch: the `Dispatches` row, one
@@ -705,6 +734,24 @@ impl DispatchOrder {
         Self::rows_to_orders(&mut conn, rows)
     }
 
+    /// Every dispatch currently `IN_TRANSIT`, across every organization. Used
+    /// by [`crate::logistics::notification::delay_alerts::scan_and_alert`] to
+    /// find candidates for a delay alert without loading dispatches that
+    /// can't possibly be "on the road" right now.
+    pub fn list_in_transit() -> Result<Vec<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        ensure_tables(&mut conn)?;
+
+        let rows: Vec<DispatchRow> = conn.exec(
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence
+             FROM Dispatches WHERE status = 'IN_TRANSIT'",
+            (),
+        )?;
+
+        Self::rows_to_orders(&mut conn, rows)
+    }
+
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
@@ -855,6 +902,40 @@ mod tests {
             proof_of_delivery: None,
             trip_id: None,
             stop_sequence: None,
+        }
+    }
+
+    /// `sample_order`, but `dispatched_at` set precisely `hours_ago` hours
+    /// before now instead of a fixed historical timestamp — for tests that
+    /// care about the gap between creation and now, like the delay checks
+    /// below.
+    fn order_with_status_and_age(status: DispatchStatus, hours_ago: i64) -> DispatchOrder {
+        let mut order = sample_order(status);
+        order.dispatched_at = now_unix() - hours_ago * 3600;
+        order
+    }
+
+    #[test]
+    fn is_running_late_true_when_in_transit_past_the_promised_window() {
+        let order = order_with_status_and_age(InTransit, 100);
+        assert!(order.is_running_late());
+        assert_eq!(order.hours_late(), Some(100 - 72));
+    }
+
+    #[test]
+    fn is_running_late_false_when_in_transit_within_the_promised_window() {
+        let order = order_with_status_and_age(InTransit, 10);
+        assert!(!order.is_running_late());
+        assert_eq!(order.hours_late(), None);
+    }
+
+    #[test]
+    fn is_running_late_false_once_a_dispatch_reaches_a_terminal_status_even_if_very_old() {
+        // Delivered, returned or cancelled dispatches are never "late" no
+        // matter how old — there's nothing left to alert anyone about.
+        for status in [Delivered, Returned, Cancelled] {
+            let order = order_with_status_and_age(status, 500);
+            assert!(!order.is_running_late(), "{status:?} should never be late");
         }
     }
 

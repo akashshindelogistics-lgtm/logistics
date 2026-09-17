@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NEXT_ACTIONS, STATUS_TAG_CLASS, formatStatus } from './dispatchLifecycle';
+import { NEXT_ACTIONS, STATUS_TAG_CLASS, formatStatus, isRunningLate, PROMISED_DELIVERY_HOURS } from './dispatchLifecycle';
 import type { DispatchStatus } from '../types';
 
 const ALL_STATUSES: DispatchStatus[] = [
@@ -47,6 +47,25 @@ describe('STATUS_TAG_CLASS', () => {
   it('has a tag class for every status', () => {
     for (const status of ALL_STATUSES) {
       expect(STATUS_TAG_CLASS[status]).toMatch(/^tag-/);
+    }
+  });
+});
+
+describe('isRunningLate', () => {
+  const nowSecs = () => Math.floor(Date.now() / 1000);
+
+  it('is true for an IN_TRANSIT order past the promised window', () => {
+    expect(isRunningLate({ status: 'IN_TRANSIT', dispatched_at: nowSecs() - (PROMISED_DELIVERY_HOURS + 1) * 3600 })).toBe(true);
+  });
+
+  it('is false for an IN_TRANSIT order still within the promised window', () => {
+    expect(isRunningLate({ status: 'IN_TRANSIT', dispatched_at: nowSecs() - 1 * 3600 })).toBe(false);
+  });
+
+  it('is false for a terminal status no matter how old', () => {
+    const longAgo = nowSecs() - (PROMISED_DELIVERY_HOURS + 500) * 3600;
+    for (const status of ['DELIVERED', 'RETURNED', 'CANCELLED'] as DispatchStatus[]) {
+      expect(isRunningLate({ status, dispatched_at: longAgo })).toBe(false);
     }
   });
 });

@@ -59,8 +59,11 @@ operations, live location maps, and AI-generated dispatch summaries.
   inventory, and dispatch volume over the last 14 days.
 - **Dispatch notifications** — when a dispatch is created or delivered, a
   notification is recorded for the customer (email or SMS, whichever is on
-  file) and the driver (SMS). The Dispatches page shows the log per order.
-  Actual SMS/email sending is left to a provider integration.
+  file) and the driver (SMS), and delivered via Twilio (SMS) / Resend
+  (email) when those are configured. The Dispatches page shows the log per
+  order. A background scan also alerts the customer if a dispatch is still
+  in transit well past when it should have arrived — see
+  [`docs/delay-alerts.md`](docs/delay-alerts.md).
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
 - **Authentication & roles** — JWT + bcrypt login. The organization password
