@@ -23,6 +23,14 @@ const NOTIFICATION_STATUS_TAG_CLASS: Record<NotificationStatus, string> = {
   SKIPPED: '',
 };
 
+// Freight invoices default to 30 days' payment terms (a standard "net 30"),
+// pre-filled on the invoice form but still editable — see docs/billing.md.
+function defaultDueDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function Dispatches() {
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -325,7 +333,7 @@ export default function Dispatches() {
                         ) : (
                           <button
                             className="btn btn-sm"
-                            onClick={() => { setInvoiceDraftId(o.id); setInvAmount(''); setInvDue(''); }}
+                            onClick={() => { setInvoiceDraftId(o.id); setInvAmount(''); setInvDue(defaultDueDate()); }}
                           >
                             Invoice
                           </button>

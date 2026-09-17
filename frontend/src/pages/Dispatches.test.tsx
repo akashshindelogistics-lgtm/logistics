@@ -263,6 +263,7 @@ describe('Dispatches page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Invoice' }));
     await user.type(screen.getByLabelText('Freight Amount'), '4500');
+    await user.clear(screen.getByLabelText('Due Date'));
     await user.type(screen.getByLabelText('Due Date'), '2026-09-30');
     await user.click(screen.getByRole('button', { name: /raise invoice/i }));
 
@@ -271,6 +272,20 @@ describe('Dispatches page', () => {
       dueOn: '2026-09-30',
     });
     await waitFor(() => expect(screen.getByRole('button', { name: /mark paid/i })).toBeInTheDocument());
+  });
+
+  it('pre-fills the invoice due date 30 days out (net-30 terms), still editable', async () => {
+    const user = userEvent.setup();
+    const order = makeOrder();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+
+    render(<Dispatches />);
+    await screen.findByText('PENDING');
+    await user.click(screen.getByRole('button', { name: 'Invoice' }));
+
+    const expected = new Date();
+    expected.setDate(expected.getDate() + 30);
+    expect(screen.getByLabelText('Due Date')).toHaveValue(expected.toISOString().slice(0, 10));
   });
 
   it('marks an existing pending invoice paid', async () => {

@@ -793,7 +793,20 @@
   "Route optimization" section; the "Not done here" line about it
   removed).
   Plan/context: [[file:docs/multi-stop-routes.md]]
-* TODO Investigate how to raise invoice, what should be the due date ?
+* DONE Investigate how to raise invoice, what should be the due date ?
+  The backend (src/logistics/billing/invoice.rs) already takes due_on as a
+  required, caller-supplied ISO date with no opinion on payment terms -
+  raising an invoice was always possible, but the dashboard's invoice form
+  left "Due Date" blank, forcing the dispatcher to pick one from scratch
+  every time with no guidance. Resolved by defaulting the form to 30 days
+  from today - a standard commercial "net 30" - while keeping it a normal,
+  editable date input so a dispatcher can still set a different date to
+  match a customer-specific agreement. New frontend/src/pages/Dispatches.tsx
+  `defaultDueDate()` helper, wired into the "Invoice" button's onClick. New
+  Dispatches.test.tsx coverage asserting the pre-filled value; the existing
+  manual-entry test now clears the field first since it's no longer blank.
+  docs/billing.md documents the default and that the backend itself still
+  has no policy of its own.
 * DONE [#B] Vehicle-to-trip live location tracking - show a trip's assigned vehicle moving across its planned stops on a live map, instead of GPS location only being visible in isolation on the Vehicles page
   The Vehicles page (LocationMap.tsx) and the GPS tracker-key push endpoint
   (POST /api/track/{tracker_key}) already exist, but a trip's stops
