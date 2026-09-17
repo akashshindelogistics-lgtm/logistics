@@ -47,7 +47,9 @@ operations, live location maps, and AI-generated dispatch summaries.
   into a godown.
 - **Multi-stop trips** — plan one vehicle to visit several customers in a
   sequence; each stop is a normal dispatch with its own lifecycle, linked
-  under a trip whose status is derived from its stops.
+  under a trip whose status is derived from its stops. Optionally
+  auto-order the stops by proximity (nearest-neighbour route optimization)
+  instead of visiting them in the order they were entered.
 - **Freight billing** — raise one invoice per dispatch with an amount and a
   due date; the dashboard tracks each invoice as paid / pending / overdue
   and rolls a customer's unpaid invoices up into an outstanding balance.

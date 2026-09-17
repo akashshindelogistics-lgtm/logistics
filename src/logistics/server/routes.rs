@@ -317,6 +317,12 @@ pub struct CreateTripPayload {
     /// The stops in the order the vehicle should visit them. At least two, and
     /// no customer twice.
     pub stops: Vec<TripStopPayload>,
+    /// When true, stops 2..N are reordered by nearest-neighbour geography
+    /// before the trip is created — `stops[0]` is always kept as the route's
+    /// fixed starting point. Defaults to false (visit `stops` in the exact
+    /// order given).
+    #[serde(default)]
+    pub optimize_route: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -2858,7 +2864,7 @@ pub async fn create_trip(
     let stops_ref: Vec<(&Customer, &[DispatchLineItemInput])> =
         resolved.iter().map(|(c, l)| (c, l.as_slice())).collect();
 
-    match org.dispatch_trip_to_customers(&stops_ref) {
+    match org.dispatch_trip_to_customers(&stops_ref, payload.optimize_route) {
         Ok(trip) => {
             // Best-effort per-stop notifications.
             for stop in &trip.stops {
@@ -7349,6 +7355,28 @@ mod tests {
 
     // ── Multi-stop trips ────────────────────────────────────────────────────
 
+    async fn located_customer_at(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth: &str,
+        name: &str,
+        latitude: f64,
+        longitude: f64,
+    ) -> Uuid {
+        let customer = create_customer_via_api(app, org_id, auth, name).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/customers/{}/location", customer.id))
+            .insert_header(("Authorization", auth.to_string()))
+            .set_json(&LocationPayload { latitude, longitude, address: None })
+            .to_request();
+        assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
+        customer.id
+    }
+
     async fn located_customer(
         app: &impl actix_web::dev::Service<
             actix_http::Request,
@@ -7359,14 +7387,7 @@ mod tests {
         auth: &str,
         name: &str,
     ) -> Uuid {
-        let customer = create_customer_via_api(app, org_id, auth, name).await;
-        let req = test::TestRequest::put()
-            .uri(&format!("/api/customers/{}/location", customer.id))
-            .insert_header(("Authorization", auth.to_string()))
-            .set_json(&LocationPayload { latitude: 19.07, longitude: 72.87, address: None })
-            .to_request();
-        assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
-        customer.id
+        located_customer_at(app, org_id, auth, name, 19.07, 72.87).await
     }
 
     fn trip_stop(customer_id: Uuid, qty: i64) -> TripStopPayload {
@@ -7404,7 +7425,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)] })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)], optimize_route: false })
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 200);
@@ -7469,7 +7490,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1)] })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1)], optimize_route: false })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -7477,7 +7498,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)] })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)], optimize_route: false })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -7487,9 +7508,46 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", wh))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)] })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)], optimize_route: false })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_trip_optimize_route_reorders_stops_by_proximity_via_the_api() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, first, auth) = setup_dispatch(&app, "Trip Optimize Org").await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", first.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Cancelled, proof_of_delivery: None, return_to_godown_id: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        // c1 is the fixed start; c_far is much farther from c1 than c_near is.
+        let c1 = located_customer_at(&app, org.id, &auth, "Start", 19.07, 72.87).await;
+        let c_far = located_customer_at(&app, org.id, &auth, "Far Stop", 19.50, 73.30).await;
+        let c_near = located_customer_at(&app, org.id, &auth, "Near Stop", 19.08, 72.88).await;
+
+        // Given in "far, then near" order, but with optimize_route the API
+        // should visit the nearer one second.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/trips", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateTripPayload {
+                stops: vec![trip_stop(c1, 1), trip_stop(c_far, 1), trip_stop(c_near, 1)],
+                optimize_route: true,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let trip = test::read_body_json::<ApiResponse<Trip>, _>(resp).await.data.unwrap();
+
+        let ordered_customers: Vec<Uuid> = trip.stops.iter().map(|s| s.customer_id).collect();
+        assert_eq!(ordered_customers, vec![c1, c_near, c_far]);
     }
 
     // ── Users / roles ───────────────────────────────────────────────────────
