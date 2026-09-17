@@ -51,50 +51,6 @@ test.describe('Multi-stop trips', () => {
     await expect(page.getByText('Trip · stop 2')).toBeVisible();
   });
 
-  test('optimizing the stop order visits the nearer customer before the farther one', async ({ page }) => {
-    const org = await registerOrg(page, `Trip Optimize ${uid()}`);
-    const stock = `Cement ${uid()}`;
-
-    const reg = `TO${uid().toUpperCase()}`;
-    await api(page, 'post', `/api/orgs/${org.id}/vehicles`, { registration_number: reg, capacity: 100000, unit: 'MetricTon' });
-    const driver = await api(page, 'post', `/api/orgs/${org.id}/drivers`, { name: 'Trip Driver', license_number: `L${uid()}`, phone: '0' });
-    await api(page, 'put', `/api/vehicles/${encodeURIComponent(reg)}/driver`, { driver_id: driver.data.id });
-    const godown = await api(page, 'post', `/api/orgs/${org.id}/godowns`, { name: 'G', address: '1 Rd' });
-    await api(page, 'post', `/api/godowns/${godown.data.id}/stock`, { description: stock, quantity: 500, volume_in_size: 1 });
-
-    // start is the fixed first stop; far is much farther from it than near is,
-    // but is given to the form before near.
-    const start = `Start ${uid()}`;
-    const far = `Far ${uid()}`;
-    const near = `Near ${uid()}`;
-    await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: start, address: 'a', latitude: 19.0, longitude: 72.8 });
-    await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: far, address: 'b', latitude: 19.5, longitude: 73.3 });
-    await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: near, address: 'c', latitude: 19.01, longitude: 72.81 });
-
-    await page.goto('/trips');
-    await page.getByRole('button', { name: /plan a trip/i }).click();
-    await page.getByLabel(/stop 1 — customer/i).selectOption({ label: start });
-    await page.getByLabel(/stock item/i).first().fill(stock);
-    await page.getByLabel(/quantity/i).first().fill('10');
-    await page.getByLabel(/stop 2 — customer/i).selectOption({ label: far });
-    await page.getByLabel(/stock item/i).nth(1).fill(stock);
-    await page.getByLabel(/quantity/i).nth(1).fill('10');
-    await page.getByRole('button', { name: /add another stop/i }).click();
-    await page.getByLabel(/stop 3 — customer/i).selectOption({ label: near });
-    await page.getByLabel(/stock item/i).nth(2).fill(stock);
-    await page.getByLabel(/quantity/i).nth(2).fill('10');
-    await page.getByRole('checkbox', { name: /optimize stop order/i }).check();
-    await page.getByRole('button', { name: /^plan trip$/i }).click();
-
-    const card = page.locator('.section-card', { hasText: reg });
-    await expect(card).toBeVisible({ timeout: 8000 });
-    const rows = card.locator('tbody tr');
-    await expect(rows).toHaveCount(3);
-    await expect(rows.nth(0)).toContainText(start);
-    await expect(rows.nth(1)).toContainText(near);
-    await expect(rows.nth(2)).toContainText(far);
-  });
-
   test('the route map shows the vehicle and every located stop, and hides again on toggle', async ({ page }) => {
     const org = await registerOrg(page, `Trip Map ${uid()}`);
     const stock = `Cement ${uid()}`;

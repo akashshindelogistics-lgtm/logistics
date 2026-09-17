@@ -100,28 +100,8 @@ describe('Trips page', () => {
     expect(tripsApi.createTrip).toHaveBeenCalledWith('org1', [
       { customer_id: 'c1', line_items: [{ stock_description: 'Cement', requested_quantity: 10 }] },
       { customer_id: 'c2', line_items: [{ stock_description: 'Cement', requested_quantity: 5 }] },
-    ], false);
+    ]);
     await waitFor(() => expect(screen.getByText('MH12 AB 1234')).toBeInTheDocument());
-  });
-
-  it('passes optimizeRoute: true when the "Optimize stop order" checkbox is checked', async () => {
-    const user = userEvent.setup();
-    vi.mocked(tripsApi.listOrgTrips).mockResolvedValueOnce(ok([])).mockResolvedValueOnce(ok([trip()]));
-    vi.mocked(tripsApi.createTrip).mockResolvedValue(ok(trip()));
-    render(<Trips />, { wrapper: MemoryRouter });
-    await screen.findByText(/no trips yet/i);
-
-    await user.click(screen.getByRole('button', { name: /plan a trip/i }));
-    await user.selectOptions(screen.getByLabelText(/stop 1 — customer/i), 'c1');
-    await user.type(screen.getAllByLabelText(/stock item/i)[0], 'Cement');
-    await user.type(screen.getAllByLabelText(/quantity/i)[0], '10');
-    await user.selectOptions(screen.getByLabelText(/stop 2 — customer/i), 'c2');
-    await user.type(screen.getAllByLabelText(/stock item/i)[1], 'Cement');
-    await user.type(screen.getAllByLabelText(/quantity/i)[1], '5');
-    await user.click(screen.getByRole('checkbox', { name: /optimize stop order/i }));
-    await user.click(screen.getByRole('button', { name: /^plan trip$/i }));
-
-    expect(tripsApi.createTrip).toHaveBeenCalledWith('org1', expect.any(Array), true);
   });
 
   it('shows a route map with the vehicle and every located stop when toggled on', async () => {
