@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { IconGrid, IconBuilding, IconTruck, IconUsers, IconPackage, IconDispatch, IconChart, IconX } from './Icons';
+import { IconGrid, IconBuilding, IconTruck, IconUsers, IconPackage, IconDispatch, IconChart, IconX, IconSun, IconMoon } from './Icons';
 import { getOrgName, getOrgId, clearAuth, isLoggedIn, isAdmin } from '../api/auth';
+import { useTheme } from '../lib/theme';
 import './Sidebar.css';
 
 const baseLinks = [
@@ -18,6 +19,7 @@ const adminLinks = [
 
 export default function Sidebar() {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
   const loggedIn = isLoggedIn();
   const orgName = getOrgName();
   const orgId = getOrgId();
@@ -68,6 +70,16 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
+      <button
+        type="button"
+        className="sidebar-theme-toggle"
+        onClick={toggleTheme}
+        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+      >
+        {theme === 'dark' ? <IconSun size={15} /> : <IconMoon size={15} />}
+        <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+      </button>
 
       <div className="sidebar-footer">
         {loggedIn ? (

@@ -819,6 +819,26 @@
   extended with a GPS push + a closing step opening the route map. `npx tsc
   -b` and `npm run test:unit` (211 tests) both clean; trips.spec.ts (4
   tests) and the demo both pass headed and headless.
+* DONE Dark mode toggle - a light/dark theme switch in the sidebar, persisted per browser
+  New frontend/src/lib/theme.tsx: a ThemeProvider (wraps <App/> in main.tsx)
+  storing the active theme in a React context, initialised from
+  localStorage (`logi_theme`) or, failing that, the browser's
+  `prefers-color-scheme`, and setting a `data-theme` attribute on
+  `<html>` that index.css's dark-mode CSS variable overrides key off.
+  Sidebar.tsx gained a "Light mode"/"Dark mode" toggle button (new
+  IconSun/IconMoon in Icons.tsx) calling `toggleTheme()`; the choice is
+  written back to localStorage so it survives a reload and future
+  visits. index.css's `:root` block gained explicit dark-mode values for
+  every themed variable (background, surface, borders, text, status-tag
+  colors, shadows, row-hover, skeleton), applied both via `data-theme="dark"`
+  (explicit user choice, wins regardless of system preference) and via
+  `prefers-color-scheme: dark` when the user hasn't chosen explicitly;
+  page.css's few remaining hardcoded colors were switched to the same
+  variables so tables and buttons theme correctly too. New
+  frontend/src/lib/theme.test.tsx (initial theme resolution, toggling,
+  persistence) and Sidebar.test.tsx coverage for the toggle button; new
+  Playwright flow frontend/tests/theme.spec.ts (switches to dark mode and
+  confirms it persists across a reload).
 * TODO Delay/ETA-drift alerts - notify when an in-transit dispatch is running late against its planned schedule
   Reuses the existing Twilio/Resend notification delivery pipeline
   (src/logistics/notification) verbatim - just a new trigger condition, no
