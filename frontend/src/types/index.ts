@@ -88,6 +88,26 @@ export interface VehicleDocument {
   status: ComplianceStatus;
 }
 
+// Mirrors MaintenanceStatus / VehicleMaintenance in
+// src/logistics/vehicle/maintenance.rs. `days_until_due`, `km_until_due` and
+// `status` are computed by the server on every read.
+export type MaintenanceStatus = 'UpToDate' | 'DueSoon' | 'Overdue';
+
+export interface VehicleMaintenance {
+  id: string;
+  org_id: string;
+  vehicle_registration: string;
+  description: string;
+  due_on: string | null;
+  due_at_mileage_km: number | null;
+  current_mileage_km: number | null;
+  last_service_on: string | null;
+  notes: string | null;
+  days_until_due: number | null;
+  km_until_due: number | null;
+  status: MaintenanceStatus;
+}
+
 export interface Organization {
   id: string;
   name: string;

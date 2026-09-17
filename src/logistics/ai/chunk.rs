@@ -51,6 +51,7 @@ pub enum ChunkKind {
     DispatchNarrative,
     StockSnapshot,
     OrgDirectory,
+    VehicleMaintenance,
 }
 
 impl ChunkKind {
@@ -61,6 +62,7 @@ impl ChunkKind {
             ChunkKind::DispatchNarrative => "dispatch_narrative",
             ChunkKind::StockSnapshot => "stock_snapshot",
             ChunkKind::OrgDirectory => "org_directory",
+            ChunkKind::VehicleMaintenance => "vehicle_maintenance",
         }
     }
 
@@ -70,6 +72,7 @@ impl ChunkKind {
             "dispatch_narrative" => ChunkKind::DispatchNarrative,
             "stock_snapshot" => ChunkKind::StockSnapshot,
             "org_directory" => ChunkKind::OrgDirectory,
+            "vehicle_maintenance" => ChunkKind::VehicleMaintenance,
             _ => ChunkKind::Notification,
         }
     }
@@ -218,6 +221,26 @@ pub fn vehicle_document_chunk_text(d: &VehicleDocument) -> String {
         d.expires_on,
         d.status,
         notes_part
+    )
+}
+
+/// The narrative text for a [`VehicleMaintenance`] chunk.
+pub fn vehicle_maintenance_chunk_text(m: &crate::logistics::vehicle::maintenance::VehicleMaintenance) -> String {
+    let due_part = match (&m.due_on, m.due_at_mileage_km) {
+        (Some(on), Some(km)) => format!("due on {on} or at {km}km"),
+        (Some(on), None) => format!("due on {on}"),
+        (None, Some(km)) => format!("due at {km}km"),
+        (None, None) => "due date unset".to_string(),
+    };
+    let notes_part = m
+        .notes
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|n| format!(" Notes: {n}"))
+        .unwrap_or_default();
+    format!(
+        "Vehicle {}'s {} is {} (status: {:?}).{}",
+        m.vehicle_registration, m.description, due_part, m.status, notes_part
     )
 }
 

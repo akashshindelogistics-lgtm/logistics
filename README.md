@@ -28,7 +28,10 @@ operations, live location maps, and AI-generated dispatch summaries.
   to the vehicle (each vehicle carries its own tracker key). Record each
   vehicle's compliance paperwork (insurance, RC, permit, PUC and fitness
   certificate) with expiry dates; the dashboard flags documents that are
-  expiring within 30 days or already expired.
+  expiring within 30 days or already expired. Schedule preventive
+  maintenance due by date and/or odometer mileage, with the same due-soon /
+  overdue flagging — see
+  [`docs/vehicle-maintenance.md`](docs/vehicle-maintenance.md).
 - **Drivers** — keep driver records (name, licence number, phone) per
   organization and assign one to a vehicle from the dashboard. A vehicle
   needs an **active** assigned driver, spare capacity, and no trip already
@@ -253,6 +256,10 @@ All routes are served under the `/api` prefix.
 | GET/POST | `/api/vehicles/{reg}/documents` | List / record a vehicle's compliance paperwork (insurance, RC, permit, PUC, fitness) |
 | PUT/DELETE | `/api/vehicle-documents/{id}` | Renew (update) or delete a compliance document |
 | GET | `/api/orgs/{id}/vehicle-documents` | Whole-fleet compliance list, soonest expiry first |
+| GET/POST | `/api/vehicles/{reg}/maintenance` | List / schedule preventive maintenance due by date and/or odometer mileage |
+| PUT/DELETE | `/api/vehicle-maintenance/{id}` | Update or delete a maintenance item |
+| PUT | `/api/vehicle-maintenance/{id}/mileage` | Record the vehicle's latest odometer reading against an item |
+| GET | `/api/orgs/{id}/vehicle-maintenance` | Whole-fleet maintenance list, soonest date-based due date first |
 | GET/POST | `/api/customers`, `/api/orgs/{id}/customers` | List the org's customers / add one (optionally with an initial `latitude`/`longitude`) |
 | PUT/DELETE | `/api/customers/{id}/location`, `/api/customers/{id}` | Update a customer's location / delete the customer |
 | POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to one of its customers |

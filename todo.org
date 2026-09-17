@@ -893,8 +893,45 @@
   browser flow without a test-only backdoor; see docs/delay-alerts.md's
   "Known limitations". `cargo test --lib` and `npm run test:unit` both green.
   Plan/context: [[file:docs/delay-alerts.md]]
-* TODO Preventive maintenance scheduling - service due by mileage/date, with alerts, for vehicles
+* DONE Preventive maintenance scheduling - service due by mileage/date, with alerts, for vehicles
   Reuses the existing VehicleDocument compliance-expiry pattern
   (src/logistics/vehicle/document.rs: ExpiringSoon/Expired status,
   days_until_expiry, renewal reminders on the org detail page) almost
-  exactly, just for maintenance due-dates instead of paperwork expiry.
+  exactly, just for maintenance due-dates instead of paperwork expiry - with
+  one real difference: there's no ambient "today" equivalent for mileage the
+  way there is for dates, and this app has no odometer telemetry, so a
+  mileage-based item's `current_mileage_km` is just the latest reading ops
+  recorded on the item itself, not a live vehicle-wide value.
+  New src/logistics/vehicle/maintenance.rs: `VehicleMaintenance { ...,
+  due_on, due_at_mileage_km, current_mileage_km, days_until_due,
+  km_until_due, status }`, `MaintenanceStatus::{UpToDate, DueSoon, Overdue}`
+  computed fresh on every read (Overdue if either a due date has passed or
+  the latest recorded mileage reached the due mileage; DueSoon within 14
+  days / 500km of either). At least one of due_on/due_at_mileage_km is
+  required. Full CRUD + `record_mileage()`, cascade-deletes with its
+  vehicle/org, indexed for the AI assistant (new ChunkKind::VehicleMaintenance)
+  - all mirroring vehicle::document's existing methods almost line for line.
+  5 new routes (GET/POST /api/vehicles/{reg}/maintenance, PUT/DELETE
+  /api/vehicle-maintenance/{id}, PUT .../mileage, GET
+  /api/orgs/{id}/vehicle-maintenance), no role restriction (matches
+  vehicle::document's precedent).
+  Frontend: a new "Vehicle Maintenance" card on the org detail page,
+  mirroring the existing "Vehicle Compliance" card immediately above it -
+  due-soon/overdue header badges, a table with status per item, an inline
+  schedule form, and per-row "Record mileage" (mileage-tracked items only)
+  / "Renew" / delete actions.
+  "With alerts" here means the same thing it already means for compliance
+  paperwork: a dashboard flag, not a push notification - see
+  docs/vehicle-maintenance.md's "Alerts" section for why that's the right
+  call here (unlike the dispatch delay-alert feature, this isn't a
+  customer-facing live-shipment event).
+  10 new Rust unit tests (maintenance.rs), 5 new Rust route tests
+  (full CRUD lifecycle incl. recording mileage; 400/404/403 cases). 6 new
+  frontend api-client tests, 3 new OrganizationDetail.test.tsx tests
+  (scheduling, due-soon/overdue badges, recording mileage via the prompt).
+  1 new Playwright flow (organization.spec.ts) scheduling a date-based item
+  and a mileage-based one, then recording an odometer reading past the due
+  mileage and confirming it flips to overdue. `cargo test --lib` (387
+  tests), `npm run test:unit` (227 tests) and the relevant Playwright specs
+  all green.
+  Plan/context: [[file:docs/vehicle-maintenance.md]]

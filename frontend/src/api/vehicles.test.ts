@@ -11,6 +11,12 @@ import {
   addVehicleDocument,
   updateVehicleDocument,
   deleteVehicleDocument,
+  listVehicleMaintenance,
+  listOrgVehicleMaintenance,
+  addVehicleMaintenance,
+  updateVehicleMaintenance,
+  recordVehicleMaintenanceMileage,
+  deleteVehicleMaintenance,
 } from './vehicles';
 
 vi.mock('./client', () => ({
@@ -111,5 +117,47 @@ describe('vehicles api client', () => {
     vi.mocked(api.delete).mockResolvedValue(envelope(null));
     await deleteVehicleDocument('d1');
     expect(api.delete).toHaveBeenCalledWith('/vehicle-documents/d1');
+  });
+
+  it('listVehicleMaintenance GETs the URL-encoded per-vehicle route', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope([]));
+    await listVehicleMaintenance('MH 01 AB 1234');
+    expect(api.get).toHaveBeenCalledWith('/vehicles/MH%2001%20AB%201234/maintenance');
+  });
+
+  it('listOrgVehicleMaintenance GETs the org-wide maintenance route', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope([]));
+    await listOrgVehicleMaintenance('o1');
+    expect(api.get).toHaveBeenCalledWith('/orgs/o1/vehicle-maintenance');
+  });
+
+  it('addVehicleMaintenance POSTs the payload to the per-vehicle route', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({}));
+    await addVehicleMaintenance('MH01AB1234', { description: 'Oil change', due_on: '2027-01-01' });
+    expect(api.post).toHaveBeenCalledWith('/vehicles/MH01AB1234/maintenance', {
+      description: 'Oil change',
+      due_on: '2027-01-01',
+    });
+  });
+
+  it('updateVehicleMaintenance PUTs to /vehicle-maintenance/{id}', async () => {
+    vi.mocked(api.put).mockResolvedValue(envelope({}));
+    await updateVehicleMaintenance('m1', { description: 'Full service', due_at_mileage_km: 60000 });
+    expect(api.put).toHaveBeenCalledWith('/vehicle-maintenance/m1', {
+      description: 'Full service',
+      due_at_mileage_km: 60000,
+    });
+  });
+
+  it('recordVehicleMaintenanceMileage PUTs the reading to /vehicle-maintenance/{id}/mileage', async () => {
+    vi.mocked(api.put).mockResolvedValue(envelope({}));
+    await recordVehicleMaintenanceMileage('m1', 49500);
+    expect(api.put).toHaveBeenCalledWith('/vehicle-maintenance/m1/mileage', { current_mileage_km: 49500 });
+  });
+
+  it('deleteVehicleMaintenance DELETEs /vehicle-maintenance/{id}', async () => {
+    vi.mocked(api.delete).mockResolvedValue(envelope(null));
+    await deleteVehicleMaintenance('m1');
+    expect(api.delete).toHaveBeenCalledWith('/vehicle-maintenance/m1');
   });
 });
