@@ -25,6 +25,11 @@ Orgs ──1:N──▶ Dispatches ──1:1──▶ Invoices
   write and compared lexicographically (ISO dates sort chronologically).
   `issued_on` is stamped server-side when the invoice is raised; `due_on` is
   supplied by the caller; `paid_on` is stamped when the invoice is paid.
+  The backend has no opinion on payment terms — it accepts whatever `due_on`
+  the caller sends, validated only as a real calendar date. The dashboard's
+  invoice form pre-fills `due_on` 30 days from today (a standard "net 30"),
+  the common default commercial payment term, but the dispatcher can change
+  it to match a customer-specific agreement before raising the invoice.
 - `status` is **computed on every read**, never stored:
   - `PAID` — `paid_on` is set.
   - `OVERDUE` — unpaid and `due_on` is before today.

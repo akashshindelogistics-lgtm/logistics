@@ -9,15 +9,25 @@ const envelope = <T,>(data: T) => ({ data: { success: true, message: '', data } 
 describe('trips api client', () => {
   beforeEach(() => vi.resetAllMocks());
 
-  it('createTrip POSTs the stops to /orgs/{id}/trips and unwraps', async () => {
+  it('createTrip POSTs the stops to /orgs/{id}/trips with optimize_route defaulted false, and unwraps', async () => {
     vi.mocked(api.post).mockResolvedValue(envelope({ id: 't1' }));
     const stops = [
       { customer_id: 'c1', line_items: [{ stock_description: 'Cement', requested_quantity: 10 }] },
       { customer_id: 'c2', line_items: [{ stock_description: 'Cement', requested_quantity: 5 }] },
     ];
     const res = await createTrip('o1', stops);
-    expect(api.post).toHaveBeenCalledWith('/orgs/o1/trips', { stops });
+    expect(api.post).toHaveBeenCalledWith('/orgs/o1/trips', { stops, optimize_route: false });
     expect(res.data).toEqual({ id: 't1' });
+  });
+
+  it('createTrip passes optimize_route: true through when requested', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({ id: 't1' }));
+    const stops = [
+      { customer_id: 'c1', line_items: [{ stock_description: 'Cement', requested_quantity: 10 }] },
+      { customer_id: 'c2', line_items: [{ stock_description: 'Cement', requested_quantity: 5 }] },
+    ];
+    await createTrip('o1', stops, true);
+    expect(api.post).toHaveBeenCalledWith('/orgs/o1/trips', { stops, optimize_route: true });
   });
 
   it('listOrgTrips GETs /orgs/{id}/trips', async () => {

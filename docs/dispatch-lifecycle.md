@@ -61,9 +61,13 @@ the `DELIVERED` status-history entry rather than a caller-supplied one.
 `DispatchOrder` responses carry it as `proof_of_delivery:
 ProofOfDelivery | null`, populated the same way as `status_history`.
 
-There is no file-upload/storage system backing `signature_or_photo_url` —
-it's a free-form URL or `data:` URI column; the caller is responsible for
-hosting the actual image.
+`signature_or_photo_url` is still a free-form `TEXT` column — a URL — but
+this backend now has a real file-upload/storage system behind it
+(`POST /api/orgs/{id}/uploads` stores the bytes on local disk and returns a
+URL this backend serves at `GET /api/uploads/{id}`). See
+`docs/file-uploads.md`. A caller can still pass any external URL directly;
+the frontend's delivery-confirmation form uploads through that endpoint
+rather than asking for one to be pasted in.
 
 ## Returns
 

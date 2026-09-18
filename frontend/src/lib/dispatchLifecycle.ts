@@ -1,4 +1,4 @@
-import type { DispatchStatus } from '../types';
+import type { DispatchOrder, DispatchStatus } from '../types';
 
 export const STATUS_TAG_CLASS: Record<DispatchStatus, string> = {
   PENDING: 'tag-amber',
@@ -46,4 +46,18 @@ export const NEXT_ACTIONS: Partial<Record<DispatchStatus, NextAction[]>> = {
 
 export function formatStatus(status: DispatchStatus): string {
   return status.replace('_', ' ');
+}
+
+// Matches PROMISED_DELIVERY_HOURS in src/logistics/dispatch/dispatch.rs — a
+// dispatch is expected to reach DELIVERED within this many hours of being
+// created. There's no per-order promised-date field yet, so this is one
+// fleet-wide target; the backend's delay-alert scan (see
+// docs/delay-alerts.md) uses the exact same threshold.
+export const PROMISED_DELIVERY_HOURS = 72;
+
+/** Still IN_TRANSIT, and past its promised delivery window. */
+export function isRunningLate(order: Pick<DispatchOrder, 'status' | 'dispatched_at'>): boolean {
+  if (order.status !== 'IN_TRANSIT') return false;
+  const hoursSinceDispatch = (Date.now() / 1000 - order.dispatched_at) / 3600;
+  return hoursSinceDispatch > PROMISED_DELIVERY_HOURS;
 }

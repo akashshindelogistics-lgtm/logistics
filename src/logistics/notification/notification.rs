@@ -36,6 +36,11 @@ fn now_unix() -> i64 {
 pub enum NotificationEvent {
     DispatchCreated,
     DispatchDelivered,
+    /// A dispatch is still `IN_TRANSIT` past
+    /// [`crate::logistics::dispatch::dispatch::PROMISED_DELIVERY_HOURS`] since
+    /// it was created. Recorded by
+    /// [`crate::logistics::notification::delay_alerts::scan_and_alert`].
+    DispatchRunningLate,
 }
 
 impl NotificationEvent {
@@ -43,6 +48,7 @@ impl NotificationEvent {
         match self {
             NotificationEvent::DispatchCreated => "DISPATCH_CREATED",
             NotificationEvent::DispatchDelivered => "DISPATCH_DELIVERED",
+            NotificationEvent::DispatchRunningLate => "DISPATCH_RUNNING_LATE",
         }
     }
 
@@ -52,6 +58,7 @@ impl NotificationEvent {
         match self {
             NotificationEvent::DispatchCreated => "Your order is on its way",
             NotificationEvent::DispatchDelivered => "Your order has been delivered",
+            NotificationEvent::DispatchRunningLate => "Your order is running behind schedule",
         }
     }
 }
@@ -175,10 +182,10 @@ impl Notification {
             id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
             org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
             dispatch_id: Uuid::parse_str(&dispatch_id).unwrap_or_else(|_| Uuid::new_v4()),
-            event: if event == "DISPATCH_DELIVERED" {
-                NotificationEvent::DispatchDelivered
-            } else {
-                NotificationEvent::DispatchCreated
+            event: match event.as_str() {
+                "DISPATCH_DELIVERED" => NotificationEvent::DispatchDelivered,
+                "DISPATCH_RUNNING_LATE" => NotificationEvent::DispatchRunningLate,
+                _ => NotificationEvent::DispatchCreated,
             },
             channel: NotificationChannel::from_str(&channel),
             recipient_kind,
@@ -320,6 +327,50 @@ impl Notification {
             org_id,
             dispatch_id,
             NotificationEvent::DispatchDelivered,
+            "customer",
+            customer_target,
+            customer_body,
+        )];
+        Self::persist(&notifs)?;
+        Ok(notifs)
+    }
+
+    /// Record the "your shipment is running behind schedule" notification
+    /// for the customer, when a dispatch is still `IN_TRANSIT` past
+    /// [`crate::logistics::dispatch::dispatch::PROMISED_DELIVERY_HOURS`].
+    /// Called by [`crate::logistics::notification::delay_alerts::scan_and_alert`],
+    /// which is also responsible for not calling this twice for the same
+    /// dispatch. AI-personalized / fallback behavior matches
+    /// [`Self::record_dispatch_created`].
+    pub async fn record_dispatch_running_late(
+        org_id: Uuid,
+        dispatch_id: Uuid,
+        customer: &Customer,
+        hours_late: i64,
+    ) -> Result<Vec<Notification>, Box<dyn Error>> {
+        let short_id = &dispatch_id.to_string()[..8];
+        let customer_target = Self::customer_target(customer);
+
+        let customer_body = if customer_target.is_some() {
+            crate::logistics::ai::notification_copy::generate_dispatch_running_late_customer_body(&customer.name, short_id, hours_late)
+                .await
+                .unwrap_or_else(|_| {
+                    format!(
+                        "Hi {}, your order (ref {short_id}) is running about {hours_late}h behind its expected delivery time. We're sorry for the delay.",
+                        customer.name
+                    )
+                })
+        } else {
+            format!(
+                "Hi {}, your order (ref {short_id}) is running about {hours_late}h behind its expected delivery time. We're sorry for the delay.",
+                customer.name
+            )
+        };
+
+        let notifs = vec![Self::build(
+            org_id,
+            dispatch_id,
+            NotificationEvent::DispatchRunningLate,
             "customer",
             customer_target,
             customer_body,

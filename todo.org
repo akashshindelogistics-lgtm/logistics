@@ -315,7 +315,30 @@
   away. 2 new Rust route tests, 3 new frontend api-client tests, 2 new Customers
   page tests, 2 new Playwright flows. docs/customers.md + README updated.
   Plan/context: [[file:docs/customers.md]]
-* TODO Update e2e demo flow as new changes + features are added to logistics system
+* DONE Update e2e demo flow as new changes + features are added to logistics system
+  This is a standing habit, not a one-time deliverable - each feature
+  already gets its own demo/spec coverage when it ships (see the DONE notes
+  above for route optimization, file uploads, delay alerts, vehicle
+  maintenance, etc.), but the single full-workflow narrative
+  (frontend/tests/e2e-full-flow.spec.ts, run via `npm run test:e2e:demo`)
+  had fallen behind. Caught it up in this pass: a new "Switch to dark mode"
+  step right after registering (the whole rest of the walkthrough now runs
+  themed, since the choice persists across the sign-out/login step), a new
+  "Schedule preventive maintenance for the vehicle" step right after the
+  existing compliance-document step, and the freight-invoice step now
+  asserts the Due Date field is already prefilled 30 days out (net-30)
+  instead of filling it by hand. Left the multi-stop trip step as-is
+  (doesn't exercise the "Optimize stop order" checkbox - that already has
+  its own dedicated coverage in trips.spec.ts/trips.demo.ts, and adding it
+  here would need deliberately-scattered customer geography this step
+  doesn't otherwise need) and didn't attempt to demonstrate delay alerts
+  (documented as infeasible from a browser flow in docs/delay-alerts.md's
+  "Known limitations" - dispatched_at isn't caller-settable). Passes
+  headless (`npx playwright test tests/e2e-full-flow.spec.ts`) and headed
+  under playwright.demo.config.ts.
+  Whoever picks up the next feature should keep doing this: add the new
+  step(s) to this file when they touch a flow this walkthrough already
+  covers, the same way this pass did.
 * DONE All CI workflows should run on push to branch.
   The three test workflows (frontend-unit-tests, frontend-integration,
   periodic-tests) triggered only on push to main/master, so a feature branch
@@ -793,7 +816,20 @@
   "Route optimization" section; the "Not done here" line about it
   removed).
   Plan/context: [[file:docs/multi-stop-routes.md]]
-* TODO Investigate how to raise invoice, what should be the due date ?
+* DONE Investigate how to raise invoice, what should be the due date ?
+  The backend (src/logistics/billing/invoice.rs) already takes due_on as a
+  required, caller-supplied ISO date with no opinion on payment terms -
+  raising an invoice was always possible, but the dashboard's invoice form
+  left "Due Date" blank, forcing the dispatcher to pick one from scratch
+  every time with no guidance. Resolved by defaulting the form to 30 days
+  from today - a standard commercial "net 30" - while keeping it a normal,
+  editable date input so a dispatcher can still set a different date to
+  match a customer-specific agreement. New frontend/src/pages/Dispatches.tsx
+  `defaultDueDate()` helper, wired into the "Invoice" button's onClick. New
+  Dispatches.test.tsx coverage asserting the pre-filled value; the existing
+  manual-entry test now clears the field first since it's no longer blank.
+  docs/billing.md documents the default and that the backend itself still
+  has no policy of its own.
 * DONE [#B] Vehicle-to-trip live location tracking - show a trip's assigned vehicle moving across its planned stops on a live map, instead of GPS location only being visible in isolation on the Vehicles page
   The Vehicles page (LocationMap.tsx) and the GPS tracker-key push endpoint
   (POST /api/track/{tracker_key}) already exist, but a trip's stops
@@ -819,15 +855,106 @@
   extended with a GPS push + a closing step opening the route map. `npx tsc
   -b` and `npm run test:unit` (211 tests) both clean; trips.spec.ts (4
   tests) and the demo both pass headed and headless.
-* TODO Delay/ETA-drift alerts - notify when an in-transit dispatch is running late against its planned schedule
+* DONE Dark mode toggle - a light/dark theme switch in the sidebar, persisted per browser
+  New frontend/src/lib/theme.tsx: a ThemeProvider (wraps <App/> in main.tsx)
+  storing the active theme in a React context, initialised from
+  localStorage (`logi_theme`) or, failing that, the browser's
+  `prefers-color-scheme`, and setting a `data-theme` attribute on
+  `<html>` that index.css's dark-mode CSS variable overrides key off.
+  Sidebar.tsx gained a "Light mode"/"Dark mode" toggle button (new
+  IconSun/IconMoon in Icons.tsx) calling `toggleTheme()`; the choice is
+  written back to localStorage so it survives a reload and future
+  visits. index.css's `:root` block gained explicit dark-mode values for
+  every themed variable (background, surface, borders, text, status-tag
+  colors, shadows, row-hover, skeleton), applied both via `data-theme="dark"`
+  (explicit user choice, wins regardless of system preference) and via
+  `prefers-color-scheme: dark` when the user hasn't chosen explicitly;
+  page.css's few remaining hardcoded colors were switched to the same
+  variables so tables and buttons theme correctly too. New
+  frontend/src/lib/theme.test.tsx (initial theme resolution, toggling,
+  persistence) and Sidebar.test.tsx coverage for the toggle button; new
+  Playwright flow frontend/tests/theme.spec.ts (switches to dark mode and
+  confirms it persists across a reload).
+* DONE Delay/ETA-drift alerts - notify when an in-transit dispatch is running late against its planned schedule
   Reuses the existing Twilio/Resend notification delivery pipeline
   (src/logistics/notification) verbatim - just a new trigger condition, no
-  new delivery mechanism. Needs a "planned/expected" time reference to
-  compare against, which OpsReport's on-time-rate calculation already
-  assumes (currently a fixed 72h target, see docs/reports.md) - may need a
-  per-dispatch promised-date field instead of the fixed target.
-* TODO Preventive maintenance scheduling - service due by mileage/date, with alerts, for vehicles
+  new delivery mechanism. Rather than add a per-dispatch promised-date field
+  (a real schema/API change nobody has asked to customize yet), reused
+  OpsReport's existing fixed 72h target as its own constant,
+  `PROMISED_DELIVERY_HOURS` in src/logistics/dispatch/dispatch.rs - not
+  stored, computed from `dispatched_at` on every check, same as
+  `reports::ON_TIME_TARGET_HOURS` (a separate, ==-valued constant, not wired
+  together with it).
+  New `DispatchOrder::is_running_late()` (true when still IN_TRANSIT and
+  more than PROMISED_DELIVERY_HOURS past dispatched_at - never true once a
+  dispatch reaches a terminal status, however old), `hours_late()`, and
+  `list_in_transit()`. New src/logistics/notification/delay_alerts.rs:
+  `scan_and_alert()` loads every IN_TRANSIT dispatch, keeps the late ones,
+  skips any that already carry a DISPATCH_RUNNING_LATE notification (making
+  repeated/concurrent scans idempotent - never double-sends), and otherwise
+  records + delivers one via a new `Notification::record_dispatch_running_late`
+  (customer only, AI-personalized with the same fixed-template fallback as
+  every other notification). main.rs spawns this on a 15-minute tokio timer
+  for the process's lifetime - this app's actual deploy target is a
+  persistent VM, not an ephemeral-per-request platform, so no new
+  infrastructure was needed. No new route; nothing else calls it.
+  Frontend: no new API call - frontend/src/lib/dispatchLifecycle.ts's
+  `isRunningLate()` mirrors the same PROMISED_DELIVERY_HOURS check
+  client-side from data a dispatch already carries, and the Dispatches page
+  shows a red "⚠ Running late" badge next to the status tag.
+  4 new Rust unit tests (dispatch.rs: is_running_late/hours_late true/false
+  cases, including every terminal status staying false regardless of age),
+  4 new Rust integration tests (delay_alerts.rs: sends exactly one alert for
+  a real, backdated dispatch; never double-sends on a second scan; skips one
+  still within its window; skips one no longer IN_TRANSIT), 2 new AI
+  notification-copy tests. 2 new frontend unit tests
+  (dispatchLifecycle.test.ts) plus 3 new Dispatches.test.tsx cases (badge
+  shows for an overdue IN_TRANSIT order, not for a recent one, not for an old
+  but terminal one). No Playwright coverage of the badge itself -
+  `dispatched_at` is stamped server-side and isn't caller-settable through
+  the public API, so there's no way to backdate a dispatch from a real
+  browser flow without a test-only backdoor; see docs/delay-alerts.md's
+  "Known limitations". `cargo test --lib` and `npm run test:unit` both green.
+  Plan/context: [[file:docs/delay-alerts.md]]
+* DONE Preventive maintenance scheduling - service due by mileage/date, with alerts, for vehicles
   Reuses the existing VehicleDocument compliance-expiry pattern
   (src/logistics/vehicle/document.rs: ExpiringSoon/Expired status,
   days_until_expiry, renewal reminders on the org detail page) almost
-  exactly, just for maintenance due-dates instead of paperwork expiry.
+  exactly, just for maintenance due-dates instead of paperwork expiry - with
+  one real difference: there's no ambient "today" equivalent for mileage the
+  way there is for dates, and this app has no odometer telemetry, so a
+  mileage-based item's `current_mileage_km` is just the latest reading ops
+  recorded on the item itself, not a live vehicle-wide value.
+  New src/logistics/vehicle/maintenance.rs: `VehicleMaintenance { ...,
+  due_on, due_at_mileage_km, current_mileage_km, days_until_due,
+  km_until_due, status }`, `MaintenanceStatus::{UpToDate, DueSoon, Overdue}`
+  computed fresh on every read (Overdue if either a due date has passed or
+  the latest recorded mileage reached the due mileage; DueSoon within 14
+  days / 500km of either). At least one of due_on/due_at_mileage_km is
+  required. Full CRUD + `record_mileage()`, cascade-deletes with its
+  vehicle/org, indexed for the AI assistant (new ChunkKind::VehicleMaintenance)
+  - all mirroring vehicle::document's existing methods almost line for line.
+  5 new routes (GET/POST /api/vehicles/{reg}/maintenance, PUT/DELETE
+  /api/vehicle-maintenance/{id}, PUT .../mileage, GET
+  /api/orgs/{id}/vehicle-maintenance), no role restriction (matches
+  vehicle::document's precedent).
+  Frontend: a new "Vehicle Maintenance" card on the org detail page,
+  mirroring the existing "Vehicle Compliance" card immediately above it -
+  due-soon/overdue header badges, a table with status per item, an inline
+  schedule form, and per-row "Record mileage" (mileage-tracked items only)
+  / "Renew" / delete actions.
+  "With alerts" here means the same thing it already means for compliance
+  paperwork: a dashboard flag, not a push notification - see
+  docs/vehicle-maintenance.md's "Alerts" section for why that's the right
+  call here (unlike the dispatch delay-alert feature, this isn't a
+  customer-facing live-shipment event).
+  10 new Rust unit tests (maintenance.rs), 5 new Rust route tests
+  (full CRUD lifecycle incl. recording mileage; 400/404/403 cases). 6 new
+  frontend api-client tests, 3 new OrganizationDetail.test.tsx tests
+  (scheduling, due-soon/overdue badges, recording mileage via the prompt).
+  1 new Playwright flow (organization.spec.ts) scheduling a date-based item
+  and a mileage-based one, then recording an odometer reading past the due
+  mileage and confirming it flips to overdue. `cargo test --lib` (387
+  tests), `npm run test:unit` (227 tests) and the relevant Playwright specs
+  all green.
+  Plan/context: [[file:docs/vehicle-maintenance.md]]

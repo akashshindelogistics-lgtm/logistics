@@ -185,6 +185,26 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create VehicleDocuments");
 
     conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS VehicleMaintenance (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            vehicle_registration VARCHAR(255) NOT NULL,
+            description VARCHAR(255) NOT NULL,
+            due_on VARCHAR(10) DEFAULT NULL,
+            due_at_mileage_km BIGINT DEFAULT NULL,
+            current_mileage_km BIGINT DEFAULT NULL,
+            last_service_on VARCHAR(10) DEFAULT NULL,
+            notes TEXT DEFAULT NULL,
+            CONSTRAINT fk_vehiclemaint_org
+                FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE,
+            CONSTRAINT fk_vehiclemaint_vehicle
+                FOREIGN KEY (vehicle_registration)
+                REFERENCES Vehicle(registration_number) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create VehicleMaintenance");
+
+    conn.query_drop(
         "CREATE TABLE IF NOT EXISTS Customers (
             id VARCHAR(36) PRIMARY KEY,
             org_id VARCHAR(36) NOT NULL,
@@ -344,6 +364,19 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
         )",
     )
     .expect("migrate: create OrgUsers");
+
+    conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS UploadedFiles (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            content_type VARCHAR(64) NOT NULL,
+            byte_size BIGINT NOT NULL,
+            storage_path VARCHAR(512) NOT NULL,
+            uploaded_at BIGINT NOT NULL,
+            CONSTRAINT fk_uploaded_file_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create UploadedFiles");
 }
 
 /// A private, uniquely-named MySQL database scoped to exactly one test.

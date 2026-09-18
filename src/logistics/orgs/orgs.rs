@@ -3,6 +3,7 @@ use crate::logistics::db::connection::DbConnection;
 use crate::logistics::dispatch::dispatch::{
     DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus,
 };
+use crate::logistics::dispatch::route::{haversine_distance_km, nearest_neighbor_order};
 use crate::logistics::dispatch::trip::Trip;
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
@@ -20,16 +21,6 @@ fn now_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
-}
-
-fn haversine_distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    let r = 6371.0;
-    let d_lat = (lat2 - lat1).to_radians();
-    let d_lon = (lon2 - lon1).to_radians();
-    let a = (d_lat / 2.0).sin().powi(2)
-        + lat1.to_radians().cos() * lat2.to_radians().cos() * (d_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-    r * c
 }
 
 /// A validated dispatch line item plus the godown holdings it will be drawn
@@ -246,9 +237,18 @@ impl Organization {
     /// Each stop becomes a normal `DispatchOrder` (its own PENDING → …
     /// lifecycle, its own invoice, its own proof of delivery), linked by
     /// `trip_id` and ordered by `stop_sequence`.
+    ///
+    /// When `optimize_route` is true, stops 2..N are reordered by greedy
+    /// nearest-neighbour geography (see
+    /// [`crate::logistics::dispatch::route::nearest_neighbor_order`]) before
+    /// planning — the caller's first stop is always kept as the route's
+    /// starting point (and the point vehicle selection anchors on below), so
+    /// only *which order the rest are visited in* changes, never which
+    /// vehicle gets picked.
     pub fn dispatch_trip_to_customers(
         &self,
         stops: &[(&Customer, &[DispatchLineItemInput])],
+        optimize_route: bool,
     ) -> Result<Trip, Box<dyn Error>> {
         if stops.len() < 2 {
             return Err(
@@ -263,17 +263,7 @@ impl Organization {
                 }
             }
         }
-
-        let mut conn = DbConnection::from_env().get_connection()?;
-        let godowns = Godown::list_by_org(self.id)?;
-
-        // Plan every stop against a shared, decrementing stock snapshot so two
-        // stops can't over-commit the same item, and sum the volume the truck
-        // must carry for the whole trip.
-        let mut remaining = Self::stock_snapshot(&godowns);
-        let mut stop_plans: Vec<(&Customer, Vec<LineItemPlan>)> = Vec::with_capacity(stops.len());
-        let mut trip_volume: i64 = 0;
-        for (idx, (customer, line_items)) in stops.iter().enumerate() {
+        for (idx, (customer, _)) in stops.iter().enumerate() {
             if customer.location.is_none() {
                 return Err(format!(
                     "Stop {}: customer '{}' has no delivery location set",
@@ -282,6 +272,43 @@ impl Organization {
                 )
                 .into());
             }
+        }
+
+        let reordered: Option<Vec<(&Customer, &[DispatchLineItemInput])>> = if optimize_route {
+            let start = stops[0]
+                .0
+                .location
+                .as_ref()
+                .map(|l| (l.latitude, l.longitude))
+                .expect("validated above");
+            let rest_points: Vec<(f64, f64)> = stops[1..]
+                .iter()
+                .map(|(c, _)| {
+                    let l = c.location.as_ref().expect("validated above");
+                    (l.latitude, l.longitude)
+                })
+                .collect();
+            let order = nearest_neighbor_order(start, &rest_points);
+            let mut v = Vec::with_capacity(stops.len());
+            v.push(stops[0]);
+            v.extend(order.into_iter().map(|i| stops[1 + i]));
+            Some(v)
+        } else {
+            None
+        };
+        let stops: &[(&Customer, &[DispatchLineItemInput])] = reordered.as_deref().unwrap_or(stops);
+
+        let mut conn = DbConnection::from_env().get_connection()?;
+        let godowns = Godown::list_by_org(self.id)?;
+
+        // Plan every stop (in the final, possibly-optimized order) against a
+        // shared, decrementing stock snapshot so two stops can't over-commit
+        // the same item, and sum the volume the truck must carry for the
+        // whole trip.
+        let mut remaining = Self::stock_snapshot(&godowns);
+        let mut stop_plans: Vec<(&Customer, Vec<LineItemPlan>)> = Vec::with_capacity(stops.len());
+        let mut trip_volume: i64 = 0;
+        for (idx, (customer, line_items)) in stops.iter().enumerate() {
             let (plans, volume) = self
                 .plan_stock_draw(&godowns, &mut remaining, line_items)
                 .map_err(|e| -> Box<dyn Error> { format!("Stop {}: {e}", idx + 1).into() })?;
@@ -1229,17 +1256,20 @@ mod tests {
         let _db = TestDb::create();
         let (org, customers) = trip_ready_org(1);
         let err = org
-            .dispatch_trip_to_customers(&[(&customers[0], &[line("Cement", 1)][..])])
+            .dispatch_trip_to_customers(&[(&customers[0], &[line("Cement", 1)][..])], false)
             .unwrap_err();
         assert!(err.to_string().contains("at least two stops"));
 
         let (org2, customers2) = trip_ready_org(1);
         let dup = &customers2[0];
         let err = org2
-            .dispatch_trip_to_customers(&[
-                (dup, &[line("Cement", 1)][..]),
-                (dup, &[line("Cement", 1)][..]),
-            ])
+            .dispatch_trip_to_customers(
+                &[
+                    (dup, &[line("Cement", 1)][..]),
+                    (dup, &[line("Cement", 1)][..]),
+                ],
+                false,
+            )
             .unwrap_err();
         assert!(err.to_string().contains("same customer"));
     }
@@ -1250,11 +1280,14 @@ mod tests {
         let (org, customers) = trip_ready_org(3);
 
         let trip = org
-            .dispatch_trip_to_customers(&[
-                (&customers[0], &[line("Cement", 10)][..]),
-                (&customers[1], &[line("Cement", 20)][..]),
-                (&customers[2], &[line("Cement", 5)][..]),
-            ])
+            .dispatch_trip_to_customers(
+                &[
+                    (&customers[0], &[line("Cement", 10)][..]),
+                    (&customers[1], &[line("Cement", 20)][..]),
+                    (&customers[2], &[line("Cement", 5)][..]),
+                ],
+                false,
+            )
             .expect("trip");
 
         assert_eq!(trip.stops.len(), 3);
@@ -1289,10 +1322,13 @@ mod tests {
         let (org, customers) = trip_ready_org(2);
 
         let err = org
-            .dispatch_trip_to_customers(&[
-                (&customers[0], &[line("Cement", 10)][..]),
-                (&customers[1], &[line("Cement", 99_999)][..]), // can't be met
-            ])
+            .dispatch_trip_to_customers(
+                &[
+                    (&customers[0], &[line("Cement", 10)][..]),
+                    (&customers[1], &[line("Cement", 99_999)][..]), // can't be met
+                ],
+                false,
+            )
             .unwrap_err();
         assert!(err.to_string().contains("Stop 2"));
 
@@ -1325,11 +1361,70 @@ mod tests {
         c2.update_location(18.5, 73.8, Some("x")).expect("l");
 
         let err = org
-            .dispatch_trip_to_customers(&[
-                (&c1, &[line("Rebar", 5)][..]),
-                (&c2, &[line("Rebar", 5)][..]),
-            ])
+            .dispatch_trip_to_customers(
+                &[
+                    (&c1, &[line("Rebar", 5)][..]),
+                    (&c2, &[line("Rebar", 5)][..]),
+                ],
+                false,
+            )
             .unwrap_err();
         assert!(err.to_string().contains("free and large enough"));
+    }
+
+    #[test]
+    fn test_trip_optimize_route_reorders_stops_by_proximity_keeping_the_first_fixed() {
+        let _db = TestDb::create();
+        // trip_ready_org places customers at increasing latitude (already
+        // nearest-first from customer[0]), so build a case that's actually
+        // out of order: customer[0] is the fixed start, then request the
+        // farthest one (2) before the nearer one (1).
+        let (org, customers) = trip_ready_org(3);
+
+        let trip = org
+            .dispatch_trip_to_customers(
+                &[
+                    (&customers[0], &[line("Cement", 1)][..]),
+                    (&customers[2], &[line("Cement", 1)][..]), // farther, given first
+                    (&customers[1], &[line("Cement", 1)][..]), // nearer, given second
+                ],
+                true,
+            )
+            .expect("trip");
+
+        // customers[0] stays the fixed start; customers[1] (nearer) should
+        // now be visited before customers[2] (farther).
+        let ordered_customer_ids: Vec<Uuid> = trip.stops.iter().map(|s| s.customer_id).collect();
+        assert_eq!(
+            ordered_customer_ids,
+            vec![customers[0].id, customers[1].id, customers[2].id]
+        );
+        assert_eq!(
+            trip.stops.iter().filter_map(|s| s.stop_sequence).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn test_trip_without_optimize_route_keeps_the_caller_supplied_order() {
+        let _db = TestDb::create();
+        let (org, customers) = trip_ready_org(3);
+
+        let trip = org
+            .dispatch_trip_to_customers(
+                &[
+                    (&customers[0], &[line("Cement", 1)][..]),
+                    (&customers[2], &[line("Cement", 1)][..]),
+                    (&customers[1], &[line("Cement", 1)][..]),
+                ],
+                false,
+            )
+            .expect("trip");
+
+        let ordered_customer_ids: Vec<Uuid> = trip.stops.iter().map(|s| s.customer_id).collect();
+        assert_eq!(
+            ordered_customer_ids,
+            vec![customers[0].id, customers[2].id, customers[1].id]
+        );
     }
 }

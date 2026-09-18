@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import * as authApi from '../api/auth';
+import { ThemeProvider } from '../lib/theme';
 
 const navigateMock = vi.fn();
 vi.mock('react-router-dom', async importOriginal => {
@@ -13,11 +14,21 @@ vi.mock('react-router-dom', async importOriginal => {
 vi.mock('../api/auth');
 
 function renderSidebar() {
-  return render(<Sidebar />, { wrapper: MemoryRouter });
+  return render(
+    <MemoryRouter>
+      <ThemeProvider>
+        <Sidebar />
+      </ThemeProvider>
+    </MemoryRouter>,
+  );
 }
 
 describe('Sidebar', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
+  });
 
   it('shows the org badge and a sign-out button when logged in', () => {
     vi.mocked(authApi.isLoggedIn).mockReturnValue(true);
@@ -93,5 +104,19 @@ describe('Sidebar', () => {
 
     expect(authApi.clearAuth).toHaveBeenCalled();
     expect(navigateMock).toHaveBeenCalledWith('/login', { replace: true });
+  });
+
+  it('toggles the theme when the theme button is clicked', async () => {
+    const user = userEvent.setup();
+    vi.mocked(authApi.isLoggedIn).mockReturnValue(false);
+    vi.mocked(authApi.getOrgName).mockReturnValue(null);
+    vi.mocked(authApi.getOrgId).mockReturnValue(null);
+    renderSidebar();
+
+    const toggle = screen.getByRole('button', { name: /switch to dark theme/i });
+    await user.click(toggle);
+
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(screen.getByRole('button', { name: /switch to light theme/i })).toBeInTheDocument();
   });
 });

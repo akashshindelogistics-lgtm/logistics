@@ -8,6 +8,11 @@ import {
   addVehicleDocument,
   updateVehicleDocument,
   deleteVehicleDocument,
+  listOrgVehicleMaintenance,
+  addVehicleMaintenance,
+  updateVehicleMaintenance,
+  recordVehicleMaintenanceMileage,
+  deleteVehicleMaintenance,
 } from '../api/vehicles';
 import { listCustomers } from '../api/customers';
 import { createGodown, deleteGodown, addGodownStock, transferGodownStock, listStockTransfers } from '../api/godowns';
@@ -19,6 +24,7 @@ import type {
   StockTransfer,
   ComplianceDocType,
   VehicleDocument,
+  VehicleMaintenance,
 } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck, IconUsers } from '../components/Icons';
@@ -68,6 +74,26 @@ const COMPLIANCE_STATUS_META = {
   Expired: { label: 'Expired', className: 'tag-red' },
 } as const;
 
+interface MaintFormState {
+  vehicleRegistration: string;
+  description: string;
+  dueOn: string;
+  dueAtMileageKm: string;
+}
+
+const emptyMaintForm: MaintFormState = {
+  vehicleRegistration: '',
+  description: '',
+  dueOn: '',
+  dueAtMileageKm: '',
+};
+
+const MAINTENANCE_STATUS_META = {
+  UpToDate: { label: 'Up to date', className: 'tag-green' },
+  DueSoon: { label: 'Due soon', className: 'tag-amber' },
+  Overdue: { label: 'Overdue', className: 'tag-red' },
+} as const;
+
 export default function OrganizationDetail() {
   const { id } = useParams<{ id: string }>();
   const [org, setOrg] = useState<Organization | null>(null);
@@ -100,6 +126,12 @@ export default function OrganizationDetail() {
   const [docMsg, setDocMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [showDocForm, setShowDocForm] = useState(false);
 
+  const [vehicleMaintenance, setVehicleMaintenance] = useState<VehicleMaintenance[]>([]);
+  const [maintForm, setMaintForm] = useState<MaintFormState>(emptyMaintForm);
+  const [maintSubmitting, setMaintSubmitting] = useState(false);
+  const [maintMsg, setMaintMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [showMaintForm, setShowMaintForm] = useState(false);
+
   const [dCustomerId, setDCustomerId] = useState('');
   const [dLineItems, setDLineItems] = useState<{ description: string; quantity: string }[]>([
     { description: '', quantity: '' },
@@ -114,13 +146,15 @@ export default function OrganizationDetail() {
       listDrivers(),
       listStockTransfers(id!),
       listOrgVehicleDocuments(id!),
+      listOrgVehicleMaintenance(id!),
     ])
-      .then(([orgRes, custRes, drvRes, transferRes, docRes]) => {
+      .then(([orgRes, custRes, drvRes, transferRes, docRes, maintRes]) => {
         setOrg(orgRes.data ?? null);
         setCustomers(custRes.data ?? []);
         setDrivers(drvRes.data ?? []);
         setTransfers(transferRes.data ?? []);
         setVehicleDocuments(docRes.data ?? []);
+        setVehicleMaintenance(maintRes.data ?? []);
       })
       .finally(() => setLoading(false));
 
@@ -212,6 +246,84 @@ export default function OrganizationDetail() {
   const handleDeleteDocument = async (doc: VehicleDocument) => {
     if (!confirm(`Delete the ${DOC_TYPE_LABELS[doc.doc_type]} record for ${doc.vehicle_registration}?`)) return;
     await deleteVehicleDocument(doc.id);
+    load();
+  };
+
+  const handleAddMaintenance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMaintSubmitting(true);
+    setMaintMsg(null);
+    try {
+      await addVehicleMaintenance(maintForm.vehicleRegistration, {
+        description: maintForm.description,
+        due_on: maintForm.dueOn || null,
+        due_at_mileage_km: maintForm.dueAtMileageKm ? Number(maintForm.dueAtMileageKm) : null,
+      });
+      setMaintForm(emptyMaintForm);
+      setShowMaintForm(false);
+      setMaintMsg({ text: 'Maintenance item scheduled.', ok: true });
+      load();
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setMaintMsg({ text: apiMsg ? `Could not save schedule: ${apiMsg}` : 'Could not save schedule.', ok: false });
+    } finally {
+      setMaintSubmitting(false);
+    }
+  };
+
+  const handleRecordMileage = async (item: VehicleMaintenance) => {
+    const next = prompt(
+      `Current odometer reading (km) for ${item.vehicle_registration}:`,
+      item.current_mileage_km != null ? String(item.current_mileage_km) : '',
+    );
+    if (!next) return;
+    const km = Number(next);
+    if (!Number.isFinite(km)) return;
+    try {
+      await recordVehicleMaintenanceMileage(item.id, km);
+      setMaintMsg({ text: 'Odometer reading recorded.', ok: true });
+      load();
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setMaintMsg({ text: apiMsg ? `Could not record reading: ${apiMsg}` : 'Could not record reading.', ok: false });
+    }
+  };
+
+  const handleRenewMaintenance = async (item: VehicleMaintenance) => {
+    let nextDueOn = item.due_on;
+    if (item.due_on) {
+      const next = prompt(`New due date for "${item.description}" on ${item.vehicle_registration} (YYYY-MM-DD):`, item.due_on);
+      if (next === null) return;
+      nextDueOn = next || null;
+    }
+    let nextDueAtMileageKm = item.due_at_mileage_km;
+    if (item.due_at_mileage_km != null) {
+      const next = prompt(
+        `New due odometer reading (km) for "${item.description}" on ${item.vehicle_registration}:`,
+        String(item.due_at_mileage_km),
+      );
+      if (next === null) return;
+      nextDueAtMileageKm = next ? Number(next) : null;
+    }
+    try {
+      await updateVehicleMaintenance(item.id, {
+        description: item.description,
+        due_on: nextDueOn,
+        due_at_mileage_km: nextDueAtMileageKm,
+        last_service_on: new Date().toISOString().slice(0, 10),
+        notes: item.notes,
+      });
+      setMaintMsg({ text: 'Maintenance schedule updated.', ok: true });
+      load();
+    } catch (err) {
+      const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setMaintMsg({ text: apiMsg ? `Update failed: ${apiMsg}` : 'Update failed.', ok: false });
+    }
+  };
+
+  const handleDeleteMaintenance = async (item: VehicleMaintenance) => {
+    if (!confirm(`Delete the "${item.description}" maintenance schedule for ${item.vehicle_registration}?`)) return;
+    await deleteVehicleMaintenance(item.id);
     load();
   };
 
@@ -332,6 +444,9 @@ export default function OrganizationDetail() {
 
   const expiringSoonCount = vehicleDocuments.filter(d => d.status === 'ExpiringSoon').length;
   const expiredCount = vehicleDocuments.filter(d => d.status === 'Expired').length;
+
+  const maintDueSoonCount = vehicleMaintenance.filter(m => m.status === 'DueSoon').length;
+  const maintOverdueCount = vehicleMaintenance.filter(m => m.status === 'Overdue').length;
 
   const mapPins: MapPin[] = [];
   if (org.location)
@@ -679,6 +794,174 @@ export default function OrganizationDetail() {
                 </div>
                 <button className="btn btn-primary" type="submit" disabled={docSubmitting} style={{ alignSelf: 'flex-end' }}>
                   <IconPlus size={14} />{docSubmitting ? 'Saving…' : 'Save Document'}
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+
+        {/* Preventive maintenance scheduling */}
+        <div className="section-card" style={{ gridColumn: '1 / -1' }}>
+          <div className="section-card-header">
+            <span className="section-card-title"><IconTruck size={15} />Vehicle Maintenance</span>
+            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span className="badge">{vehicleMaintenance.length}</span>
+              {maintDueSoonCount > 0 && (
+                <span className="badge tag-amber">{maintDueSoonCount} due soon</span>
+              )}
+              {maintOverdueCount > 0 && (
+                <span className="badge tag-red">{maintOverdueCount} overdue</span>
+              )}
+            </span>
+          </div>
+
+          {maintMsg && (
+            <div
+              role="status"
+              style={{ margin: '12px 20px 0', padding: '10px 14px', borderRadius: 8, fontSize: 13, background: maintMsg.ok ? 'var(--green-bg)' : 'var(--red-bg)', color: maintMsg.ok ? 'var(--green-text)' : 'var(--red-text)', display: 'flex', alignItems: 'center', gap: 8 }}
+            >
+              {maintMsg.ok && <IconCheck size={14} />}
+              {maintMsg.text}
+            </div>
+          )}
+
+          {org.vehicles.length > 0 && (
+            <div style={{ padding: '12px 20px 0' }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                aria-expanded={showMaintForm}
+                onClick={() => { setShowMaintForm(v => !v); setMaintMsg(null); }}
+              >
+                <IconPlus size={13} />{showMaintForm ? 'Close' : 'Schedule maintenance'}
+              </button>
+            </div>
+          )}
+
+          {org.vehicles.length === 0 ? (
+            <div className="empty-state" style={{ padding: '28px 20px' }}>
+              <div className="empty-state-icon"><IconTruck size={22} /></div>
+              <h3>Add a vehicle to schedule maintenance</h3>
+              <p>Track each truck's next service, due by date and/or odometer mileage.</p>
+            </div>
+          ) : vehicleMaintenance.length === 0 ? (
+            <div className="empty-state" style={{ padding: '28px 20px' }}>
+              <div className="empty-state-icon"><IconTruck size={22} /></div>
+              <h3>No maintenance scheduled</h3>
+              <p>Schedule a service due by date, by odometer mileage, or both, below.</p>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Vehicle</th><th>Item</th><th>Due</th><th>Mileage</th><th>Status</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {vehicleMaintenance.map(item => {
+                    const meta = MAINTENANCE_STATUS_META[item.status];
+                    return (
+                      <tr key={item.id} data-testid="maintenance-row">
+                        <td><span className="entity-name">{item.vehicle_registration}</span></td>
+                        <td>{item.description}</td>
+                        <td>
+                          {item.due_on ? (
+                            <>
+                              {item.due_on}
+                              <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>
+                                {item.days_until_due! < 0
+                                  ? `(${-item.days_until_due!}d ago)`
+                                  : `(in ${item.days_until_due}d)`}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td>
+                          {item.due_at_mileage_km != null ? (
+                            <>
+                              {item.current_mileage_km != null ? `${item.current_mileage_km.toLocaleString()} / ` : ''}
+                              {item.due_at_mileage_km.toLocaleString()}km
+                            </>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td><span className={`badge ${meta.className}`}>{meta.label}</span></td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            {item.due_at_mileage_km != null && (
+                              <button className="btn btn-sm" onClick={() => handleRecordMileage(item)}>Record mileage</button>
+                            )}
+                            <button className="btn btn-sm" onClick={() => handleRenewMaintenance(item)}>Renew</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => handleDeleteMaintenance(item)}>
+                              <IconTrash size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {org.vehicles.length > 0 && showMaintForm && (
+            <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Schedule Maintenance</p>
+              <form onSubmit={handleAddMaintenance} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="field" style={{ flex: '0 0 170px', marginBottom: 0 }}>
+                  <label htmlFor="maint-vehicle">Vehicle</label>
+                  <select
+                    id="maint-vehicle"
+                    value={maintForm.vehicleRegistration}
+                    onChange={e => setMaintForm(f => ({ ...f, vehicleRegistration: e.target.value }))}
+                    required
+                  >
+                    <option value="">Select…</option>
+                    {org.vehicles.map(v => (
+                      <option key={v.registration_number} value={v.registration_number}>{v.registration_number}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 140, marginBottom: 0 }}>
+                  <label htmlFor="maint-description">Item</label>
+                  <input
+                    id="maint-description"
+                    value={maintForm.description}
+                    onChange={e => setMaintForm(f => ({ ...f, description: e.target.value }))}
+                    placeholder="e.g. Oil change"
+                    required
+                  />
+                </div>
+                <div className="field" style={{ flex: '0 0 160px', marginBottom: 0 }}>
+                  <label htmlFor="maint-due-on">Due Date</label>
+                  <input
+                    id="maint-due-on"
+                    type="date"
+                    value={maintForm.dueOn}
+                    onChange={e => setMaintForm(f => ({ ...f, dueOn: e.target.value }))}
+                  />
+                </div>
+                <div className="field" style={{ flex: '0 0 140px', marginBottom: 0 }}>
+                  <label htmlFor="maint-due-km">Due at (km)</label>
+                  <input
+                    id="maint-due-km"
+                    type="number"
+                    min="0"
+                    value={maintForm.dueAtMileageKm}
+                    onChange={e => setMaintForm(f => ({ ...f, dueAtMileageKm: e.target.value }))}
+                    placeholder="e.g. 50000"
+                  />
+                </div>
+                <button
+                  className="btn btn-primary"
+                  type="submit"
+                  disabled={maintSubmitting || (!maintForm.dueOn && !maintForm.dueAtMileageKm)}
+                  style={{ alignSelf: 'flex-end' }}
+                >
+                  <IconPlus size={14} />{maintSubmitting ? 'Saving…' : 'Save Schedule'}
                 </button>
               </form>
             </div>

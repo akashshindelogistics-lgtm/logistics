@@ -333,8 +333,15 @@ test.describe('Dispatches', () => {
     await expect(confirmDeliveryBtn).toBeDisabled();
 
     await page.getByLabel(/receiver name/i).fill('Priya Sharma');
-    await page.getByLabel(/signature.*photo url/i).fill('https://example.com/pod/sig.png');
-    await expect(confirmDeliveryBtn).toBeEnabled();
+    // A real small in-memory image, uploaded through the file input — the
+    // backend actually stores these bytes now (see docs/file-uploads.md),
+    // rather than accepting an arbitrary pasted URL.
+    await page.getByLabel(/signature \/ photo/i).setInputFiles({
+      name: 'signature.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('fake png bytes for the e2e test'),
+    });
+    await expect(confirmDeliveryBtn).toBeEnabled({ timeout: 8000 });
     await confirmDeliveryBtn.click();
 
     await expect(row.getByText('DELIVERED', { exact: true })).toBeVisible({ timeout: 8000 });
@@ -346,6 +353,16 @@ test.describe('Dispatches', () => {
     await row.getByRole('button', { name: /ai status/i }).click();
     await expect(page.getByText(/received by/i)).toBeVisible();
     await expect(page.getByText('Priya Sharma').last()).toBeVisible();
+
+    // The "View signature/photo" link points at our own upload-serving
+    // route and actually resolves to the uploaded bytes.
+    const podLink = page.getByRole('link', { name: /view signature\/photo/i });
+    await expect(podLink).toBeVisible();
+    const href = await podLink.getAttribute('href');
+    expect(href).toContain('/api/uploads/');
+    const fileResp = await page.request.get(href!, { headers: { Authorization: `Bearer ${token}` } });
+    expect(fileResp.ok()).toBeTruthy();
+    expect(fileResp.headers()['content-type']).toBe('image/png');
   });
 
   test('marking a dispatch RETURNED credits its stock back into a godown', async ({ page }) => {

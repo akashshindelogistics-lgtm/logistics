@@ -24,3 +24,5 @@ export const IconCheck    = i('M20 6 9 17l-5-5');
 export const IconSearch   = i('M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z');
 export const IconClock    = i('M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 5v5l4 2');
 export const IconChart    = i('M3 3v18h18M7 15l3-4 3 3 4-6');
+export const IconSun      = i('M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42');
+export const IconMoon     = i('M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z');

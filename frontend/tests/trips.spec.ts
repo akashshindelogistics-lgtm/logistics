@@ -93,4 +93,49 @@ test.describe('Multi-stop trips', () => {
     await card.getByRole('button', { name: /hide map/i }).click();
     await expect(card.locator('.leaflet-container')).toHaveCount(0);
   });
+
+  test('optimize stop order reorders stops by proximity to the first stop', async ({ page }) => {
+    const org = await registerOrg(page, `Trip Opt ${uid()}`);
+    const stock = `Cement ${uid()}`;
+
+    const reg = `TO${uid().toUpperCase()}`;
+    await api(page, 'post', `/api/orgs/${org.id}/vehicles`, { registration_number: reg, capacity: 100000, unit: 'MetricTon' });
+    const driver = await api(page, 'post', `/api/orgs/${org.id}/drivers`, { name: 'Trip Driver', license_number: `L${uid()}`, phone: '0' });
+    await api(page, 'put', `/api/vehicles/${encodeURIComponent(reg)}/driver`, { driver_id: driver.data.id });
+    const godown = await api(page, 'post', `/api/orgs/${org.id}/godowns`, { name: 'G', address: '1 Rd' });
+    await api(page, 'post', `/api/godowns/${godown.data.id}/stock`, { description: stock, quantity: 500, volume_in_size: 1 });
+
+    // Given out of nearest-first order: near, far, middle — with optimize
+    // checked, the near-vehicle-anchored stop 1 stays fixed and stops 2/3
+    // get reordered to visit "Middle" before "Far".
+    const start = `Start ${uid()}`;
+    const far = `Far ${uid()}`;
+    const middle = `Middle ${uid()}`;
+    await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: start, address: 'a', latitude: 19.00, longitude: 72.80 });
+    await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: far, address: 'b', latitude: 19.50, longitude: 72.80 });
+    await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: middle, address: 'c', latitude: 19.10, longitude: 72.80 });
+
+    await page.goto('/trips');
+    await page.getByRole('button', { name: /plan a trip/i }).click();
+    await page.getByRole('button', { name: /add another stop/i }).click();
+    await page.getByLabel(/stop 1 — customer/i).selectOption({ label: start });
+    await page.getByLabel(/stock item/i).nth(0).fill(stock);
+    await page.getByLabel(/quantity/i).nth(0).fill('10');
+    await page.getByLabel(/stop 2 — customer/i).selectOption({ label: far });
+    await page.getByLabel(/stock item/i).nth(1).fill(stock);
+    await page.getByLabel(/quantity/i).nth(1).fill('10');
+    await page.getByLabel(/stop 3 — customer/i).selectOption({ label: middle });
+    await page.getByLabel(/stock item/i).nth(2).fill(stock);
+    await page.getByLabel(/quantity/i).nth(2).fill('10');
+    await page.getByLabel(/optimize stop order/i).check();
+    await page.getByRole('button', { name: /^plan trip$/i }).click();
+
+    const card = page.locator('.section-card', { hasText: reg });
+    await expect(card).toBeVisible({ timeout: 8000 });
+    const rows = card.locator('table tbody tr');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toContainText(start);
+    await expect(rows.nth(1)).toContainText(middle);
+    await expect(rows.nth(2)).toContainText(far);
+  });
 });

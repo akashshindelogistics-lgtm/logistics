@@ -155,6 +155,49 @@ test.describe('Organization', () => {
     await expect(page.getByText(/1 expiring soon/i)).toBeVisible();
   });
 
+  test('schedule vehicle maintenance by date and by mileage, and record an odometer reading', async ({ page }) => {
+    const org = await registerOrg(page, `Maintenance Flow Org ${uid()}`);
+    const reg = `KA05MM${uid().slice(-4)}`;
+    await page.goto(`/orgs/${org.id}`);
+
+    // Add a vehicle.
+    await page.getByLabel('Registration Number').fill(reg);
+    await page.getByLabel('Capacity (MT)').fill('12');
+    await page.getByRole('button', { name: /add vehicle/i }).click();
+    await expect(page.getByTestId('fleet-table').getByText(reg)).toBeVisible({ timeout: 8000 });
+
+    // Schedule an oil change due in 5 days.
+    const soon = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+    await page.getByRole('button', { name: /schedule maintenance/i }).click();
+    await page.getByLabel('Vehicle', { exact: true }).selectOption(reg);
+    await page.getByLabel('Item').fill('Oil change');
+    await page.getByLabel('Due Date').fill(soon);
+    await page.getByRole('button', { name: /save schedule/i }).click();
+    await expect(page.getByText(/maintenance item scheduled/i)).toBeVisible({ timeout: 8000 });
+
+    const maintRow = page.getByTestId('maintenance-row').filter({ hasText: 'Oil change' });
+    await expect(maintRow.getByText('Due soon')).toBeVisible();
+    await expect(page.getByText(/1 due soon/i)).toBeVisible();
+
+    // Schedule a second item due by mileage only, then record an odometer
+    // reading that's already past it — overdue by mileage, not by date.
+    await page.getByRole('button', { name: /schedule maintenance/i }).click();
+    await page.getByLabel('Vehicle', { exact: true }).selectOption(reg);
+    await page.getByLabel('Item').fill('Tyre rotation');
+    await page.getByLabel('Due at (km)').fill('50000');
+    await page.getByRole('button', { name: /save schedule/i }).click();
+    await expect(page.getByText(/maintenance item scheduled/i)).toBeVisible({ timeout: 8000 });
+
+    const tyreRow = page.getByTestId('maintenance-row').filter({ hasText: 'Tyre rotation' });
+    await expect(tyreRow.getByText('Up to date')).toBeVisible();
+
+    page.once('dialog', dialog => dialog.accept('50500'));
+    await tyreRow.getByRole('button', { name: /record mileage/i }).click();
+    await expect(page.getByText(/odometer reading recorded/i)).toBeVisible({ timeout: 8000 });
+    await expect(tyreRow.getByText('Overdue')).toBeVisible();
+    await expect(page.getByText(/1 overdue/i)).toBeVisible();
+  });
+
   test('org detail shows Dispatch Stock form', async ({ page }) => {
     const org = await registerOrg(page, `Dispatch Form Org ${uid()}`);
     await page.goto(`/orgs/${org.id}`);

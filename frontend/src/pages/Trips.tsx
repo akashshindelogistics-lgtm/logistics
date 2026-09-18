@@ -30,6 +30,7 @@ export default function Trips() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [stops, setStops] = useState<StopDraft[]>([emptyStop(), emptyStop()]);
+  const [optimizeRoute, setOptimizeRoute] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [mapOpenId, setMapOpenId] = useState<string | null>(null);
@@ -95,8 +96,9 @@ export default function Trips() {
     setSubmitting(true);
     setError('');
     try {
-      await createTrip(orgId, payload);
+      await createTrip(orgId, payload, optimizeRoute);
       setStops([emptyStop(), emptyStop()]);
+      setOptimizeRoute(false);
       setShowForm(false);
       load();
     } catch (err) {
@@ -150,6 +152,16 @@ export default function Trips() {
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStops(prev => [...prev, emptyStop()])} style={{ marginBottom: 12 }}>
               <IconPlus size={12} />Add another stop
             </button>
+            <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <input
+                id="optimize-route"
+                type="checkbox"
+                checked={optimizeRoute}
+                onChange={e => setOptimizeRoute(e.target.checked)}
+                style={{ width: 'auto', margin: 0 }}
+              />
+              <label htmlFor="optimize-route" style={{ margin: 0 }}>Optimize stop order</label>
+            </div>
             {error && <div className="errortxt" style={{ marginBottom: 12 }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" type="submit" disabled={submitting}>

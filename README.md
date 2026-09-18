@@ -28,7 +28,10 @@ operations, live location maps, and AI-generated dispatch summaries.
   to the vehicle (each vehicle carries its own tracker key). Record each
   vehicle's compliance paperwork (insurance, RC, permit, PUC and fitness
   certificate) with expiry dates; the dashboard flags documents that are
-  expiring within 30 days or already expired.
+  expiring within 30 days or already expired. Schedule preventive
+  maintenance due by date and/or odometer mileage, with the same due-soon /
+  overdue flagging — see
+  [`docs/vehicle-maintenance.md`](docs/vehicle-maintenance.md).
 - **Drivers** — keep driver records (name, licence number, phone) per
   organization and assign one to a vehicle from the dashboard. A vehicle
   needs an **active** assigned driver, spare capacity, and no trip already
@@ -43,11 +46,14 @@ operations, live location maps, and AI-generated dispatch summaries.
   lifecycle (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/
   `RETURNED`/`CANCELLED`) with a full timestamped status history. Marking one
   `DELIVERED` requires proof of delivery (receiver name plus a
-  signature/photo); marking one `RETURNED` credits the shipment's stock back
-  into a godown.
+  signature/photo, uploaded and stored by the backend — see
+  [`docs/file-uploads.md`](docs/file-uploads.md)); marking one `RETURNED`
+  credits the shipment's stock back into a godown.
 - **Multi-stop trips** — plan one vehicle to visit several customers in a
   sequence; each stop is a normal dispatch with its own lifecycle, linked
-  under a trip whose status is derived from its stops.
+  under a trip whose status is derived from its stops. Optionally
+  auto-order the stops by proximity (nearest-neighbour route optimization)
+  instead of visiting them in the order they were entered.
 - **Freight billing** — raise one invoice per dispatch with an amount and a
   due date; the dashboard tracks each invoice as paid / pending / overdue
   and rolls a customer's unpaid invoices up into an outstanding balance.
@@ -56,8 +62,11 @@ operations, live location maps, and AI-generated dispatch summaries.
   inventory, and dispatch volume over the last 14 days.
 - **Dispatch notifications** — when a dispatch is created or delivered, a
   notification is recorded for the customer (email or SMS, whichever is on
-  file) and the driver (SMS). The Dispatches page shows the log per order.
-  Actual SMS/email sending is left to a provider integration.
+  file) and the driver (SMS), and delivered via Twilio (SMS) / Resend
+  (email) when those are configured. The Dispatches page shows the log per
+  order. A background scan also alerts the customer if a dispatch is still
+  in transit well past when it should have arrived — see
+  [`docs/delay-alerts.md`](docs/delay-alerts.md).
 - **AI dispatch summaries** — generate a natural-language summary of a
   dispatch's status using the Anthropic (Claude) API.
 - **Authentication & roles** — JWT + bcrypt login. The organization password
@@ -152,6 +161,10 @@ export TWILIO_FROM_NUMBER="+15551234567"
 export RESEND_API_KEY="re_..."
 export RESEND_FROM_EMAIL="dispatch@yourdomain.com"
 
+# Optional: where uploaded files (e.g. proof-of-delivery photos) are stored
+# on disk — see docs/file-uploads.md. Defaults to ./uploads.
+export UPLOAD_DIR="./uploads"
+
 cargo run
 ```
 
@@ -243,6 +256,10 @@ All routes are served under the `/api` prefix.
 | GET/POST | `/api/vehicles/{reg}/documents` | List / record a vehicle's compliance paperwork (insurance, RC, permit, PUC, fitness) |
 | PUT/DELETE | `/api/vehicle-documents/{id}` | Renew (update) or delete a compliance document |
 | GET | `/api/orgs/{id}/vehicle-documents` | Whole-fleet compliance list, soonest expiry first |
+| GET/POST | `/api/vehicles/{reg}/maintenance` | List / schedule preventive maintenance due by date and/or odometer mileage |
+| PUT/DELETE | `/api/vehicle-maintenance/{id}` | Update or delete a maintenance item |
+| PUT | `/api/vehicle-maintenance/{id}/mileage` | Record the vehicle's latest odometer reading against an item |
+| GET | `/api/orgs/{id}/vehicle-maintenance` | Whole-fleet maintenance list, soonest date-based due date first |
 | GET/POST | `/api/customers`, `/api/orgs/{id}/customers` | List the org's customers / add one (optionally with an initial `latitude`/`longitude`) |
 | PUT/DELETE | `/api/customers/{id}/location`, `/api/customers/{id}` | Update a customer's location / delete the customer |
 | POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to one of its customers |

@@ -46,38 +46,75 @@ A trip:
 
 | Method & path | |
 | --- | --- |
-| `POST /api/orgs/{id}/trips` | `{ stops: [{ customer_id, line_items: [{ stock_description, requested_quantity }] }] }` → the created `Trip` with its stops |
+| `POST /api/orgs/{id}/trips` | `{ stops: [{ customer_id, line_items: [{ stock_description, requested_quantity }] }], optimize_route? }` → the created `Trip` with its stops |
 | `GET /api/orgs/{id}/trips` | the org's trips, newest first, each with its stops + derived status |
 | `GET /api/trips/{id}` | one trip and its stops (owned) |
+
+## Route optimization
+
+`optimize_route: true` on create reorders stops 2..N by geography before
+planning — `stops[0]` is always kept as the route's fixed starting point (and
+the point vehicle selection still anchors on, so which vehicle gets picked
+never changes). Defaults to `false`: visit `stops` in the exact order given,
+the original behaviour.
+
+The ordering itself is a greedy **nearest-neighbour** heuristic
+(`src/logistics/dispatch/route.rs::nearest_neighbor_order`) over
+`haversine_distance_km` great-circle distance: starting from stop 1, repeatedly
+hop to whichever remaining stop is closest to wherever the walk currently is.
+It's pure math with no I/O, so it's unit-tested standalone with no database.
+This is a heuristic, not an exact solution — true "shortest tour visiting
+every point" (TSP) is NP-hard — but nearest-neighbour is a fast, standard
+approximation that works well for the handful of stops a real trip has.
+
+Reordering happens before stock is planned (not after), because *which*
+stop's request succeeds first matters when two stops on a shared, decrementing
+stock snapshot want more of an item than is on hand — so the final visiting
+order has to be settled before `plan_stock_draw` runs, not applied as a
+cosmetic re-sort of the result afterward.
 
 ## Frontend
 
 A **Trips** page (`/trips`, sidebar link): a "Plan a Trip" form with
-repeatable stop rows (customer + one stock line + quantity), and a card per
-trip showing the vehicle, the derived status, and the ordered stops with each
-stop's live dispatch status. The **Dispatches** page tags a trip stop's row
-with `Trip · stop N`.
+repeatable stop rows (customer + one stock line + quantity), an "Optimize
+stop order" checkbox, and a card per trip showing the vehicle, the derived
+status, and the ordered stops with each stop's live dispatch status. The
+**Dispatches** page tags a trip stop's row with `Trip · stop N`.
 
 ## Not done here (follow-ups)
 
 - The UI's trip form takes one stock line per stop; the API takes many.
-- No "optimise the stop order" — the sequence is exactly what the caller gives.
+- The nearest-neighbour heuristic doesn't attempt 2-opt or any other
+  tour-improvement pass — good enough for a handful of stops, but it can be
+  measurably worse than optimal on a larger or more adversarial one.
 - A trip has no status/actions of its own; you drive it stop by stop from the
   Dispatches page.
 
 ## Tests
 
+- Rust pure logic (`dispatch/route.rs`): `haversine_distance_km` against a
+  known approximate distance; `nearest_neighbor_order` is the identity on an
+  already-sorted input, reorders an out-of-order one, is a permutation of
+  every index, handles empty/single-point input, and never produces a longer
+  route than the input order on a scattered case.
 - Rust model (`orgs.rs`): a trip puts every stop on one vehicle, sequences
   them, and draws each stop's stock down; `< 2` stops / a repeated customer /
   no vehicle big enough for the combined load are rejected; a short later
-  stop rolls the whole trip back.
+  stop rolls the whole trip back; `optimize_route: true` reorders stops 2..N
+  by proximity while keeping stop 1 fixed, `false` (the default) keeps the
+  caller's exact order.
 - Rust routes (`routes.rs`): create a two-stop trip and read it back via
   `GET /trips/{id}`, `/orgs/{id}/trips`, and `/dispatches` (stops linked by
   `trip_id`); one stop / unknown customer → `400`; warehouse-staff role →
-  `403`.
-- Frontend unit: `trips` api client; the Trips page lists trips and their
-  stops, rejects `< 2` complete stops, and posts a well-formed payload.
+  `403`; `optimize_route: true` reorders stops by proximity end-to-end
+  through the API.
+- Frontend unit: `trips` api client (`optimize_route` defaults false, passes
+  through when requested); the Trips page lists trips and their stops,
+  rejects `< 2` complete stops, posts a well-formed payload, and passes
+  `optimizeRoute: true` when the checkbox is checked.
 - Playwright (`trips.spec.ts`): plan a two-stop trip through the UI and see
-  both stops share one vehicle and get tagged on the Dispatches page. Full-flow
-  demo has a "plan a multi-stop trip to two customers" step;
+  both stops share one vehicle and get tagged on the Dispatches page, plus a
+  scenario checking the "Optimize stop order" checkbox and confirming the
+  farther-away stop is visited after the nearer one. Full-flow demo has a
+  "plan a multi-stop trip to two customers" step;
   `npm run test:e2e:demo:trips` is the standalone headed walkthrough.

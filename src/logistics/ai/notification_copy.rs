@@ -89,6 +89,15 @@ fn build_dispatch_delivered_customer_prompt(customer_name: &str, dispatch_short_
     )
 }
 
+fn build_dispatch_running_late_customer_prompt(customer_name: &str, dispatch_short_id: &str, hours_late: i64) -> String {
+    format!(
+        "You are a logistics company texting a customer to apologetically let them know their order \
+        is running behind schedule and is still on its way. Customer name: {customer_name}. Order \
+        reference: {dispatch_short_id}. It is running about {hours_late} hours behind its expected \
+        delivery time. {STYLE_NOTE}"
+    )
+}
+
 /// "Your order is on its way" — for the customer, when a dispatch is created.
 pub async fn generate_dispatch_created_customer_body(customer_name: &str, dispatch_short_id: &str) -> Result<String, String> {
     call_claude(build_dispatch_created_customer_prompt(customer_name, dispatch_short_id)).await
@@ -102,6 +111,12 @@ pub async fn generate_dispatch_created_driver_body(customer_name: &str, dispatch
 /// "Your order has been delivered" — for the customer, when a dispatch is delivered.
 pub async fn generate_dispatch_delivered_customer_body(customer_name: &str, dispatch_short_id: &str) -> Result<String, String> {
     call_claude(build_dispatch_delivered_customer_prompt(customer_name, dispatch_short_id)).await
+}
+
+/// "Your order is running behind schedule" — for the customer, when a
+/// dispatch's delay alert fires.
+pub async fn generate_dispatch_running_late_customer_body(customer_name: &str, dispatch_short_id: &str, hours_late: i64) -> Result<String, String> {
+    call_claude(build_dispatch_running_late_customer_prompt(customer_name, dispatch_short_id, hours_late)).await
 }
 
 #[cfg(test)]
@@ -132,6 +147,15 @@ mod tests {
         assert!(prompt.contains("Priya Sharma"));
         assert!(prompt.contains("delivered"));
         assert!(prompt.contains("thanking"));
+    }
+
+    #[test]
+    fn build_dispatch_running_late_customer_prompt_mentions_the_delay_and_hours() {
+        let prompt = build_dispatch_running_late_customer_prompt("Priya Sharma", "a1b2c3d4", 14);
+        assert!(prompt.contains("Priya Sharma"));
+        assert!(prompt.contains("a1b2c3d4"));
+        assert!(prompt.contains("behind schedule"));
+        assert!(prompt.contains("14 hours"));
     }
 
     // The three tests below only exercise the missing-API-key error path,
@@ -171,6 +195,18 @@ mod tests {
             std::env::remove_var("ANTHROPIC_API_KEY");
         }
         let err = generate_dispatch_delivered_customer_body("Priya Sharma", "a1b2c3d4")
+            .await
+            .expect_err("should fail without an API key");
+        assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
+    }
+
+    #[actix_web::test]
+    async fn generate_dispatch_running_late_customer_body_errors_when_the_api_key_is_not_set() {
+        // SAFETY: see above.
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+        let err = generate_dispatch_running_late_customer_body("Priya Sharma", "a1b2c3d4", 14)
             .await
             .expect_err("should fail without an API key");
         assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");

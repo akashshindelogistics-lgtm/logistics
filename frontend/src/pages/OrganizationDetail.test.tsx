@@ -48,6 +48,7 @@ function mockLoad(
   vi.mocked(driversApi.listDrivers).mockResolvedValue(ok(drivers));
   vi.mocked(godownsApi.listStockTransfers).mockResolvedValue(ok([]));
   vi.mocked(vehiclesApi.listOrgVehicleDocuments).mockResolvedValue(ok([]));
+  vi.mocked(vehiclesApi.listOrgVehicleMaintenance).mockResolvedValue(ok([]));
 }
 
 function renderPage() {
@@ -62,6 +63,7 @@ describe('OrganizationDetail page', () => {
     vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
     vi.mocked(godownsApi.listStockTransfers).mockResolvedValue(ok([]));
     vi.mocked(vehiclesApi.listOrgVehicleDocuments).mockResolvedValue(ok([]));
+    vi.mocked(vehiclesApi.listOrgVehicleMaintenance).mockResolvedValue(ok([]));
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -359,6 +361,86 @@ describe('OrganizationDetail page', () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[0]).getByText('Expired')).toBeInTheDocument();
     expect(within(rows[1]).getByText('Expiring soon')).toBeInTheDocument();
+  });
+
+  it('schedules a vehicle maintenance item through the inline form', async () => {
+    const user = userEvent.setup();
+    mockLoad(
+      org({ vehicles: [{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }] }),
+    );
+    vi.mocked(vehiclesApi.addVehicleMaintenance).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByTestId('fleet-table');
+
+    await user.click(screen.getByRole('button', { name: /schedule maintenance/i }));
+    await user.selectOptions(screen.getByLabelText('Vehicle'), 'MH01AB1234');
+    await user.type(screen.getByLabelText('Item'), 'Oil change');
+    await user.type(screen.getByLabelText('Due Date'), '2027-03-31');
+    await user.click(screen.getByRole('button', { name: /save schedule/i }));
+
+    expect(vehiclesApi.addVehicleMaintenance).toHaveBeenCalledWith('MH01AB1234', {
+      description: 'Oil change',
+      due_on: '2027-03-31',
+      due_at_mileage_km: null,
+    });
+    expect(await screen.findByText(/maintenance item scheduled/i)).toBeInTheDocument();
+  });
+
+  it('flags due-soon and overdue maintenance items in the summary and table', async () => {
+    mockLoad(
+      org({ vehicles: [{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }] }),
+    );
+    vi.mocked(vehiclesApi.listOrgVehicleMaintenance).mockResolvedValue(
+      ok([
+        {
+          id: 'vm1', org_id: 'o1', vehicle_registration: 'MH01AB1234',
+          description: 'Brake pads', due_on: '2020-01-01', due_at_mileage_km: null,
+          current_mileage_km: null, last_service_on: null, notes: null,
+          days_until_due: -900, km_until_due: null, status: 'Overdue',
+        },
+        {
+          id: 'vm2', org_id: 'o1', vehicle_registration: 'MH01AB1234',
+          description: 'Tyre rotation', due_on: null, due_at_mileage_km: 50000,
+          current_mileage_km: 49600, last_service_on: null, notes: null,
+          days_until_due: null, km_until_due: 400, status: 'DueSoon',
+        },
+      ]),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('1 due soon')).toBeInTheDocument();
+    expect(screen.getByText('1 overdue')).toBeInTheDocument();
+    const rows = screen.getAllByTestId('maintenance-row');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText('Overdue')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Due soon')).toBeInTheDocument();
+  });
+
+  it('records an odometer reading through the "Record mileage" prompt', async () => {
+    const user = userEvent.setup();
+    mockLoad(
+      org({ vehicles: [{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }] }),
+    );
+    vi.mocked(vehiclesApi.listOrgVehicleMaintenance).mockResolvedValue(
+      ok([
+        {
+          id: 'vm1', org_id: 'o1', vehicle_registration: 'MH01AB1234',
+          description: 'Tyre rotation', due_on: null, due_at_mileage_km: 50000,
+          current_mileage_km: 49000, last_service_on: null, notes: null,
+          days_until_due: null, km_until_due: 1000, status: 'UpToDate',
+        },
+      ]),
+    );
+    vi.mocked(vehiclesApi.recordVehicleMaintenanceMileage).mockResolvedValue(ok({} as never));
+    vi.stubGlobal('prompt', vi.fn(() => '49500'));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /record mileage/i }));
+
+    expect(vehiclesApi.recordVehicleMaintenanceMileage).toHaveBeenCalledWith('vm1', 49500);
+    expect(await screen.findByText(/odometer reading recorded/i)).toBeInTheDocument();
   });
 
   it('assigns a driver to a vehicle from the fleet table', async () => {

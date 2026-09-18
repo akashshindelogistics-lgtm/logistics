@@ -22,12 +22,16 @@ use crate::logistics::reports::{
     DeliveryPerformance, DispatchVolumePoint, GodownInventory, OpsReport, VehicleUtilization,
 };
 use crate::logistics::stock::stock::Stock;
+use crate::logistics::upload::upload::{UploadedFile, UploadError, MAX_UPLOAD_BYTES};
 use crate::logistics::user::user::{OrgRole, OrgUser, UserError};
 use crate::logistics::vehicle::document::{
     ComplianceDocType, ComplianceStatus, VehicleDocument, VehicleDocumentError,
 };
+use crate::logistics::vehicle::maintenance::{MaintenanceStatus, VehicleMaintenance, VehicleMaintenanceError};
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
+use actix_multipart::Multipart;
 use actix_web::{delete, dev::Payload, get, post, put, web, FromRequest, HttpRequest, HttpResponse, Responder};
+use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use std::future::{ready, Ready};
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
@@ -283,6 +287,31 @@ pub struct VehicleDocumentPayload {
     pub notes: Option<String>,
 }
 
+/// Create or update one preventive-maintenance schedule item. At least one
+/// of `due_on` / `due_at_mileage_km` is required.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct VehicleMaintenancePayload {
+    /// Free text, e.g. "Oil change" or "Full service".
+    pub description: String,
+    /// Due date as ISO `YYYY-MM-DD`, optional.
+    #[serde(default)]
+    pub due_on: Option<String>,
+    /// Due odometer reading in kilometres, optional.
+    #[serde(default)]
+    pub due_at_mileage_km: Option<i64>,
+    /// When this item was last actually serviced, as ISO `YYYY-MM-DD`.
+    #[serde(default)]
+    pub last_service_on: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// Record the vehicle's latest odometer reading against a maintenance item.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct RecordMileagePayload {
+    pub current_mileage_km: i64,
+}
+
 /// One line on a dispatch request: a stock description and how many units of
 /// it to send.
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -317,6 +346,12 @@ pub struct CreateTripPayload {
     /// The stops in the order the vehicle should visit them. At least two, and
     /// no customer twice.
     pub stops: Vec<TripStopPayload>,
+    /// When true, stops 2..N are reordered by nearest-neighbour geography
+    /// before the trip is created — `stops[0]` is always kept as the route's
+    /// fixed starting point. Defaults to false (visit `stops` in the exact
+    /// order given).
+    #[serde(default)]
+    pub optimize_route: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -488,6 +523,20 @@ pub struct VehicleDocumentListResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VehicleMaintenanceResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<VehicleMaintenance>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VehicleMaintenanceListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<VehicleMaintenance>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DispatchOrderResponse {
     pub success: bool,
     pub message: String,
@@ -506,6 +555,21 @@ pub struct TripListResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Vec<Trip>>,
+}
+
+/// The minimal info handed back after a successful upload: the new file's id
+/// and the URL it can be fetched back from (`GET /api/uploads/{id}`).
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UploadedFileRef {
+    pub id: Uuid,
+    pub url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UploadedFileResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<UploadedFileRef>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1903,6 +1967,269 @@ pub async fn list_org_vehicle_documents(
     }
 }
 
+/// Load a maintenance item by id and verify it belongs to `auth_org_id`, or
+/// build the 403/404/500 response to return early with.
+fn load_owned_vehicle_maintenance(
+    item_id: Uuid,
+    auth_org_id: Uuid,
+) -> Result<VehicleMaintenance, HttpResponse> {
+    match VehicleMaintenance::get_by_id(item_id) {
+        Ok(Some(item)) if item.org_id == auth_org_id => Ok(item),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: maintenance item belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Vehicle maintenance item not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch vehicle maintenance item: {}", err),
+            data: None,
+        })),
+    }
+}
+
+/// Map a `VehicleMaintenanceError` to a caller-facing response: a bad date
+/// or a missing due criterion is a `400`, anything else a `500`.
+fn vehicle_maintenance_error_response(err: VehicleMaintenanceError) -> HttpResponse {
+    match err {
+        VehicleMaintenanceError::InvalidDate(_) | VehicleMaintenanceError::NoDueCriterion => {
+            HttpResponse::BadRequest().json(ApiResponse::<String> {
+                success: false,
+                message: err.to_string(),
+                data: None,
+            })
+        }
+        VehicleMaintenanceError::Db(_) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to save vehicle maintenance item: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/vehicles/{reg}/maintenance",
+    tag = "Vehicle maintenance",
+    security(("bearer_auth" = [])),
+    params(("reg" = String, Path, description = "Vehicle registration number")),
+    responses(
+        (status = 200, description = "Maintenance items for the vehicle, soonest date-based due date first", body = VehicleMaintenanceListResponse),
+        (status = 404, description = "Vehicle not found in this organization", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/vehicles/{reg}/maintenance")]
+pub async fn list_vehicle_maintenance(path: web::Path<String>, auth: AuthenticatedOrg) -> impl Responder {
+    let reg = path.into_inner();
+    if let Err(resp) = ensure_owned_vehicle(&reg, auth.org_id) {
+        return resp;
+    }
+    match VehicleMaintenance::list_by_vehicle(&reg) {
+        Ok(items) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} maintenance items", items.len()),
+            data: Some(items),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list vehicle maintenance items: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/vehicles/{reg}/maintenance",
+    tag = "Vehicle maintenance",
+    security(("bearer_auth" = [])),
+    params(("reg" = String, Path, description = "Vehicle registration number")),
+    request_body = VehicleMaintenancePayload,
+    responses(
+        (status = 201, description = "Maintenance item recorded", body = VehicleMaintenanceResponse),
+        (status = 400, description = "A supplied date is invalid, or neither due_on nor due_at_mileage_km was given", body = EmptyResponse),
+        (status = 404, description = "Vehicle not found in this organization", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/vehicles/{reg}/maintenance")]
+pub async fn add_vehicle_maintenance(
+    path: web::Path<String>,
+    payload: web::Json<VehicleMaintenancePayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let reg = path.into_inner();
+    if let Err(resp) = ensure_owned_vehicle(&reg, auth.org_id) {
+        return resp;
+    }
+    let body = payload.into_inner();
+    match VehicleMaintenance::create(
+        auth.org_id,
+        &reg,
+        body.description,
+        body.due_on,
+        body.due_at_mileage_km,
+        body.last_service_on,
+        body.notes,
+    ) {
+        Ok(item) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: "Vehicle maintenance item recorded".to_string(),
+            data: Some(item),
+        }),
+        Err(err) => vehicle_maintenance_error_response(err),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/vehicle-maintenance/{id}",
+    tag = "Vehicle maintenance",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vehicle maintenance item UUID")),
+    request_body = VehicleMaintenancePayload,
+    responses(
+        (status = 200, description = "Maintenance item updated", body = VehicleMaintenanceResponse),
+        (status = 400, description = "A supplied date is invalid, or neither due_on nor due_at_mileage_km was given", body = EmptyResponse),
+        (status = 403, description = "Item belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Item not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/vehicle-maintenance/{id}")]
+pub async fn update_vehicle_maintenance(
+    path: web::Path<Uuid>,
+    payload: web::Json<VehicleMaintenancePayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut item = match load_owned_vehicle_maintenance(path.into_inner(), auth.org_id) {
+        Ok(i) => i,
+        Err(resp) => return resp,
+    };
+    let body = payload.into_inner();
+    match item.update(body.description, body.due_on, body.due_at_mileage_km, body.last_service_on, body.notes) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Vehicle maintenance item updated".to_string(),
+            data: Some(item),
+        }),
+        Err(err) => vehicle_maintenance_error_response(err),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/vehicle-maintenance/{id}/mileage",
+    tag = "Vehicle maintenance",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vehicle maintenance item UUID")),
+    request_body = RecordMileagePayload,
+    responses(
+        (status = 200, description = "Odometer reading recorded", body = VehicleMaintenanceResponse),
+        (status = 403, description = "Item belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Item not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/vehicle-maintenance/{id}/mileage")]
+pub async fn record_vehicle_maintenance_mileage(
+    path: web::Path<Uuid>,
+    payload: web::Json<RecordMileagePayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut item = match load_owned_vehicle_maintenance(path.into_inner(), auth.org_id) {
+        Ok(i) => i,
+        Err(resp) => return resp,
+    };
+    match item.record_mileage(payload.into_inner().current_mileage_km) {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Odometer reading recorded".to_string(),
+            data: Some(item),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to record odometer reading: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/vehicle-maintenance/{id}",
+    tag = "Vehicle maintenance",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vehicle maintenance item UUID")),
+    responses(
+        (status = 200, description = "Maintenance item deleted", body = EmptyResponse),
+        (status = 403, description = "Item belongs to a different organization", body = EmptyResponse),
+        (status = 404, description = "Item not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[delete("/vehicle-maintenance/{id}")]
+pub async fn delete_vehicle_maintenance(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let item = match load_owned_vehicle_maintenance(path.into_inner(), auth.org_id) {
+        Ok(i) => i,
+        Err(resp) => return resp,
+    };
+    match item.delete() {
+        Ok(_) => HttpResponse::Ok().json(ApiResponse::<String> {
+            success: true,
+            message: "Vehicle maintenance item deleted".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to delete vehicle maintenance item: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/vehicle-maintenance",
+    tag = "Vehicle maintenance",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "Every maintenance item across the org's fleet, soonest date-based due date first", body = VehicleMaintenanceListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/vehicle-maintenance")]
+pub async fn list_org_vehicle_maintenance(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match VehicleMaintenance::list_by_org(org_id) {
+        Ok(items) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} maintenance items", items.len()),
+            data: Some(items),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list vehicle maintenance items: {}", err),
+            data: None,
+        }),
+    }
+}
+
 // ── Godown handlers (protected) ───────────────────────────────────────────────
 //
 // Stock is held in a godown, not directly on the organization. Every
@@ -2858,7 +3185,7 @@ pub async fn create_trip(
     let stops_ref: Vec<(&Customer, &[DispatchLineItemInput])> =
         resolved.iter().map(|(c, l)| (c, l.as_slice())).collect();
 
-    match org.dispatch_trip_to_customers(&stops_ref) {
+    match org.dispatch_trip_to_customers(&stops_ref, payload.optimize_route) {
         Ok(trip) => {
             // Best-effort per-stop notifications.
             for stop in &trip.stops {
@@ -2960,6 +3287,175 @@ pub async fn get_trip(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Res
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to fetch trip: {}", err),
+            data: None,
+        }),
+    }
+}
+
+// ── File uploads ────────────────────────────────────────────────────────────
+
+#[utoipa::path(
+    post,
+    path = "/api/orgs/{id}/uploads",
+    tag = "Uploads",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    request_body(
+        content = String,
+        description = "multipart/form-data with one `file` field — image/jpeg, image/png or image/webp, up to 5 MiB",
+        content_type = "multipart/form-data"
+    ),
+    responses(
+        (status = 200, description = "File stored", body = UploadedFileResponse),
+        (status = 400, description = "No file, an unsupported content type, or too large", body = EmptyResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/orgs/{id}/uploads")]
+pub async fn upload_file(
+    path: web::Path<Uuid>,
+    mut payload: Multipart,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: you can only upload files for your own organization"
+                .to_string(),
+            data: None,
+        });
+    }
+
+    let mut content_type: Option<String> = None;
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut found_field = false;
+
+    while let Some(item) = payload.next().await {
+        let mut field = match item {
+            Ok(f) => f,
+            Err(err) => {
+                return HttpResponse::BadRequest().json(ApiResponse::<String> {
+                    success: false,
+                    message: format!("Malformed multipart upload: {err}"),
+                    data: None,
+                })
+            }
+        };
+        found_field = true;
+        content_type = field.content_type().map(|m| m.to_string());
+
+        while let Some(chunk) = field.next().await {
+            let data = match chunk {
+                Ok(d) => d,
+                Err(err) => {
+                    return HttpResponse::BadRequest().json(ApiResponse::<String> {
+                        success: false,
+                        message: format!("Malformed multipart upload: {err}"),
+                        data: None,
+                    })
+                }
+            };
+            if bytes.len() + data.len() > MAX_UPLOAD_BYTES {
+                return HttpResponse::BadRequest().json(ApiResponse::<String> {
+                    success: false,
+                    message: format!(
+                        "File exceeds the {MAX_UPLOAD_BYTES}-byte limit"
+                    ),
+                    data: None,
+                });
+            }
+            bytes.extend_from_slice(&data);
+        }
+        break; // exactly one file field is expected
+    }
+
+    if !found_field {
+        return HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: "No file was uploaded".to_string(),
+            data: None,
+        });
+    }
+    let Some(content_type) = content_type else {
+        return HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: "Uploaded file is missing a content type".to_string(),
+            data: None,
+        });
+    };
+
+    match UploadedFile::store(org_id, &content_type, &bytes) {
+        Ok(file) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "File uploaded".to_string(),
+            data: Some(UploadedFileRef {
+                id: file.id,
+                url: format!("/api/uploads/{}", file.id),
+            }),
+        }),
+        Err(err @ (UploadError::UnsupportedContentType(_) | UploadError::Empty | UploadError::TooLarge(_))) => {
+            HttpResponse::BadRequest().json(ApiResponse::<String> {
+                success: false,
+                message: err.to_string(),
+                data: None,
+            })
+        }
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: err.to_string(),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/uploads/{id}",
+    tag = "Uploads",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Uploaded file UUID")),
+    responses(
+        (status = 200, description = "The file's raw bytes, served back with its stored content type"),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/uploads/{id}")]
+pub async fn get_uploaded_file(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let id = path.into_inner();
+    match UploadedFile::get_by_id(id) {
+        Ok(Some(file)) => {
+            if file.org_id != auth.org_id {
+                return HttpResponse::Forbidden().json(ApiResponse::<String> {
+                    success: false,
+                    message: "Access denied: this file belongs to a different organization"
+                        .to_string(),
+                    data: None,
+                });
+            }
+            match file.read_bytes() {
+                Ok(bytes) => HttpResponse::Ok().content_type(file.content_type.clone()).body(bytes),
+                Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                    success: false,
+                    message: format!("Failed to read stored file: {err}"),
+                    data: None,
+                }),
+            }
+        }
+        Ok(None) => HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "File not found".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch file: {}", err),
             data: None,
         }),
     }
@@ -3990,6 +4486,12 @@ impl Modify for SecurityAddon {
         update_vehicle_document,
         delete_vehicle_document,
         list_org_vehicle_documents,
+        list_vehicle_maintenance,
+        add_vehicle_maintenance,
+        update_vehicle_maintenance,
+        record_vehicle_maintenance_mileage,
+        delete_vehicle_maintenance,
+        list_org_vehicle_maintenance,
         list_godowns,
         create_godown,
         get_godown,
@@ -4026,6 +4528,8 @@ impl Modify for SecurityAddon {
         create_trip,
         list_org_trips,
         get_trip,
+        upload_file,
+        get_uploaded_file,
     ),
     components(
         schemas(
@@ -4036,11 +4540,12 @@ impl Modify for SecurityAddon {
             CreateGodownPayload, UpdateGodownPayload,
             CreateCustomerPayload, DispatchRequestPayload, DispatchLineItemPayload,
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
-            VehicleDocumentPayload,
+            VehicleDocumentPayload, VehicleMaintenancePayload, RecordMileagePayload,
             TransferStockPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload, InvoicePayload,
             Organization, Vehicle, Unit, Location, Stock, Godown, StockTransfer, Customer, Driver,
             VehicleDocument, ComplianceDocType, ComplianceStatus,
+            VehicleMaintenance, MaintenanceStatus, VehicleMaintenanceResponse, VehicleMaintenanceListResponse,
             DispatchOrder, DispatchLineItem, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             Invoice, PaymentStatus, CustomerBillingSummary,
             OpsReport, VehicleUtilization, DeliveryPerformance, GodownInventory, DispatchVolumePoint,
@@ -4057,6 +4562,7 @@ impl Modify for SecurityAddon {
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
             OpsReportResponse, UserResponse, UserListResponse, NotificationListResponse,
             TripResponse, TripListResponse, CreateTripPayload, TripStopPayload,
+            UploadedFileResponse, UploadedFileRef,
             AssistantAskPayload, AssistantAnswer, AssistantSource, AssistantAnswerResponse,
             AssistantReindexResult, AssistantReindexResponse,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
@@ -4070,6 +4576,7 @@ impl Modify for SecurityAddon {
         (name = "Vehicles", description = "Vehicle fleet management"),
         (name = "Drivers", description = "Driver records and vehicle assignment"),
         (name = "Vehicle compliance", description = "Vehicle paperwork (insurance, RC, permit, PUC, fitness) and expiry tracking"),
+        (name = "Vehicle maintenance", description = "Preventive maintenance scheduling by due date and/or odometer mileage, with alerts"),
         (name = "Godowns", description = "Warehouse (godown) and stock management"),
         (name = "Customers", description = "Customer management"),
         (name = "Dispatch", description = "Stock dispatch"),
@@ -4077,6 +4584,7 @@ impl Modify for SecurityAddon {
         (name = "Reports", description = "Operational reporting: fleet utilization, delivery performance, inventory, dispatch volume"),
         (name = "Notifications", description = "Customer and driver notifications recorded for each dispatch"),
         (name = "Trips", description = "Multi-stop trips: one vehicle serving several customer orders in sequence"),
+        (name = "Uploads", description = "File storage for uploaded images, e.g. proof-of-delivery photos and signatures"),
         (name = "AI Assistant", description = "Retrieval-grounded natural-language Q&A over an organization's own data"),
     )
 )]
@@ -4117,6 +4625,12 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(update_vehicle_document)
             .service(delete_vehicle_document)
             .service(list_org_vehicle_documents)
+            .service(list_vehicle_maintenance)
+            .service(add_vehicle_maintenance)
+            .service(update_vehicle_maintenance)
+            .service(record_vehicle_maintenance_mileage)
+            .service(delete_vehicle_maintenance)
+            .service(list_org_vehicle_maintenance)
             .service(list_godowns)
             .service(create_godown)
             .service(get_godown)
@@ -4152,7 +4666,9 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(list_org_notifications)
             .service(create_trip)
             .service(list_org_trips)
-            .service(get_trip),
+            .service(get_trip)
+            .service(upload_file)
+            .service(get_uploaded_file),
     )
     .service(
         SwaggerUi::new("/swagger-ui/{_:.*}")
@@ -7349,6 +7865,28 @@ mod tests {
 
     // ── Multi-stop trips ────────────────────────────────────────────────────
 
+    async fn located_customer_at(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth: &str,
+        name: &str,
+        latitude: f64,
+        longitude: f64,
+    ) -> Uuid {
+        let customer = create_customer_via_api(app, org_id, auth, name).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/customers/{}/location", customer.id))
+            .insert_header(("Authorization", auth.to_string()))
+            .set_json(&LocationPayload { latitude, longitude, address: None })
+            .to_request();
+        assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
+        customer.id
+    }
+
     async fn located_customer(
         app: &impl actix_web::dev::Service<
             actix_http::Request,
@@ -7359,14 +7897,7 @@ mod tests {
         auth: &str,
         name: &str,
     ) -> Uuid {
-        let customer = create_customer_via_api(app, org_id, auth, name).await;
-        let req = test::TestRequest::put()
-            .uri(&format!("/api/customers/{}/location", customer.id))
-            .insert_header(("Authorization", auth.to_string()))
-            .set_json(&LocationPayload { latitude: 19.07, longitude: 72.87, address: None })
-            .to_request();
-        assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
-        customer.id
+        located_customer_at(app, org_id, auth, name, 19.07, 72.87).await
     }
 
     fn trip_stop(customer_id: Uuid, qty: i64) -> TripStopPayload {
@@ -7404,7 +7935,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)] })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)], optimize_route: false })
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 200);
@@ -7469,7 +8000,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1)] })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1)], optimize_route: false })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -7477,7 +8008,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)] })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)], optimize_route: false })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -7487,7 +8018,202 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", wh))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)] })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)], optimize_route: false })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_trip_optimize_route_reorders_stops_by_proximity_via_the_api() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, first, auth) = setup_dispatch(&app, "Trip Optimize Org").await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/dispatches/{}/status", first.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateDispatchStatusPayload {
+                status: DispatchStatus::Cancelled, proof_of_delivery: None, return_to_godown_id: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        // c1 is the fixed start; c_far is much farther from c1 than c_near is.
+        let c1 = located_customer_at(&app, org.id, &auth, "Start", 19.07, 72.87).await;
+        let c_far = located_customer_at(&app, org.id, &auth, "Far Stop", 19.50, 73.30).await;
+        let c_near = located_customer_at(&app, org.id, &auth, "Near Stop", 19.08, 72.88).await;
+
+        // Given in "far, then near" order, but with optimize_route the API
+        // should visit the nearer one second.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/trips", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateTripPayload {
+                stops: vec![trip_stop(c1, 1), trip_stop(c_far, 1), trip_stop(c_near, 1)],
+                optimize_route: true,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let trip = test::read_body_json::<ApiResponse<Trip>, _>(resp).await.data.unwrap();
+
+        let ordered_customers: Vec<Uuid> = trip.stops.iter().map(|s| s.customer_id).collect();
+        assert_eq!(ordered_customers, vec![c1, c_near, c_far]);
+    }
+
+    // ── File uploads ────────────────────────────────────────────────────────
+
+    /// Build a raw `multipart/form-data` body with one file field, for tests
+    /// — actix-web's test utilities have no multipart helper of their own.
+    fn multipart_body(boundary: &str, filename: &str, content_type: &str, bytes: &[u8]) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n")
+                .as_bytes(),
+        );
+        body.extend_from_slice(format!("Content-Type: {content_type}\r\n\r\n").as_bytes());
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        body
+    }
+
+    fn upload_request(
+        org_id: Uuid,
+        auth: Option<&str>,
+        filename: &str,
+        content_type: &str,
+        bytes: &[u8],
+    ) -> actix_http::Request {
+        let boundary = "TestBoundary1234";
+        let body = multipart_body(boundary, filename, content_type, bytes);
+        let mut req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/uploads", org_id))
+            .insert_header((
+                "Content-Type",
+                format!("multipart/form-data; boundary={boundary}"),
+            ))
+            .set_payload(body);
+        if let Some(auth) = auth {
+            req = req.insert_header(("Authorization", auth.to_string()));
+        }
+        req.to_request()
+    }
+
+    #[actix_web::test]
+    async fn test_upload_file_stores_it_and_serves_it_back() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _, auth) = setup_dispatch(&app, "Upload Org").await;
+
+        let bytes = b"fake png bytes for a test".to_vec();
+        let req = upload_request(org.id, Some(&auth), "pod.png", "image/png", &bytes);
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let uploaded = test::read_body_json::<ApiResponse<UploadedFileRef>, _>(resp)
+            .await
+            .data
+            .unwrap();
+        assert_eq!(uploaded.url, format!("/api/uploads/{}", uploaded.id));
+
+        // Serve it back — same bytes, same content type, via GET /api/uploads/{id}.
+        let req = test::TestRequest::get()
+            .uri(&uploaded.url)
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap().to_str().unwrap(),
+            "image/png"
+        );
+        let body = test::read_body(resp).await;
+        assert_eq!(body.as_ref(), bytes.as_slice());
+    }
+
+    #[actix_web::test]
+    async fn test_upload_file_requires_auth() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _, _) = setup_dispatch(&app, "Upload Auth Org").await;
+
+        let req = upload_request(org.id, None, "pod.png", "image/png", b"bytes");
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_upload_file_rejects_a_different_orgs_token() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org1, _, _) = setup_dispatch(&app, "Upload Org One").await;
+        let (_, auth2) = setup_org(&app, "Upload Org Two").await;
+
+        let req = upload_request(org1.id, Some(&auth2), "pod.png", "image/png", b"bytes");
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_upload_file_requires_dispatch_role() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _, auth) = setup_dispatch(&app, "Upload Role Org").await;
+        let wh = add_user_and_login(&app, org.id, &auth, "upload-wh@example.com", OrgRole::WarehouseStaff).await;
+
+        let req = upload_request(org.id, Some(&wh), "pod.png", "image/png", b"bytes");
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_upload_file_rejects_unsupported_content_type() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _, auth) = setup_dispatch(&app, "Upload CT Org").await;
+
+        let req = upload_request(org.id, Some(&auth), "notes.pdf", "application/pdf", b"%PDF-1.4");
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_upload_file_rejects_a_file_over_the_size_limit() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, _, auth) = setup_dispatch(&app, "Upload Size Org").await;
+
+        let too_big = vec![0u8; MAX_UPLOAD_BYTES + 1];
+        let req = upload_request(org.id, Some(&auth), "big.png", "image/png", &too_big);
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_get_uploaded_file_404s_for_an_unknown_id() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_, _, auth) = setup_dispatch(&app, "Upload 404 Org").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/uploads/{}", Uuid::new_v4()))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_get_uploaded_file_403s_for_a_different_orgs_token() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org1, _, auth1) = setup_dispatch(&app, "Upload Get Org One").await;
+        let (_, auth2) = setup_org(&app, "Upload Get Org Two").await;
+
+        let req = upload_request(org1.id, Some(&auth1), "pod.png", "image/png", b"bytes");
+        let uploaded = test::read_body_json::<ApiResponse<UploadedFileRef>, _>(
+            test::call_service(&app, req).await,
+        )
+        .await
+        .data
+        .unwrap();
+
+        let req = test::TestRequest::get()
+            .uri(&uploaded.url)
+            .insert_header(("Authorization", auth2))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
@@ -8187,6 +8913,194 @@ mod tests {
 
         let req = test::TestRequest::get()
             .uri(&format!("/api/orgs/{}/vehicle-documents", org_a.id))
+            .insert_header(("Authorization", auth_b))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    // ── Vehicle preventive maintenance ──────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_vehicle_maintenance_crud_via_api() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Maintenance Co").await;
+        add_vehicle_via_api(&app, org.id, &auth, "KA07-M2-1111").await;
+
+        // Schedule an oil change due in 5 days — "due soon".
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/KA07-M2-1111/maintenance")
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&VehicleMaintenancePayload {
+                description: "Oil change".to_string(),
+                due_on: Some(iso_date_offset(5)),
+                due_at_mileage_km: Some(50_000),
+                last_service_on: Some(iso_date_offset(-175)),
+                notes: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let created: ApiResponse<VehicleMaintenance> = test::read_body_json(resp).await;
+        let item = created.data.unwrap();
+        assert_eq!(item.status, MaintenanceStatus::DueSoon);
+        assert_eq!(item.km_until_due, None); // no odometer reading recorded yet
+
+        // It shows up in the per-vehicle list.
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles/KA07-M2-1111/maintenance")
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let list: ApiResponse<Vec<VehicleMaintenance>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(list.data.unwrap().len(), 1);
+
+        // Record an odometer reading past the due mileage -> overdue by mileage.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-maintenance/{}/mileage", item.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&RecordMileagePayload { current_mileage_km: 50_500 })
+            .to_request();
+        let recorded: ApiResponse<VehicleMaintenance> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let recorded = recorded.data.unwrap();
+        assert_eq!(recorded.status, MaintenanceStatus::Overdue);
+        assert_eq!(recorded.current_mileage_km, Some(50_500));
+
+        // Update it: push the due date and mileage forward (the service was done).
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-maintenance/{}", item.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&VehicleMaintenancePayload {
+                description: "Oil change".to_string(),
+                due_on: Some(iso_date_offset(180)),
+                due_at_mileage_km: Some(60_000),
+                last_service_on: Some(iso_date_offset(0)),
+                notes: Some("done at the depot".to_string()),
+            })
+            .to_request();
+        let updated: ApiResponse<VehicleMaintenance> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let updated = updated.data.unwrap();
+        assert_eq!(updated.status, MaintenanceStatus::UpToDate);
+        assert_eq!(updated.notes, Some("done at the depot".to_string()));
+
+        // The org-wide maintenance list sees it too.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vehicle-maintenance", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let org_list: ApiResponse<Vec<VehicleMaintenance>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(org_list.data.unwrap().len(), 1);
+
+        // Delete it.
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/vehicle-maintenance/{}", item.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles/KA07-M2-1111/maintenance")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let list: ApiResponse<Vec<VehicleMaintenance>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert!(list.data.unwrap().is_empty());
+    }
+
+    #[actix_web::test]
+    async fn test_add_vehicle_maintenance_rejects_no_due_criterion_with_400() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, auth) = setup_org(&app, "No Criterion Co").await;
+        add_vehicle_via_api(&app, _org.id, &auth, "NC-VH-1").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/NC-VH-1/maintenance")
+            .insert_header(("Authorization", auth))
+            .set_json(&VehicleMaintenancePayload {
+                description: "Oil change".to_string(),
+                due_on: None,
+                due_at_mileage_km: None,
+                last_service_on: None,
+                notes: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_add_vehicle_maintenance_404_for_a_vehicle_in_another_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, auth_a) = setup_org(&app, "Fleet Owner").await;
+        let (_org_b, auth_b) = setup_org(&app, "Fleet Other").await;
+        add_vehicle_via_api(&app, org_a.id, &auth_a, "OWN-VH-2").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/OWN-VH-2/maintenance")
+            .insert_header(("Authorization", auth_b))
+            .set_json(&VehicleMaintenancePayload {
+                description: "Sneaky service".to_string(),
+                due_on: Some(iso_date_offset(30)),
+                due_at_mileage_km: None,
+                last_service_on: None,
+                notes: None,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_update_vehicle_maintenance_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, auth_a) = setup_org(&app, "Maint Owner").await;
+        let (_org_b, auth_b) = setup_org(&app, "Maint Intruder").await;
+        add_vehicle_via_api(&app, org_a.id, &auth_a, "MAINT-VH-1").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/vehicles/MAINT-VH-1/maintenance")
+            .insert_header(("Authorization", auth_a))
+            .set_json(&VehicleMaintenancePayload {
+                description: "Brake pads".to_string(),
+                due_on: Some(iso_date_offset(90)),
+                due_at_mileage_km: None,
+                last_service_on: None,
+                notes: None,
+            })
+            .to_request();
+        let created: ApiResponse<VehicleMaintenance> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let item_id = created.data.unwrap().id;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-maintenance/{item_id}"))
+            .insert_header(("Authorization", auth_b))
+            .set_json(&VehicleMaintenancePayload {
+                description: "Hijacked".to_string(),
+                due_on: Some(iso_date_offset(90)),
+                due_at_mileage_km: None,
+                last_service_on: None,
+                notes: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_list_org_vehicle_maintenance_403_for_a_different_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, _auth_a) = setup_org(&app, "Maint Fleet A").await;
+        let (_org_b, auth_b) = setup_org(&app, "Maint Fleet B").await;
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vehicle-maintenance", org_a.id))
             .insert_header(("Authorization", auth_b))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);

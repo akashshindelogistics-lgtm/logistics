@@ -8,6 +8,7 @@ import * as orgsApi from '../api/orgs';
 import * as billingApi from '../api/billing';
 import * as notificationsApi from '../api/notifications';
 import * as authApi from '../api/auth';
+import * as uploadsApi from '../api/uploads';
 import type { DispatchOrder, Invoice } from '../types';
 
 vi.mock('../api/dispatches');
@@ -15,6 +16,7 @@ vi.mock('../api/orgs');
 vi.mock('../api/billing');
 vi.mock('../api/notifications');
 vi.mock('../api/auth');
+vi.mock('../api/uploads');
 
 function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
   return {
@@ -85,6 +87,49 @@ describe('Dispatches page', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
+  it('shows a "Running late" badge for an IN_TRANSIT order past its promised delivery window', async () => {
+    const longAgo = Math.floor(Date.now() / 1000) - 100 * 3600; // 100h ago > 72h target
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true,
+      message: '',
+      data: [makeOrder({ status: 'IN_TRANSIT', dispatched_at: longAgo })],
+    });
+    render(<Dispatches />);
+
+    await screen.findByText('IN TRANSIT');
+    expect(screen.getByText(/running late/i)).toBeInTheDocument();
+  });
+
+  it('does not show a "Running late" badge for a recent IN_TRANSIT order', async () => {
+    const recently = Math.floor(Date.now() / 1000) - 3600; // 1h ago, well under 72h
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true,
+      message: '',
+      data: [makeOrder({ status: 'IN_TRANSIT', dispatched_at: recently })],
+    });
+    render(<Dispatches />);
+
+    await screen.findByText('IN TRANSIT');
+    expect(screen.queryByText(/running late/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show a "Running late" badge for an old but terminal (DELIVERED) order', async () => {
+    const longAgo = Math.floor(Date.now() / 1000) - 500 * 3600;
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true,
+      message: '',
+      data: [makeOrder({
+        status: 'DELIVERED',
+        dispatched_at: longAgo,
+        proof_of_delivery: { receiver_name: 'R', signature_or_photo_url: 'https://x/y.png', delivered_at: longAgo },
+      })],
+    });
+    render(<Dispatches />);
+
+    await screen.findByText('DELIVERED');
+    expect(screen.queryByText(/running late/i)).not.toBeInTheDocument();
+  });
+
   it('shows no lifecycle actions for a terminal status', async () => {
     vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
       success: true,
@@ -132,6 +177,10 @@ describe('Dispatches page', () => {
       ],
     });
     vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+    vi.mocked(uploadsApi.uploadFile).mockResolvedValue({
+      success: true, message: '', data: { id: 'file-1', url: '/api/uploads/file-1' },
+    });
+    vi.mocked(uploadsApi.uploadedFileHref).mockImplementation(path => path);
     vi.mocked(dispatchesApi.updateDispatchStatus).mockResolvedValue({
       success: true,
       message: 'Dispatch status updated to DELIVERED',
@@ -140,7 +189,7 @@ describe('Dispatches page', () => {
         status: 'DELIVERED',
         proof_of_delivery: {
           receiver_name: 'Priya Sharma',
-          signature_or_photo_url: 'https://example.com/sig.png',
+          signature_or_photo_url: '/api/uploads/file-1',
           delivered_at: 3,
         },
       },
@@ -157,17 +206,18 @@ describe('Dispatches page', () => {
     expect(confirmBtn).toBeDisabled();
 
     await user.type(screen.getByLabelText(/receiver name/i), 'Priya Sharma');
-    expect(confirmBtn).toBeDisabled(); // still missing the photo/signature URL
+    expect(confirmBtn).toBeDisabled(); // still missing the photo/signature
 
-    await user.type(screen.getByLabelText(/signature.*photo url/i), 'https://example.com/sig.png');
-    expect(confirmBtn).toBeEnabled();
+    const file = new File(['fake-bytes'], 'sig.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText(/signature \/ photo/i), file);
+    await waitFor(() => expect(confirmBtn).toBeEnabled());
 
     await user.click(confirmBtn);
 
     expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith(
       'order-1',
       'DELIVERED',
-      { receiver_name: 'Priya Sharma', signature_or_photo_url: 'https://example.com/sig.png' },
+      { receiver_name: 'Priya Sharma', signature_or_photo_url: '/api/uploads/file-1' },
       undefined,
     );
     await waitFor(() => expect(screen.getByText('DELIVERED')).toBeInTheDocument());
@@ -256,6 +306,7 @@ describe('Dispatches page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Invoice' }));
     await user.type(screen.getByLabelText('Freight Amount'), '4500');
+    await user.clear(screen.getByLabelText('Due Date'));
     await user.type(screen.getByLabelText('Due Date'), '2026-09-30');
     await user.click(screen.getByRole('button', { name: /raise invoice/i }));
 
@@ -264,6 +315,20 @@ describe('Dispatches page', () => {
       dueOn: '2026-09-30',
     });
     await waitFor(() => expect(screen.getByRole('button', { name: /mark paid/i })).toBeInTheDocument());
+  });
+
+  it('pre-fills the invoice due date 30 days out (net-30 terms), still editable', async () => {
+    const user = userEvent.setup();
+    const order = makeOrder();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [order] });
+
+    render(<Dispatches />);
+    await screen.findByText('PENDING');
+    await user.click(screen.getByRole('button', { name: 'Invoice' }));
+
+    const expected = new Date();
+    expected.setDate(expected.getDate() + 30);
+    expect(screen.getByLabelText('Due Date')).toHaveValue(expected.toISOString().slice(0, 10));
   });
 
   it('marks an existing pending invoice paid', async () => {
@@ -318,5 +383,65 @@ describe('Dispatches page', () => {
     // QUEUED and SKIPPED.
     const failedTag = screen.getByText('FAILED');
     expect(failedTag).toHaveClass('tag-red');
+  });
+
+  it('uploads a proof-of-delivery photo and confirms delivery with the uploaded URL', async () => {
+    const user = userEvent.setup();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true, message: '', data: [makeOrder({ status: 'IN_TRANSIT' })],
+    });
+    vi.mocked(uploadsApi.uploadFile).mockResolvedValue({
+      success: true, message: '', data: { id: 'file-1', url: '/api/uploads/file-1' },
+    });
+    vi.mocked(uploadsApi.uploadedFileHref).mockImplementation(path => path);
+    vi.mocked(dispatchesApi.updateDispatchStatus).mockResolvedValue({
+      success: true, message: '', data: makeOrder({ status: 'DELIVERED' }),
+    });
+
+    render(<Dispatches />);
+    await user.click(await screen.findByRole('button', { name: /mark delivered/i }));
+    await user.type(screen.getByLabelText(/receiver name/i), 'Ramesh');
+
+    const confirmBtn = screen.getByRole('button', { name: /confirm delivery/i });
+    expect(confirmBtn).toBeDisabled();
+
+    const file = new File(['fake-bytes'], 'pod.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText(/signature \/ photo/i), file);
+
+    expect(uploadsApi.uploadFile).toHaveBeenCalledWith('org-1', file);
+    await waitFor(() => expect(confirmBtn).not.toBeDisabled());
+    expect(screen.getByText(/uploaded/i)).toBeInTheDocument();
+
+    await user.click(confirmBtn);
+    await waitFor(() =>
+      expect(dispatchesApi.updateDispatchStatus).toHaveBeenCalledWith(
+        'order-1',
+        'DELIVERED',
+        { receiver_name: 'Ramesh', signature_or_photo_url: '/api/uploads/file-1' },
+        undefined,
+      ),
+    );
+  });
+
+  it('shows an error and keeps Confirm Delivery disabled when the upload fails', async () => {
+    const user = userEvent.setup();
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({
+      success: true, message: '', data: [makeOrder({ status: 'IN_TRANSIT' })],
+    });
+    vi.mocked(uploadsApi.uploadFile).mockRejectedValue(new Error('unsupported content type'));
+
+    render(<Dispatches />);
+    await user.click(await screen.findByRole('button', { name: /mark delivered/i }));
+    await user.type(screen.getByLabelText(/receiver name/i), 'Ramesh');
+
+    // A valid image type — the point of this test is the server rejecting
+    // the upload (e.g. it decides the bytes aren't really an image), which
+    // the browser's `accept` filter wouldn't catch anyway.
+    const file = new File(['not actually an image'], 'pod.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText(/signature \/ photo/i), file);
+
+    expect(await screen.findByText(/upload failed/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm delivery/i })).toBeDisabled();
+    expect(dispatchesApi.updateDispatchStatus).not.toHaveBeenCalled();
   });
 });
