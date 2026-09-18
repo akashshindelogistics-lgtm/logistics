@@ -315,7 +315,30 @@
   away. 2 new Rust route tests, 3 new frontend api-client tests, 2 new Customers
   page tests, 2 new Playwright flows. docs/customers.md + README updated.
   Plan/context: [[file:docs/customers.md]]
-* TODO Update e2e demo flow as new changes + features are added to logistics system
+* DONE Update e2e demo flow as new changes + features are added to logistics system
+  This is a standing habit, not a one-time deliverable - each feature
+  already gets its own demo/spec coverage when it ships (see the DONE notes
+  above for route optimization, file uploads, delay alerts, vehicle
+  maintenance, etc.), but the single full-workflow narrative
+  (frontend/tests/e2e-full-flow.spec.ts, run via `npm run test:e2e:demo`)
+  had fallen behind. Caught it up in this pass: a new "Switch to dark mode"
+  step right after registering (the whole rest of the walkthrough now runs
+  themed, since the choice persists across the sign-out/login step), a new
+  "Schedule preventive maintenance for the vehicle" step right after the
+  existing compliance-document step, and the freight-invoice step now
+  asserts the Due Date field is already prefilled 30 days out (net-30)
+  instead of filling it by hand. Left the multi-stop trip step as-is
+  (doesn't exercise the "Optimize stop order" checkbox - that already has
+  its own dedicated coverage in trips.spec.ts/trips.demo.ts, and adding it
+  here would need deliberately-scattered customer geography this step
+  doesn't otherwise need) and didn't attempt to demonstrate delay alerts
+  (documented as infeasible from a browser flow in docs/delay-alerts.md's
+  "Known limitations" - dispatched_at isn't caller-settable). Passes
+  headless (`npx playwright test tests/e2e-full-flow.spec.ts`) and headed
+  under playwright.demo.config.ts.
+  Whoever picks up the next feature should keep doing this: add the new
+  step(s) to this file when they touch a flow this walkthrough already
+  covers, the same way this pass did.
 * DONE All CI workflows should run on push to branch.
   The three test workflows (frontend-unit-tests, frontend-integration,
   periodic-tests) triggered only on push to main/master, so a feature branch

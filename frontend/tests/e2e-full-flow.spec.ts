@@ -2,10 +2,13 @@ import { test, expect } from '@playwright/test';
 import { registerOrg, loginOrg, uid } from './helpers';
 
 /**
- * A single, narrated walk through the whole product: register an org, sign
- * out and back in, build up a warehouse and fleet, dispatch a multi-item
- * shipment to a customer, glance at the ops report while it's out, carry it
- * through its delivery lifecycle, raise and pay a freight invoice, and
+ * A single, narrated walk through the whole product: register an org,
+ * switch to dark mode, sign out and back in, build up a warehouse and
+ * fleet (including a vehicle's compliance paperwork and its preventive
+ * maintenance schedule), dispatch a multi-item shipment to a customer,
+ * glance at the ops report while it's out, carry it through its delivery
+ * lifecycle (uploading a real proof-of-delivery photo), raise and pay a
+ * freight invoice (its due date defaulting to a standard "net 30"), and
  * dispatch + return a second shipment to see its stock credited back into a
  * godown.
  *
@@ -36,6 +39,11 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await expect(page).toHaveURL(`/orgs/${created.id}`);
     await expect(page.getByRole('heading', { level: 1 })).toContainText(orgName);
     return created;
+  });
+
+  await test.step('Switch to dark mode', async () => {
+    await page.getByRole('button', { name: /switch to dark theme/i }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   });
 
   await test.step('Sign out and log back in', async () => {
@@ -116,6 +124,15 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await page.getByLabel('Expiry Date').fill(expiry);
     await page.getByRole('button', { name: /save document/i }).click();
     await expect(page.getByText(/compliance document recorded/i)).toBeVisible({ timeout: 8000 });
+  });
+
+  await test.step('Schedule preventive maintenance for the vehicle', async () => {
+    await page.getByRole('button', { name: /schedule maintenance/i }).click();
+    await page.getByLabel('Vehicle', { exact: true }).selectOption(vehicleReg);
+    await page.getByLabel('Item', { exact: true }).fill('Full service');
+    await page.getByLabel('Due at (km)').fill('50000');
+    await page.getByRole('button', { name: /save schedule/i }).click();
+    await expect(page.getByText(/maintenance item scheduled/i)).toBeVisible({ timeout: 8000 });
   });
 
   await test.step('Add a driver and assign them to the vehicle', async () => {
@@ -251,11 +268,13 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
 
   await test.step('Raise a freight invoice for the delivered dispatch and mark it paid', async () => {
     const row = page.locator('tbody tr').filter({ hasText: stockA });
-    const due = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+    const expectedDue = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
 
     await row.getByRole('button', { name: 'Invoice' }).click();
+    // Due Date defaults to 30 days out (a standard "net 30") — no need to
+    // fill it in by hand.
+    await expect(page.getByLabel('Due Date')).toHaveValue(expectedDue);
     await page.getByLabel('Freight Amount').fill('4500');
-    await page.getByLabel('Due Date').fill(due);
     await page.getByRole('button', { name: /raise invoice/i }).click();
 
     const billing = row.getByTestId('billing-cell');
