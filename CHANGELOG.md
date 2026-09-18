@@ -4,6 +4,25 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.8.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.7.0...v0.8.0) (2026-09-18)
+
+
+### Features
+
+* **billing:** default a new invoice's due date to net-30 ([b7d285d](https://github.com/akashshindelogistics-lgtm/logistics/commit/b7d285d050f283393c1f1c90cf72658191c51550))
+* **dispatches:** real file storage for proof-of-delivery photos ([9feeeae](https://github.com/akashshindelogistics-lgtm/logistics/commit/9feeeae08f80b0cd4b4ecff9321c09873c9cb0f3))
+* **notifications:** delay/ETA-drift alerts for in-transit dispatches ([36a70a1](https://github.com/akashshindelogistics-lgtm/logistics/commit/36a70a114ea41eff5d74ffb58b8335926de4be6a))
+* **trips:** live vehicle location tracking on multi-stop trips ([e521d65](https://github.com/akashshindelogistics-lgtm/logistics/commit/e521d659e1fc6cd64ea880d10a543674aeb927fb))
+* **trips:** opt-in route optimization for multi-stop trip creation ([de470cb](https://github.com/akashshindelogistics-lgtm/logistics/commit/de470cbd327a2ad6ef8bbe6c89d217854bd6d3a1))
+* **trips:** show a trip's vehicle location alongside its planned stops ([1accbd9](https://github.com/akashshindelogistics-lgtm/logistics/commit/1accbd95aebd8d1b9a6f31d7937974ef2485b11c))
+* **ui:** add a light/dark theme toggle ([3030cd2](https://github.com/akashshindelogistics-lgtm/logistics/commit/3030cd2f6b3032110f2fc970d0900246096a446c))
+* **vehicles:** preventive maintenance scheduling by date and/or mileage ([9ee2dd1](https://github.com/akashshindelogistics-lgtm/logistics/commit/9ee2dd13b2bc72c34ef0e28b216a244c3e34b9e9))
+
+
+### Bug Fixes
+
+* **trips:** decouple location-tracking commit from the uncommitted route-optimization feature ([7f4c167](https://github.com/akashshindelogistics-lgtm/logistics/commit/7f4c1673749e5fe7a96539437905b47e3585d9d7))
+
 ## [0.7.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.6.0...v0.7.0) (2026-09-13)
 
 
