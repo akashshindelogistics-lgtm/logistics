@@ -157,6 +157,70 @@ fn coordinates_in_range(latitude: f64, longitude: f64) -> bool {
     (-90.0..=90.0).contains(&latitude) && (-180.0..=180.0).contains(&longitude)
 }
 
+/// How many fixes one `POST /api/driver/location` call may carry. A phone
+/// that was offline for a while flushes its queue in batches of this size.
+const MAX_DRIVER_FIXES_PER_REQUEST: usize = 100;
+/// How far ahead of the server clock a fix's `recorded_at` may be, to absorb
+/// phone clock skew without letting a wrong clock pin the vehicle's location
+/// in the future (which would make every later real fix look "older").
+const MAX_FIX_CLOCK_SKEW_SECS: i64 = 300;
+
+/// One position captured by the driver's phone.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct DriverLocationFix {
+    pub latitude: f64,
+    pub longitude: f64,
+    /// When the phone captured the fix, in unix seconds. Not the time it was
+    /// uploaded: an offline phone sends old fixes late.
+    pub recorded_at: i64,
+    /// Horizontal accuracy in metres, as reported by the OS.
+    #[serde(default)]
+    pub accuracy_m: Option<f64>,
+    /// Ground speed in metres per second.
+    #[serde(default)]
+    pub speed_mps: Option<f64>,
+}
+
+/// Body of `POST /api/driver/location`.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct DriverLocationPayload {
+    pub fixes: Vec<DriverLocationFix>,
+}
+
+/// Result of a driver location report.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverLocationResult {
+    /// How many fixes in the batch were valid and considered.
+    pub accepted: usize,
+    /// `false` when the whole batch was older than what the vehicle already
+    /// has (for example a late duplicate upload), so nothing moved.
+    pub location_updated: bool,
+    pub vehicle_registration_number: String,
+    /// The vehicle's location after the report.
+    pub location: Option<Location>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverLocationResultResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<DriverLocationResult>,
+}
+
+/// A newly issued driver device token. The plain token is shown exactly once.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverDeviceToken {
+    pub driver_id: Uuid,
+    pub device_token: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverDeviceTokenResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<DriverDeviceToken>,
+}
+
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateVehiclePayload {
     pub registration_number: String,
@@ -1433,6 +1497,218 @@ pub async fn rotate_vehicle_tracker_key(
             message: format!("Failed to rotate tracker key: {}", err),
             data: None,
         }),
+    }
+}
+
+fn json_error(status: actix_web::http::StatusCode, message: impl Into<String>) -> HttpResponse {
+    HttpResponse::build(status).json(ApiResponse::<String> {
+        success: false,
+        message: message.into(),
+        data: None,
+    })
+}
+
+/// Check one fix from a driver's phone. Returns the reason it is unusable.
+fn validate_driver_fix(fix: &DriverLocationFix, now: i64) -> Result<(), String> {
+    if !coordinates_in_range(fix.latitude, fix.longitude) {
+        return Err(
+            "latitude must be between -90 and 90 and longitude between -180 and 180".to_string(),
+        );
+    }
+    if fix.recorded_at <= 0 {
+        return Err("recorded_at must be a positive unix timestamp in seconds".to_string());
+    }
+    if fix.recorded_at > now + MAX_FIX_CLOCK_SKEW_SECS {
+        return Err(format!(
+            "recorded_at is more than {} seconds in the future — check the phone's clock",
+            MAX_FIX_CLOCK_SKEW_SECS
+        ));
+    }
+    if fix.accuracy_m.is_some_and(|a| !a.is_finite() || a < 0.0) {
+        return Err("accuracy_m must be a non-negative number".to_string());
+    }
+    if fix.speed_mps.is_some_and(|v| !v.is_finite() || v < 0.0) {
+        return Err("speed_mps must be a non-negative number".to_string());
+    }
+    Ok(())
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/driver/location",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    request_body = DriverLocationPayload,
+    responses(
+        (status = 200, description = "Fixes processed", body = DriverLocationResultResponse),
+        (status = 400, description = "Empty or oversized batch, or an invalid fix", body = EmptyResponse),
+        (status = 401, description = "Missing or unknown device token", body = EmptyResponse),
+        (status = 403, description = "The driver is inactive", body = EmptyResponse),
+        (status = 409, description = "The driver has no assigned vehicle", body = EmptyResponse)
+    )
+)]
+/// Location report from the driver's phone app. Authenticated by the driver's
+/// device token (`Authorization: Bearer <token>`, issued by
+/// `POST /api/drivers/{id}/device-token/rotate`) — not an org login. The
+/// server works out which vehicle the driver is assigned to and moves it to
+/// the newest fix in the batch. Fixes are timestamped by the phone, and the
+/// vehicle's location only ever moves forward, so a late or repeated upload
+/// cannot pull it backwards. The whole batch is rejected if any fix is
+/// invalid, so the app can fix or drop the offending fix and resend rather
+/// than guess which ones landed.
+#[post("/driver/location")]
+pub async fn report_driver_location(
+    req: HttpRequest,
+    payload: web::Json<DriverLocationPayload>,
+) -> impl Responder {
+    use actix_web::http::StatusCode;
+
+    let token = match req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .and_then(|t| Uuid::parse_str(t.trim()).ok())
+    {
+        Some(t) => t,
+        None => {
+            return json_error(
+                StatusCode::UNAUTHORIZED,
+                "Missing or malformed driver device token",
+            )
+        }
+    };
+
+    let driver = match Driver::by_device_token(token) {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            return json_error(StatusCode::UNAUTHORIZED, "Unknown driver device token")
+        }
+        Err(err) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to look up device token: {}", err),
+            )
+        }
+    };
+    if !driver.is_active {
+        return json_error(StatusCode::FORBIDDEN, "This driver is inactive");
+    }
+
+    if payload.fixes.is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "fixes must not be empty");
+    }
+    if payload.fixes.len() > MAX_DRIVER_FIXES_PER_REQUEST {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "at most {} fixes may be sent per request",
+                MAX_DRIVER_FIXES_PER_REQUEST
+            ),
+        );
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    for (i, fix) in payload.fixes.iter().enumerate() {
+        if let Err(reason) = validate_driver_fix(fix, now) {
+            return json_error(StatusCode::BAD_REQUEST, format!("fixes[{}]: {}", i, reason));
+        }
+    }
+
+    let mut vehicle = match Vehicle::by_assigned_driver(driver.id) {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return json_error(
+                StatusCode::CONFLICT,
+                "This driver has no assigned vehicle — ask your dispatcher to assign one",
+            )
+        }
+        Err(err) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find the driver's vehicle: {}", err),
+            )
+        }
+    };
+
+    // Only the newest fix can move the vehicle; older ones in the batch would
+    // be overwritten immediately.
+    let newest = payload
+        .fixes
+        .iter()
+        .max_by_key(|f| f.recorded_at)
+        .expect("batch is non-empty");
+    let updated = match vehicle.record_fix(newest.latitude, newest.longitude, newest.recorded_at) {
+        Ok(u) => u,
+        Err(err) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to record location: {}", err),
+            )
+        }
+    };
+
+    HttpResponse::Ok().json(ApiResponse {
+        success: true,
+        message: if updated {
+            "Location recorded".to_string()
+        } else {
+            "Location not updated: the vehicle already has a newer position".to_string()
+        },
+        data: Some(DriverLocationResult {
+            accepted: payload.fixes.len(),
+            location_updated: updated,
+            vehicle_registration_number: vehicle.registration_number.clone(),
+            location: vehicle.location.clone(),
+        }),
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/drivers/{id}/device-token/rotate",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Driver UUID")),
+    responses(
+        (status = 200, description = "A fresh device token was issued; it is shown only once", body = DriverDeviceTokenResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Driver not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+/// Issue a new device token for a driver's phone, invalidating the previous
+/// one. Use it to pair a phone for the first time and again if the phone is
+/// lost. The plain token is returned only in this response — the server keeps
+/// just a hash — so hand it to the driver straight away. Requires an Admin or
+/// Dispatcher.
+#[post("/drivers/{id}/device-token/rotate")]
+pub async fn rotate_driver_device_token(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let driver = match load_owned_driver(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match driver.rotate_device_token() {
+        Ok(token) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "A fresh device token was issued".to_string(),
+            data: Some(DriverDeviceToken {
+                driver_id: driver.id,
+                device_token: token,
+            }),
+        }),
+        Err(err) => json_error(
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to rotate device token: {}", err),
+        ),
     }
 }
 
@@ -4486,6 +4762,8 @@ impl Modify for SecurityAddon {
         update_vehicle_location,
         track_vehicle_location,
         rotate_vehicle_tracker_key,
+        report_driver_location,
+        rotate_driver_device_token,
         delete_vehicle,
         list_drivers,
         add_driver,
@@ -4569,6 +4847,8 @@ impl Modify for SecurityAddon {
             StockTransferResponse, StockTransferListResponse,
             CustomerResponse, CustomerListResponse,
             DriverResponse, DriverListResponse,
+            DriverLocationFix, DriverLocationPayload, DriverLocationResult, DriverLocationResultResponse,
+            DriverDeviceToken, DriverDeviceTokenResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
             OpsReportResponse, UserResponse, UserListResponse, NotificationListResponse,
@@ -4625,6 +4905,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(update_vehicle_location)
             .service(track_vehicle_location)
             .service(rotate_vehicle_tracker_key)
+            .service(report_driver_location)
+            .service(rotate_driver_device_token)
             .service(delete_vehicle)
             .service(list_drivers)
             .service(add_driver)
@@ -5489,6 +5771,384 @@ mod tests {
             .insert_header(("Authorization", other_auth))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    // ── Driver phone tracking ─────────────────────────────────────────────────
+
+    fn unix_now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    fn fix(latitude: f64, longitude: f64, recorded_at: i64) -> DriverLocationFix {
+        DriverLocationFix { latitude, longitude, recorded_at, accuracy_m: Some(8.0), speed_mps: Some(5.0) }
+    }
+
+    /// Create a driver, optionally assign it to a fresh vehicle, and pair a
+    /// phone. Returns `(driver_id, device_token)`.
+    async fn pair_driver_phone(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        org_id: Uuid,
+        auth: &str,
+        vehicle_reg: Option<&str>,
+    ) -> (Uuid, Uuid) {
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/drivers", org_id))
+            .insert_header(("Authorization", auth.to_string()))
+            .set_json(&CreateDriverPayload {
+                name: "Phone Driver".to_string(),
+                license_number: "DL-PH-1".to_string(),
+                phone: "+91 90000 00001".to_string(),
+            })
+            .to_request();
+        let resp = test::call_service(app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let driver_id = test::read_body_json::<ApiResponse<Driver>, _>(resp).await.data.unwrap().id;
+
+        if let Some(reg) = vehicle_reg {
+            register_vehicle(app, org_id, auth, reg).await;
+            let req = test::TestRequest::put()
+                .uri(&format!("/api/vehicles/{}/driver", reg))
+                .insert_header(("Authorization", auth.to_string()))
+                .set_json(&AssignDriverPayload { driver_id: Some(driver_id) })
+                .to_request();
+            assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
+        }
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/drivers/{}/device-token/rotate", driver_id))
+            .insert_header(("Authorization", auth.to_string()))
+            .to_request();
+        let resp = test::call_service(app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let token = test::read_body_json::<ApiResponse<DriverDeviceToken>, _>(resp)
+            .await
+            .data
+            .unwrap()
+            .device_token;
+        (driver_id, token)
+    }
+
+    async fn post_driver_fixes(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        token: Option<&str>,
+        fixes: Vec<DriverLocationFix>,
+    ) -> actix_web::dev::ServiceResponse {
+        let mut req = test::TestRequest::post()
+            .uri("/api/driver/location")
+            .set_json(&DriverLocationPayload { fixes });
+        if let Some(t) = token {
+            req = req.insert_header(("Authorization", format!("Bearer {}", t)));
+        }
+        test::call_service(app, req.to_request()).await
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_moves_the_assigned_vehicle_using_only_the_device_token() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Track Org").await;
+        let (_driver, token) = pair_driver_phone(&app, org.id, &auth, Some("PH-VH-1")).await;
+
+        let t = unix_now() - 30;
+        let resp = post_driver_fixes(&app, Some(&token.to_string()), vec![fix(18.5204, 73.8567, t)]).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<DriverLocationResult> = test::read_body_json(resp).await;
+        let result = body.data.unwrap();
+        assert_eq!(result.accepted, 1);
+        assert!(result.location_updated);
+        assert_eq!(result.vehicle_registration_number, "PH-VH-1");
+
+        // Visible on the org's fleet list, stamped with the phone's capture time.
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let body: ApiResponse<Vec<Vehicle>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let loc = body.data.unwrap().into_iter().find(|v| v.registration_number == "PH-VH-1").unwrap().location.unwrap();
+        assert_eq!(loc.latitude, 18.5204);
+        assert_eq!(loc.timestamp, t);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_batch_applies_only_the_newest_fix() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Batch Org").await;
+        let (_d, token) = pair_driver_phone(&app, org.id, &auth, Some("PH-VH-2")).await;
+
+        let now = unix_now();
+        // Deliberately out of order inside the batch.
+        let resp = post_driver_fixes(
+            &app,
+            Some(&token.to_string()),
+            vec![fix(3.0, 3.0, now - 10), fix(1.0, 1.0, now - 50), fix(2.0, 2.0, now - 30)],
+        )
+        .await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let result = test::read_body_json::<ApiResponse<DriverLocationResult>, _>(resp).await.data.unwrap();
+        assert_eq!(result.accepted, 3);
+        let loc = result.location.unwrap();
+        assert_eq!((loc.latitude, loc.timestamp), (3.0, now - 10));
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_late_upload_cannot_move_the_vehicle_backwards() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Late Org").await;
+        let (_d, token) = pair_driver_phone(&app, org.id, &auth, Some("PH-VH-3")).await;
+        let token = token.to_string();
+
+        let now = unix_now();
+        let resp = post_driver_fixes(&app, Some(&token), vec![fix(10.0, 10.0, now - 10)]).await;
+        assert_eq!(resp.status().as_u16(), 200);
+
+        // A queued, older batch arrives afterwards.
+        let resp = post_driver_fixes(&app, Some(&token), vec![fix(49.0, 20.0, now - 600)]).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let result = test::read_body_json::<ApiResponse<DriverLocationResult>, _>(resp).await.data.unwrap();
+        assert!(!result.location_updated);
+        let loc = result.location.unwrap();
+        assert_eq!((loc.latitude, loc.longitude), (10.0, 10.0));
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_without_a_token_is_401() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let resp = post_driver_fixes(&app, None, vec![fix(1.0, 1.0, unix_now())]).await;
+        assert_eq!(resp.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_with_unknown_or_malformed_token_is_401() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let unknown = Uuid::new_v4().to_string();
+        assert_eq!(post_driver_fixes(&app, Some(&unknown), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 401);
+        assert_eq!(post_driver_fixes(&app, Some("not-a-uuid"), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_rejects_an_org_bearer_token() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Org Token Org").await;
+        pair_driver_phone(&app, org.id, &auth, Some("PH-VH-4")).await;
+
+        // An org JWT is not a device token.
+        let jwt = auth.trim_start_matches("Bearer ").to_string();
+        assert_eq!(post_driver_fixes(&app, Some(&jwt), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_rotating_the_token_kills_the_old_one() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Rotate Org").await;
+        let (driver_id, old) = pair_driver_phone(&app, org.id, &auth, Some("PH-VH-5")).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/drivers/{}/device-token/rotate", driver_id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let new = test::read_body_json::<ApiResponse<DriverDeviceToken>, _>(test::call_service(&app, req).await)
+            .await
+            .data
+            .unwrap()
+            .device_token;
+        assert_ne!(old, new);
+
+        let t = unix_now();
+        assert_eq!(post_driver_fixes(&app, Some(&old.to_string()), vec![fix(1.0, 1.0, t)]).await.status().as_u16(), 401);
+        assert_eq!(post_driver_fixes(&app, Some(&new.to_string()), vec![fix(1.0, 1.0, t)]).await.status().as_u16(), 200);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_from_an_inactive_driver_is_403() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Inactive Org").await;
+        let (driver_id, token) = pair_driver_phone(&app, org.id, &auth, Some("PH-VH-6")).await;
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/drivers/{}", driver_id))
+            .insert_header(("Authorization", auth))
+            .set_json(&UpdateDriverPayload {
+                name: "Phone Driver".to_string(),
+                license_number: "DL-PH-1".to_string(),
+                phone: "+91 90000 00001".to_string(),
+                is_active: false,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        assert_eq!(post_driver_fixes(&app, Some(&token.to_string()), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_with_no_assigned_vehicle_is_409() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Unassigned Org").await;
+        let (_d, token) = pair_driver_phone(&app, org.id, &auth, None).await;
+
+        assert_eq!(post_driver_fixes(&app, Some(&token.to_string()), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 409);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_validates_the_batch() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Validate Org").await;
+        let (_d, token) = pair_driver_phone(&app, org.id, &auth, Some("PH-VH-7")).await;
+        let token = token.to_string();
+        let now = unix_now();
+
+        // Empty batch.
+        assert_eq!(post_driver_fixes(&app, Some(&token), vec![]).await.status().as_u16(), 400);
+        // Oversized batch.
+        let big: Vec<_> = (0..(MAX_DRIVER_FIXES_PER_REQUEST as i64 + 1)).map(|i| fix(1.0, 1.0, now - i)).collect();
+        assert_eq!(post_driver_fixes(&app, Some(&token), big).await.status().as_u16(), 400);
+        // Out-of-range coordinates.
+        assert_eq!(post_driver_fixes(&app, Some(&token), vec![fix(120.0, 10.0, now)]).await.status().as_u16(), 400);
+        assert_eq!(post_driver_fixes(&app, Some(&token), vec![fix(10.0, 190.0, now)]).await.status().as_u16(), 400);
+        // Non-positive and far-future timestamps.
+        assert_eq!(post_driver_fixes(&app, Some(&token), vec![fix(1.0, 1.0, 0)]).await.status().as_u16(), 400);
+        assert_eq!(post_driver_fixes(&app, Some(&token), vec![fix(1.0, 1.0, now + 3_600)]).await.status().as_u16(), 400);
+        // Negative accuracy / speed.
+        let mut bad = fix(1.0, 1.0, now);
+        bad.accuracy_m = Some(-1.0);
+        assert_eq!(post_driver_fixes(&app, Some(&token), vec![bad]).await.status().as_u16(), 400);
+        let mut bad = fix(1.0, 1.0, now);
+        bad.speed_mps = Some(-5.0);
+        assert_eq!(post_driver_fixes(&app, Some(&token), vec![bad]).await.status().as_u16(), 400);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_one_bad_fix_rejects_the_whole_batch() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Phone Atomic Org").await;
+        let (_d, token) = pair_driver_phone(&app, org.id, &auth, Some("PH-VH-8")).await;
+
+        let now = unix_now();
+        let resp = post_driver_fixes(
+            &app,
+            Some(&token.to_string()),
+            vec![fix(5.0, 5.0, now - 5), fix(500.0, 5.0, now - 1)],
+        )
+        .await;
+        assert_eq!(resp.status().as_u16(), 400);
+
+        // The good fix in the rejected batch did not move the vehicle.
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let body: ApiResponse<Vec<Vehicle>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let v = body.data.unwrap().into_iter().find(|v| v.registration_number == "PH-VH-8").unwrap();
+        assert!(v.location.is_none());
+    }
+
+    #[actix_web::test]
+    async fn test_driver_location_does_not_touch_another_orgs_vehicle() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org_a, auth_a) = setup_org(&app, "Phone Tenant A").await;
+        let (org_b, auth_b) = setup_org(&app, "Phone Tenant B").await;
+        let (_da, token_a) = pair_driver_phone(&app, org_a.id, &auth_a, Some("PH-A-1")).await;
+        pair_driver_phone(&app, org_b.id, &auth_b, Some("PH-B-1")).await;
+
+        assert_eq!(post_driver_fixes(&app, Some(&token_a.to_string()), vec![fix(7.0, 7.0, unix_now() - 5)]).await.status().as_u16(), 200);
+
+        let req = test::TestRequest::get()
+            .uri("/api/vehicles")
+            .insert_header(("Authorization", auth_b))
+            .to_request();
+        let body: ApiResponse<Vec<Vehicle>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let v = body.data.unwrap().into_iter().find(|v| v.registration_number == "PH-B-1").unwrap();
+        assert!(v.location.is_none(), "org B's vehicle is untouched by org A's driver");
+    }
+
+    #[actix_web::test]
+    async fn test_rotate_driver_device_token_from_another_org_returns_403() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Token Owner Org").await;
+        let (_other, other_auth) = setup_org(&app, "Token Attacker Org").await;
+        let (driver_id, _t) = pair_driver_phone(&app, org.id, &auth, None).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/drivers/{}/device-token/rotate", driver_id))
+            .insert_header(("Authorization", other_auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_rotate_driver_device_token_unknown_driver_returns_404() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, auth) = setup_org(&app, "Token Missing Org").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/drivers/{}/device-token/rotate", Uuid::new_v4()))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_rotate_driver_device_token_requires_admin_or_dispatcher() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Token Role Org").await;
+        let (driver_id, _t) = pair_driver_phone(&app, org.id, &auth, None).await;
+
+        let staff_token = generate_user_token(
+            org.id,
+            &org.name,
+            Some(Uuid::new_v4()),
+            OrgRole::WarehouseStaff.as_str(),
+        )
+        .expect("user token");
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/drivers/{}/device-token/rotate", driver_id))
+            .insert_header(("Authorization", format!("Bearer {}", staff_token)))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_driver_responses_never_contain_the_device_token() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Token Leak Org").await;
+        let (_d, token) = pair_driver_phone(&app, org.id, &auth, None).await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/drivers")
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let bytes = test::read_body(test::call_service(&app, req).await).await;
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(!text.contains(&token.to_string()));
+        assert!(!text.contains("device_token"));
     }
 
     /// Create an org (with credentials) and one godown under it, returning
