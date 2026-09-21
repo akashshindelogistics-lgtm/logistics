@@ -997,3 +997,16 @@
   category, transfer between godowns (merge vs. new-row), dispatch, and the
   reports category breakdown.
   Plan/context: [[file:docs/stock-categories.md]]
+* TODO [#B] New-organisation onboarding flow - guided setup so a new org can reach its first dispatch, instead of landing on empty pages
+  Plan written: [[file:docs/onboarding.md]]
+  Defaults chosen: public self-serve signup that creates the org plus its first
+  Admin OrgUser (email login via the existing user-login), a checklist derived
+  from real data (godown, stock, vehicle, driver, assignment, customer) rather
+  than stored wizard state, CSV import as a later phase, and inviting
+  teammates as an optional step. Open questions (mail transport, geocoding
+  provider, sunset of org-name login, plan limits) are listed in the plan.
+** TODO Phase 1: backend - POST /api/auth/signup (org + Admin user atomically), password rules, rate limit, terms_accepted_at, tests, OpenAPI, README
+** TODO Phase 2: checklist API (GET /api/orgs/{id}/onboarding + dismiss), dashboard panel, empty states, Register/Login updates, unit + Playwright + standalone demo flow
+** TODO Phase 3: email verification and an upgrade prompt for existing orgs without an Admin user
+** TODO Phase 4: CSV import (vehicles, drivers, customers, stock) with dry run and templates
+** TODO Phase 5 (optional): sample data load/remove and address geocoding
