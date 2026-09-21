@@ -30,6 +30,7 @@ struct LineItemPlan {
     description: String,
     quantity: i64,
     volume_in_size: i64,
+    category: String,
     /// `(godown_id, quantity_to_draw_from_it)` — the exact per-godown draw
     /// this line needs, largest source first.
     holdings: Vec<(Uuid, i64)>,
@@ -412,10 +413,12 @@ impl Organization {
 
         for li in line_items {
             let mut volume_in_size: Option<i64> = None;
+            let mut category: Option<String> = None;
             let mut holdings: Vec<(Uuid, i64)> = Vec::new();
             for g in godowns {
                 if let Some(s) = g.stock.iter().find(|s| s.description == li.stock_description) {
                     volume_in_size.get_or_insert(s.volume_in_size);
+                    category.get_or_insert_with(|| s.category.clone());
                     let have = scratch
                         .get(&(g.id, li.stock_description.clone()))
                         .copied()
@@ -433,6 +436,9 @@ impl Organization {
                 )
                 .into());
             };
+            // Always set alongside `volume_in_size` above, from the same matched
+            // stock row, so this is never actually `None` here.
+            let category = category.unwrap_or_else(crate::logistics::stock::stock::default_category);
 
             let total_available: i64 = holdings.iter().map(|(_, q)| q).sum();
             if total_available < li.requested_quantity {
@@ -466,6 +472,7 @@ impl Organization {
                 description: li.stock_description.clone(),
                 quantity: li.requested_quantity,
                 volume_in_size,
+                category,
                 holdings: take_from,
             });
         }
@@ -501,6 +508,7 @@ impl Organization {
                 stock_description: plan.description,
                 quantity: plan.quantity,
                 volume_in_size: plan.volume_in_size,
+                category: plan.category,
             });
         }
         Ok(items)
@@ -996,6 +1004,65 @@ mod tests {
             .map(|li| li.stock_description.as_str())
             .collect();
         assert_eq!(descs, ["Cement", "Rebar", "Sand"]);
+    }
+
+    #[test]
+    fn test_dispatch_snapshots_the_matched_stocks_category_onto_the_line_item() {
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("Category Co", "Pune HQ").expect("org");
+        org.update_location(18.52, 73.85, Some("Pune")).expect("org loc");
+
+        let godown = Godown::create(org.id, "G1", "MIDC A", None).expect("g1");
+        Stock::new(2, 100, "Cement")
+            .with_category("Building Materials")
+            .add_to_godown(godown.id)
+            .expect("cement");
+
+        let driver = Driver::create(org.id, "Driver", "LIC-C", "0").expect("driver");
+        let mut v = Vehicle::new("MH14 CT 0001", 10_000, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("vehicle");
+        v.update_location(18.52, 73.85, Some("Pune")).expect("v loc");
+        v.assign_driver(Some(driver.id)).expect("assign");
+
+        let mut customer = Customer::create_customer(org.id, "Buyer", "Baner").expect("customer");
+        customer.update_location(18.55, 73.78, Some("Baner")).expect("cust loc");
+
+        let order = org
+            .dispatch_stock_to_customer(&customer, &[line("Cement", 30)])
+            .expect("dispatch");
+
+        assert_eq!(order.line_items[0].category, "Building Materials");
+        let reloaded = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
+        assert_eq!(reloaded.line_items[0].category, "Building Materials");
+    }
+
+    #[test]
+    fn test_dispatch_uses_the_first_matched_godowns_category_when_they_disagree() {
+        let _db = TestDb::create();
+        let mut org = Organization::create_organization("Disagreeing Co", "Pune HQ").expect("org");
+        org.update_location(18.52, 73.85, Some("Pune")).expect("org loc");
+
+        // Two godowns hold "Cement" under two different categories — nothing
+        // enforces agreement, so the first godown matched (query order) wins.
+        let g1 = Godown::create(org.id, "G1", "MIDC A", None).expect("g1");
+        let g2 = Godown::create(org.id, "G2", "MIDC B", None).expect("g2");
+        Stock::new(2, 50, "Cement").with_category("Category A").add_to_godown(g1.id).expect("cement g1");
+        Stock::new(2, 50, "Cement").with_category("Category B").add_to_godown(g2.id).expect("cement g2");
+
+        let driver = Driver::create(org.id, "Driver", "LIC-D", "0").expect("driver");
+        let mut v = Vehicle::new("MH14 CT 0002", 10_000, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("vehicle");
+        v.update_location(18.52, 73.85, Some("Pune")).expect("v loc");
+        v.assign_driver(Some(driver.id)).expect("assign");
+
+        let mut customer = Customer::create_customer(org.id, "Buyer", "Baner").expect("customer");
+        customer.update_location(18.55, 73.78, Some("Baner")).expect("cust loc");
+
+        let order = org
+            .dispatch_stock_to_customer(&customer, &[line("Cement", 30)])
+            .expect("dispatch");
+
+        assert_eq!(order.line_items[0].category, "Category A");
     }
 
     #[test]

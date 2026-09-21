@@ -38,7 +38,11 @@ operations, live location maps, and AI-generated dispatch summaries.
   in progress before it can be selected for a dispatch.
 - **Stock** — add, update, and remove stock items held in an organization's
   godowns, and transfer a stock item between two godowns with a recorded
-  audit trail of every move.
+  audit trail of every move. Each stock item carries a free-text, org-defined
+  **category** (e.g. "Cement", "Electronics"), which is carried through to
+  dispatch line items and transfer records so the transport side reflects
+  what kind of goods are moving — see
+  [`docs/stock-categories.md`](docs/stock-categories.md).
 - **Customers** — manage customer records and their delivery locations. Each
   customer belongs to one organization and is never shared between orgs.
 - **Dispatches** — create dispatch orders that move one or more stock line

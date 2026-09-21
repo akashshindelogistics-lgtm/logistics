@@ -19,7 +19,8 @@ use crate::logistics::notification::notification::{
 };
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::reports::{
-    DeliveryPerformance, DispatchVolumePoint, GodownInventory, OpsReport, VehicleUtilization,
+    CategoryUnits, DeliveryPerformance, DispatchVolumePoint, GodownInventory, OpsReport,
+    VehicleUtilization,
 };
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::upload::upload::{UploadedFile, UploadError, MAX_UPLOAD_BYTES};
@@ -174,6 +175,10 @@ pub struct CreateStockPayload {
     pub volume_in_size: i64,
     pub quantity: i64,
     pub description: String,
+    /// Free-text, org-defined category (e.g. "Cement", "Electronics").
+    /// Defaults to `"General"` when omitted.
+    #[serde(default = "crate::logistics::stock::stock::default_category")]
+    pub category: String,
     /// Optional reorder point — the item is flagged (`below_threshold`) once
     /// `quantity` drops under this.
     #[serde(default)]
@@ -185,6 +190,10 @@ pub struct UpdateStockPayload {
     pub volume_in_size: i64,
     pub quantity: i64,
     pub description: String,
+    /// Free-text, org-defined category (e.g. "Cement", "Electronics").
+    /// Defaults to `"General"` when omitted.
+    #[serde(default = "crate::logistics::stock::stock::default_category")]
+    pub category: String,
     /// Optional reorder point. Sending `null` (or omitting it) clears any
     /// existing threshold.
     #[serde(default)]
@@ -2523,6 +2532,7 @@ pub async fn add_godown_stock(
         payload.quantity,
         &payload.description,
     )
+    .with_category(&payload.category)
     .with_reorder_threshold(payload.reorder_threshold);
 
     match stock.add_to_godown(godown.id) {
@@ -2582,6 +2592,7 @@ pub async fn update_godown_stock(
         godown.id,
         payload.volume_in_size,
         payload.quantity,
+        &payload.category,
         payload.reorder_threshold,
     ) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse {
@@ -4548,7 +4559,7 @@ impl Modify for SecurityAddon {
             VehicleMaintenance, MaintenanceStatus, VehicleMaintenanceResponse, VehicleMaintenanceListResponse,
             DispatchOrder, DispatchLineItem, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,
             Invoice, PaymentStatus, CustomerBillingSummary,
-            OpsReport, VehicleUtilization, DeliveryPerformance, GodownInventory, DispatchVolumePoint,
+            OpsReport, VehicleUtilization, DeliveryPerformance, GodownInventory, CategoryUnits, DispatchVolumePoint,
             Notification, NotificationEvent, NotificationChannel, NotificationStatus,
             Trip, TripStatus,
             OrgSummary,
@@ -5601,6 +5612,7 @@ mod tests {
                 volume_in_size: 100,
                 quantity: 100,
                 description: "Dispatch Test Goods".to_string(),
+                category: "General".to_string(),
                 reorder_threshold: None,
             })
             .to_request();
@@ -5924,6 +5936,7 @@ mod tests {
             volume_in_size: 50,
             quantity: 100,
             description: "Ghost Stock".to_string(),
+            category: "General".to_string(),
             reorder_threshold: None,
         };
         let req = test::TestRequest::post()
@@ -5946,6 +5959,7 @@ mod tests {
             volume_in_size: 50,
             quantity: 100,
             description: "Stolen Goods".to_string(),
+            category: "General".to_string(),
             reorder_threshold: None,
         };
         let req = test::TestRequest::post()
@@ -5970,6 +5984,7 @@ mod tests {
             volume_in_size: 200,
             quantity: 75,
             description: "Nonexistent Stock Description".to_string(),
+            category: "General".to_string(),
             reorder_threshold: None,
         };
         let req = test::TestRequest::put()
@@ -6009,6 +6024,7 @@ mod tests {
             volume_in_size: 999,
             quantity: 999,
             description: "Tampered Stock".to_string(),
+            category: "General".to_string(),
             reorder_threshold: None,
         };
         let req = test::TestRequest::put()
@@ -6103,6 +6119,7 @@ mod tests {
                 volume_in_size,
                 quantity,
                 description: description.to_string(),
+                category: "General".to_string(),
                 reorder_threshold: None,
             })
             .to_request();
@@ -6145,6 +6162,51 @@ mod tests {
         assert_eq!(transfers[0].from_godown_id, from.id);
         assert_eq!(transfers[0].to_godown_id, to.id);
         assert_eq!(transfers[0].description, "Cement");
+    }
+
+    #[actix_web::test]
+    async fn test_transfer_godown_stock_carries_the_sources_category_to_a_new_destination_row() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, from, auth_header) =
+            setup_org_with_godown(&app, "Transfer Category Org", "Source Godown").await;
+        let to = add_godown(&app, org.id, &auth_header, "Dest Godown", None).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", from.id))
+            .insert_header(("Authorization", auth_header.clone()))
+            .set_json(&CreateStockPayload {
+                volume_in_size: 5,
+                quantity: 100,
+                description: "Cement".to_string(),
+                category: "Building Materials".to_string(),
+                reorder_threshold: None,
+            })
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/transfer", from.id))
+            .insert_header(("Authorization", auth_header.clone()))
+            .set_json(&TransferStockPayload {
+                to_godown_id: to.id,
+                description: "Cement".to_string(),
+                quantity: 40,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let body: ApiResponse<StockTransfer> = test::read_body_json(resp).await;
+        assert_eq!(body.data.unwrap().category, "Building Materials");
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/godowns/{}", to.id))
+            .insert_header(("Authorization", auth_header))
+            .to_request();
+        let body: ApiResponse<Godown> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let dest_cement = body.data.unwrap().stock.into_iter().find(|s| s.description == "Cement").unwrap();
+        assert_eq!(dest_cement.category, "Building Materials");
     }
 
     #[actix_web::test]
@@ -6542,6 +6604,8 @@ mod tests {
         // vehicle + driver and more stock first.
         let (org, first, auth) = setup_dispatch(&app, "Multi Line Dispatch Org").await;
         assert_eq!(first.line_items.len(), 1);
+        // The dispatch route response carries the stock's category through.
+        assert_eq!(first.line_items[0].category, "General");
 
         // Second vehicle + active driver.
         let req = test::TestRequest::post()
@@ -6593,6 +6657,7 @@ mod tests {
                     volume_in_size: 1,
                     quantity: qty,
                     description: desc.to_string(),
+                    category: "General".to_string(),
                     reorder_threshold: None,
                 })
                 .to_request();
@@ -6718,6 +6783,7 @@ mod tests {
             volume_in_size: 100,
             quantity: 500,
             description: "Test Widget".to_string(),
+            category: "General".to_string(),
             reorder_threshold: None,
         };
         let req = test::TestRequest::post()
@@ -6732,6 +6798,83 @@ mod tests {
         let stock = body.data.unwrap();
         assert_eq!(stock.description, "Test Widget");
         assert_eq!(stock.quantity, 500);
+    }
+
+    #[actix_web::test]
+    async fn test_add_godown_stock_persists_an_explicit_category() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Category Test Org", "Category Test Godown").await;
+
+        let stock_payload = CreateStockPayload {
+            volume_in_size: 10,
+            quantity: 20,
+            description: "Server Rack".to_string(),
+            category: "Electronics".to_string(),
+            reorder_threshold: None,
+        };
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth_header))
+            .set_json(&stock_payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let body: ApiResponse<Stock> = test::read_body_json(resp).await;
+        assert_eq!(body.data.unwrap().category, "Electronics");
+    }
+
+    #[actix_web::test]
+    async fn test_add_godown_stock_defaults_category_when_omitted_from_the_json_body() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Default Category Org", "Default Category Godown").await;
+
+        // Send raw JSON without a `category` field at all, exercising the
+        // `#[serde(default = ...)]` fallback (not just a struct literal that
+        // happens to set it to "General").
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth_header))
+            .set_json(&serde_json::json!({
+                "volume_in_size": 5,
+                "quantity": 10,
+                "description": "Unlabeled Widget"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let body: ApiResponse<Stock> = test::read_body_json(resp).await;
+        assert_eq!(body.data.unwrap().category, "General");
+    }
+
+    #[actix_web::test]
+    async fn test_update_godown_stock_changes_category() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (_org, godown, auth_header) =
+            setup_org_with_godown(&app, "Update Category Org", "Update Category Godown").await;
+
+        Stock::new(5, 40, "Bolts").add_to_godown(godown.id).expect("seed stock");
+
+        let payload = UpdateStockPayload {
+            volume_in_size: 5,
+            quantity: 40,
+            description: "Bolts".to_string(),
+            category: "Hardware".to_string(),
+            reorder_threshold: None,
+        };
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/godowns/{}/stock", godown.id))
+            .insert_header(("Authorization", auth_header))
+            .set_json(&payload)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<Stock> = test::read_body_json(resp).await;
+        assert_eq!(body.data.unwrap().category, "Hardware");
     }
 
     #[actix_web::test]
@@ -6795,6 +6938,7 @@ mod tests {
                 volume_in_size: 20,
                 quantity: 60,
                 description: "Bulky Crates".to_string(),
+                category: "General".to_string(),
                 reorder_threshold: None,
             })
             .to_request();
@@ -6809,6 +6953,7 @@ mod tests {
                 volume_in_size: 20,
                 quantity: 40,
                 description: "Bulky Crates".to_string(),
+                category: "General".to_string(),
                 reorder_threshold: None,
             })
             .to_request();
@@ -6829,6 +6974,7 @@ mod tests {
                 volume_in_size: 1,
                 quantity: 8,
                 description: "Label Rolls".to_string(),
+                category: "General".to_string(),
                 reorder_threshold: Some(25),
             })
             .to_request();
@@ -8405,6 +8551,7 @@ mod tests {
 
         let stock = CreateStockPayload {
             description: "Pallets".to_string(),
+            category: "General".to_string(),
             quantity: 10,
             volume_in_size: 1,
             reorder_threshold: None,
@@ -8649,6 +8796,7 @@ mod tests {
                 volume_in_size: 1,
                 quantity: 100,
                 description: "Widgets".to_string(),
+                category: "General".to_string(),
                 reorder_threshold: None,
             })
             .to_request();

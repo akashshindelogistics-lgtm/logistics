@@ -81,10 +81,12 @@ test.describe('Organization', () => {
     await page.getByLabel('Stock Item').fill(stockDesc);
     await page.getByLabel('Stock Quantity').fill('250');
     await page.getByLabel('Volume').fill('50');
+    await page.getByLabel('Category').fill('Groceries');
     await page.getByRole('button', { name: /add stock/i }).click();
 
     await expect(page.getByText(stockDesc)).toBeVisible({ timeout: 8000 });
     await expect(page.getByText('250')).toBeVisible();
+    await expect(page.getByText('Groceries')).toBeVisible();
   });
 
   test('transfer stock from one godown to another and see it in the history', async ({ page }) => {

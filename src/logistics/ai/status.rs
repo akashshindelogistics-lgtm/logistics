@@ -141,6 +141,7 @@ mod tests {
                 stock_description: "Cement".to_string(),
                 quantity: 10,
                 volume_in_size: 1,
+                category: "General".to_string(),
             }],
             status: DispatchStatus::InTransit,
             dispatched_at: 1_700_000_000,
@@ -215,6 +216,7 @@ mod tests {
             stock_description: "Sand".to_string(),
             quantity: 25,
             volume_in_size: 1,
+            category: "General".to_string(),
         });
         let customer = sample_customer(None);
 

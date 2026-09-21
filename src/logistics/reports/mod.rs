@@ -87,6 +87,13 @@ pub struct DeliveryPerformance {
     pub on_time_rate_percent: Option<f64>,
 }
 
+/// Total units held under one category, within a single godown.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CategoryUnits {
+    pub category: String,
+    pub units: i64,
+}
+
 /// What one godown is holding right now.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct GodownInventory {
@@ -98,6 +105,9 @@ pub struct GodownInventory {
     /// Σ(volume_in_size × quantity) as a percentage of `max_capacity`, one
     /// decimal. `None` when the godown has no cap set.
     pub capacity_used_percent: Option<f64>,
+    /// One entry per distinct category held in this godown, largest units
+    /// first, ties broken alphabetically.
+    pub category_breakdown: Vec<CategoryUnits>,
 }
 
 /// One day's dispatch count.
@@ -230,12 +240,24 @@ fn godown_inventory(godown: &Godown) -> GodownInventory {
         (cap > 0).then(|| round1(used_volume as f64 / cap as f64 * 100.0))
     });
 
+    let mut by_category: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for s in &godown.stock {
+        *by_category.entry(s.category.clone()).or_insert(0) += s.quantity;
+    }
+    let mut category_breakdown: Vec<CategoryUnits> = by_category
+        .into_iter()
+        .map(|(category, units)| CategoryUnits { category, units })
+        .collect();
+    category_breakdown
+        .sort_by(|a, b| b.units.cmp(&a.units).then_with(|| a.category.cmp(&b.category)));
+
     GodownInventory {
         godown_id: godown.id,
         godown_name: godown.name.clone(),
         units_on_hand,
         distinct_items: godown.stock.len() as i64,
         capacity_used_percent,
+        category_breakdown,
     }
 }
 

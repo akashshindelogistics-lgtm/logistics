@@ -19,7 +19,7 @@ list.
 | `delivery_performance.avg_hours_to_deliver` | Mean hours from a dispatch's creation to its `DELIVERED` status-history event, over all delivered dispatches. `null` when none. |
 | `delivery_performance.on_time_rate_percent` | Share of delivered dispatches that reached `DELIVERED` within **72 hours** (`ON_TIME_TARGET_HOURS`). `null` when none. |
 | `units_dispatched_recently` | Σ(line-item quantity) over dispatches **created in the last 30 days**, any status. |
-| `godown_inventory[]` | Per godown: `units_on_hand` (Σ quantity), `distinct_items`, and `capacity_used_percent` = Σ(volume × quantity) / `max_capacity` × 100 (`null` when the godown has no cap). |
+| `godown_inventory[]` | Per godown: `units_on_hand` (Σ quantity), `distinct_items`, `capacity_used_percent` = Σ(volume × quantity) / `max_capacity` × 100 (`null` when the godown has no cap), and `category_breakdown[]` — Σ quantity per stock category, largest first (see `docs/stock-categories.md`). |
 | `dispatch_volume[]` | One `{ date, count }` point per day for the last **14 days**, oldest first, UTC. Days with no dispatches are present with `count: 0`. |
 
 ## Known limitations

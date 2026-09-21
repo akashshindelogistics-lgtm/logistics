@@ -29,11 +29,11 @@ function trip(overrides: Partial<Trip> = {}): Trip {
     created_at: 1_700_000_000, status: 'PLANNED',
     stops: [
       { id: 'd1', org_id: 'org1', customer_id: 'c1', vehicle_registration_number: 'MH12 AB 1234',
-        line_items: [{ stock_description: 'Cement', quantity: 10, volume_in_size: 1 }],
+        line_items: [{ stock_description: 'Cement', quantity: 10, volume_in_size: 1, category: 'Building Materials' }],
         status: 'PENDING', dispatched_at: 1, status_history: [], proof_of_delivery: null,
         trip_id: 'trip-1', stop_sequence: 1 },
       { id: 'd2', org_id: 'org1', customer_id: 'c2', vehicle_registration_number: 'MH12 AB 1234',
-        line_items: [{ stock_description: 'Cement', quantity: 5, volume_in_size: 1 }],
+        line_items: [{ stock_description: 'Cement', quantity: 5, volume_in_size: 1, category: 'Building Materials' }],
         status: 'PENDING', dispatched_at: 1, status_history: [], proof_of_delivery: null,
         trip_id: 'trip-1', stop_sequence: 2 },
     ],

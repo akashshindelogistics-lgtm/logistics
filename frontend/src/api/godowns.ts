@@ -42,12 +42,14 @@ export const addGodownStock = (
   description: string,
   quantity: number,
   volumeInSize: number,
+  category: string = 'General',
 ) =>
   api
     .post<ApiResponse<Stock>>(`/godowns/${godownId}/stock`, {
       description,
       quantity,
       volume_in_size: volumeInSize,
+      category,
     })
     .then(r => r.data);
 

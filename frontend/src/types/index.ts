@@ -37,6 +37,8 @@ export interface Stock {
   volume_in_size: number;
   quantity: number;
   description: string;
+  /** Free-text, org-defined category (e.g. "Cement", "Electronics"). Defaults to "General". */
+  category: string;
 }
 
 export interface Godown {
@@ -60,6 +62,7 @@ export interface StockTransfer {
   description: string;
   quantity: number;
   volume_in_size: number;
+  category: string;
   transferred_at: number;
 }
 
@@ -173,6 +176,7 @@ export interface DispatchLineItem {
   stock_description: string;
   quantity: number;
   volume_in_size: number;
+  category: string;
 }
 
 export interface DispatchOrder {
@@ -265,6 +269,7 @@ export interface OpsReport {
     units_on_hand: number;
     distinct_items: number;
     capacity_used_percent: number | null;
+    category_breakdown: Array<{ category: string; units: number }>;
   }>;
   dispatch_volume: Array<{ date: string; count: number }>;
 }

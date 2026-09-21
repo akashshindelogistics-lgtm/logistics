@@ -204,6 +204,26 @@ fn godown_inventory_sums_stock_and_computes_capacity_use() {
 }
 
 #[test]
+fn godown_inventory_breaks_down_units_by_category_largest_first() {
+    let _db = TestDb::create();
+    let org = Organization::create_organization("Category Co", "1 St").expect("org");
+    let godown = Godown::create(org.id, "Main", "A", None).expect("g");
+
+    Stock::new(1, 10, "Nuts").with_category("Hardware").add_to_godown(godown.id).expect("s1");
+    Stock::new(1, 30, "Bolts").with_category("Hardware").add_to_godown(godown.id).expect("s2");
+    Stock::new(1, 20, "Cement").with_category("Building Materials").add_to_godown(godown.id).expect("s3");
+    Stock::new(1, 5, "Misc").add_to_godown(godown.id).expect("s4"); // defaults to "General"
+
+    let r = OpsReport::for_org(org.id).expect("report");
+    let inv = r.godown_inventory.iter().find(|g| g.godown_name == "Main").unwrap();
+
+    assert_eq!(
+        inv.category_breakdown.iter().map(|c| (c.category.as_str(), c.units)).collect::<Vec<_>>(),
+        vec![("Hardware", 40), ("Building Materials", 20), ("General", 5)]
+    );
+}
+
+#[test]
 fn units_dispatched_recently_ignores_old_dispatches() {
     let _db = TestDb::create();
     let fx = seed("Recent Co", 3);

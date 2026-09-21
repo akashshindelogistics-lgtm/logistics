@@ -39,7 +39,7 @@ function makeOrder(overrides: Partial<DispatchOrder> = {}): DispatchOrder {
     org_id: 'org-1',
     customer_id: 'cust-1',
     vehicle_registration_number: 'MH01AB1234',
-    line_items: [{ stock_description: 'Cement', quantity: 50, volume_in_size: 1 }],
+    line_items: [{ stock_description: 'Cement', quantity: 50, volume_in_size: 1, category: 'Building Materials' }],
     status: 'PENDING',
     dispatched_at: 1_700_000_000,
     status_history: [{ status: 'PENDING', changed_at: 1_700_000_000 }],
@@ -85,6 +85,7 @@ describe('Dispatches page', () => {
     expect(tag).toHaveClass(STATUS_TAG_CLASS.PENDING);
     expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByText('(Building Materials)')).toBeInTheDocument();
   });
 
   it('shows a "Running late" badge for an IN_TRANSIT order past its promised delivery window', async () => {

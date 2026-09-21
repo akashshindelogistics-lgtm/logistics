@@ -25,7 +25,10 @@ Orgs ──1:N──▶ Godowns ──1:N──▶ Stock
   identified within a godown by its `description` (unchanged semantics, just
   scoped to a godown rather than an org). An optional `reorder_threshold`
   sets a restock point: reads expose a derived `below_threshold` flag that
-  is `true` once `quantity` drops under it.
+  is `true` once `quantity` drops under it. Stock also carries a free-text
+  `category` (defaults to `"General"`) — see `docs/stock-categories.md` for
+  the model, its resolution policies across dispatch/transfer, and how it
+  reaches the transport side.
 - `Organization` responses expose `godowns: Godown[]`, and each godown carries
   its own `stock: Stock[]`. The old flat `Organization.stock` field is gone.
 
