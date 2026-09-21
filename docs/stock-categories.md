@@ -133,4 +133,12 @@ Building Materials)."`
   category; the stock table renders a Category column.
   (`Dispatches.test.tsx`): a line item's category renders.
 - Playwright (`organization.spec.ts`): fills the Category field via the UI
-  and confirms it renders in the stock table row.
+  and confirms it renders in the stock table row. `e2e-full-flow.spec.ts`
+  also tags a stock item, transfers it, dispatches it, and checks the
+  category shows up at each step, as part of the full narrated walkthrough.
+- Playwright demo (`stock-categories.demo.ts`, `npm run
+  test:e2e:demo:stock-categories`): a focused, headed walk through this
+  feature on its own — tag stock with a category, add a second item with
+  none (defaults to "General"), transfer the categorized item to another
+  godown, then dispatch it and see the category on the shipment's line
+  item.

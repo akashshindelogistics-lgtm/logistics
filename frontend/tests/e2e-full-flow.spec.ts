@@ -78,20 +78,24 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await expect(page.getByText(godownB)).toBeVisible({ timeout: 8000 });
   });
 
-  await test.step('Stock the first godown with two items', async () => {
+  await test.step('Stock the first godown with two items, one tagged with a category', async () => {
     const card = page.getByTestId('godown-card').filter({ hasText: godownA });
 
     await card.getByLabel('Stock Item').fill(stockA);
     await card.getByLabel('Stock Quantity').fill('500');
     await card.getByLabel('Volume').fill('1');
+    await card.getByLabel('Category').fill('Building Materials');
     await card.getByRole('button', { name: /add stock/i }).click();
     await expect(page.getByText(stockA).first()).toBeVisible({ timeout: 8000 });
+    await expect(card.getByText('Building Materials')).toBeVisible();
 
+    // Left blank -> defaults to "General".
     await card.getByLabel('Stock Item').fill(stockB);
     await card.getByLabel('Stock Quantity').fill('200');
     await card.getByLabel('Volume').fill('1');
     await card.getByRole('button', { name: /add stock/i }).click();
     await expect(page.getByText(stockB).first()).toBeVisible({ timeout: 8000 });
+    await expect(card.locator('tr', { has: page.getByText(stockB) }).getByText('General')).toBeVisible();
   });
 
   await test.step('Transfer part of the stock to the overflow godown', async () => {
@@ -106,6 +110,15 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     const historyRow = page.locator('tr', { has: page.getByText(stockA) }).last();
     await expect(historyRow.getByText(godownA)).toBeVisible();
     await expect(historyRow.getByText(godownB)).toBeVisible();
+
+    // The category rode along to the new row created in the overflow godown.
+    // Scoped by the card's own heading link (not hasText) because by now both
+    // cards' transfer-out forms mention the other godown's name in a <select>
+    // option, which a plain hasText filter would also match.
+    const overflowCard = page.getByTestId('godown-card').filter({
+      has: page.getByRole('link', { name: godownB, exact: true }),
+    });
+    await expect(overflowCard.locator('tr', { has: page.getByText(stockA) }).getByText('Building Materials')).toBeVisible();
   });
 
   await test.step('Register a fleet vehicle', async () => {
@@ -203,6 +216,8 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await page.goto('/dispatches');
     const row = page.locator('tbody tr').filter({ hasText: stockA });
     await expect(row).toBeVisible({ timeout: 8000 });
+    // The dispatched line item carries the category it was drawn from.
+    await expect(row.getByText('(Building Materials)')).toBeVisible();
     await row.getByRole('button', { name: /notifications for/i }).click();
     await expect(page.getByText(/on its way/i)).toBeVisible({ timeout: 8000 });
     await expect(page.getByText('QUEUED').first()).toBeVisible();
