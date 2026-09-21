@@ -997,3 +997,16 @@
   category, transfer between godowns (merge vs. new-row), dispatch, and the
   reports category breakdown.
   Plan/context: [[file:docs/stock-categories.md]]
+* TODO [#B] Driver phone location tracking - a small Android/iOS app on the driver's phone that reports location periodically, alongside (not instead of) hardware GPS trackers
+  Plan written: [[file:docs/driver-phone-tracking.md]]
+  The existing POST /api/track/{tracker_key} is keyed per vehicle, has no client
+  timestamps and keeps no history, so a phone needs its own path: a per-driver
+  device token (rotatable without touching the vehicle's tracker key), a batched
+  POST /api/driver/location that resolves driver -> assigned vehicle and ignores
+  out-of-order fixes, optional location history with retention, and a minimal
+  React Native driver app. Open decisions (platform, token in header vs URL, IN_TRANSIT
+  gate) are listed in the plan.
+** TODO Phase 1: backend - Drivers.device_token + rotate route, POST /api/driver/location (batched, timestamped, out-of-order safe), tests, OpenAPI, README
+** TODO Phase 2: dashboard - driver pairing panel (token/QR, regenerate), last-fix source on vehicle detail, unit + Playwright + standalone demo flow
+** TODO Phase 3: VehicleLocationHistory table with retention, history endpoint, trail on the trip map
+** TODO Phase 4: minimal React Native driver app (pairing, background reporting, offline queue)
