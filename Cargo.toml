@@ -22,6 +22,7 @@ edition = "2024"
  reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
  actix-multipart = "0.7"
  futures-util = "0.3"
+ sha2 = "0.10"
 
 [dev-dependencies]
  actix-http = "3"
