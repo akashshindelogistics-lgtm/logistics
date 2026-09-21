@@ -958,3 +958,42 @@
   tests), `npm run test:unit` (227 tests) and the relevant Playwright specs
   all green.
   Plan/context: [[file:docs/vehicle-maintenance.md]]
+
+* DONE Improve inventory management: let an org add stock with different types/categories, and carry that categorization through the transport (dispatch/transfer) side
+  Stock gains a free-text, org-defined `category` field (default "General"),
+  layered on top of `description` as a pure attribute - description stays
+  the sole identity per godown, category is just a tag on it. Snapshotted
+  onto DispatchLineItem at dispatch time (same convention as
+  volume_in_size), and onto StockTransfer at transfer time, so the
+  transport side reflects what kind of goods are on a truck, not just an
+  item name. Two explicit conflict-resolution policies where nothing
+  enforces agreement across rows: plan_stock_draw resolves a line item's
+  category from the first godown matched (largest-holding-first) when
+  several godowns hold the same description under different categories;
+  StockTransfer::execute keeps the destination's existing category on a
+  merge (new rows get the source's), while its audit row always records
+  the source's category - what actually moved.
+  GodownInventory (reports) gains category_breakdown: Vec<CategoryUnits>,
+  one {category, units} entry per category held, largest first. The
+  org-scoped assistant's stock narration chunk now mentions category too.
+  Backend: Stock/DispatchLineItem/StockTransfer/CreateStockPayload/
+  UpdateStockPayload all updated (src/logistics/stock/stock.rs,
+  dispatch/dispatch.rs, godown/transfer.rs, server/routes.rs), with the
+  usual ALTER-if-missing column backfill for long-lived DBs. 13 new Rust
+  unit tests across stock.rs/dispatch.rs/orgs.rs/transfer.rs/reports/mod.rs/
+  chunk.rs, plus 5 new route tests (add/update round-trip, the omitted-field
+  default, transfer carrying category, dispatch returning it).
+  Frontend: Stock/DispatchLineItem/StockTransfer/GodownInventory types
+  gain category; OrganizationDetail's stock table gets a Category column
+  and the add-stock form an optional Category field; Dispatches and Trips
+  show each line item's category. New/updated frontend unit tests
+  (godowns.test.ts, OrganizationDetail.test.tsx, Dispatches.test.tsx,
+  Trips.test.tsx, Dashboard.test.tsx, Reports.test.tsx) and one updated
+  Playwright flow (organization.spec.ts) filling the Category field and
+  asserting it renders. `cargo test --lib` (401 tests), `npx tsc -b`,
+  `npm run test:unit` (230 tests), the relevant Playwright specs, and
+  `cargo run --bin gen_openapi` all green. Also manually exercised end to
+  end against the live dev stack: add stock with and without an explicit
+  category, transfer between godowns (merge vs. new-row), dispatch, and the
+  reports category breakdown.
+  Plan/context: [[file:docs/stock-categories.md]]

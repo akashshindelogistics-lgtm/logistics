@@ -18,8 +18,8 @@ function report(overrides: Partial<OpsReport> = {}): OpsReport {
     },
     units_dispatched_recently: 120,
     godown_inventory: [
-      { godown_id: 'g1', godown_name: 'North Godown', units_on_hand: 500, distinct_items: 3, capacity_used_percent: 42.5 },
-      { godown_id: 'g2', godown_name: 'South Godown', units_on_hand: 80, distinct_items: 1, capacity_used_percent: null },
+      { godown_id: 'g1', godown_name: 'North Godown', units_on_hand: 500, distinct_items: 3, capacity_used_percent: 42.5, category_breakdown: [{ category: 'General', units: 500 }] },
+      { godown_id: 'g2', godown_name: 'South Godown', units_on_hand: 80, distinct_items: 1, capacity_used_percent: null, category_breakdown: [{ category: 'General', units: 80 }] },
     ],
     dispatch_volume: Array.from({ length: 14 }, (_, i) => ({
       date: `2026-09-${String(i + 1).padStart(2, '0')}`,

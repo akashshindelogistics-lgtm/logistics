@@ -34,9 +34,10 @@ interface StockFormState {
   description: string;
   quantity: string;
   volumeInSize: string;
+  category: string;
 }
 
-const emptyStockForm: StockFormState = { description: '', quantity: '', volumeInSize: '' };
+const emptyStockForm: StockFormState = { description: '', quantity: '', volumeInSize: '', category: '' };
 
 interface TransferFormState {
   description: string;
@@ -351,7 +352,13 @@ export default function OrganizationDetail() {
     const form = stockFormFor(godownId);
     setStockSubmitting(prev => ({ ...prev, [godownId]: true }));
     try {
-      await addGodownStock(godownId, form.description, Number(form.quantity), Number(form.volumeInSize));
+      await addGodownStock(
+        godownId,
+        form.description,
+        Number(form.quantity),
+        Number(form.volumeInSize),
+        form.category || 'General',
+      );
       setStockForms(prev => ({ ...prev, [godownId]: emptyStockForm }));
       load();
     } finally {
@@ -1013,7 +1020,7 @@ export default function OrganizationDetail() {
                       <div className="table-wrap">
                         <table>
                           <thead>
-                            <tr><th>Description</th><th>Quantity</th><th>Volume</th></tr>
+                            <tr><th>Description</th><th>Category</th><th>Quantity</th><th>Volume</th></tr>
                           </thead>
                           <tbody>
                             {g.stock.map(s => (
@@ -1026,6 +1033,7 @@ export default function OrganizationDetail() {
                                     <span className="entity-name">{s.description}</span>
                                   </div>
                                 </td>
+                                <td><span className="badge tag-purple">{s.category}</span></td>
                                 <td><span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{s.quantity}</span> <span className="muted">units</span></td>
                                 <td><span className="badge tag-blue">{s.volume_in_size}</span></td>
                               </tr>
@@ -1067,6 +1075,15 @@ export default function OrganizationDetail() {
                           value={form.volumeInSize}
                           onChange={e => updateStockForm(g.id, 'volumeInSize', e.target.value)}
                           required
+                        />
+                      </div>
+                      <div className="field" style={{ flex: '0 0 140px', marginBottom: 0 }}>
+                        <label htmlFor={`stock-category-${g.id}`}>Category</label>
+                        <input
+                          id={`stock-category-${g.id}`}
+                          placeholder="e.g. Cement (optional)"
+                          value={form.category}
+                          onChange={e => updateStockForm(g.id, 'category', e.target.value)}
                         />
                       </div>
                       <button className="btn btn-primary btn-sm" type="submit" disabled={submitting}>

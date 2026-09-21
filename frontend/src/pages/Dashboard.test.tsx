@@ -21,7 +21,7 @@ function order(overrides: Partial<DispatchOrder> = {}): DispatchOrder {
     org_id: 'o1',
     customer_id: 'c1',
     vehicle_registration_number: 'MH01AB1234',
-    line_items: [{ stock_description: 'Cement', quantity: 20, volume_in_size: 1 }],
+    line_items: [{ stock_description: 'Cement', quantity: 20, volume_in_size: 1, category: 'General' }],
     status: 'PENDING',
     dispatched_at: 1_700_000_000,
     status_history: [],
@@ -58,8 +58,8 @@ describe('Dashboard page', () => {
     vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([]));
     vi.mocked(dispatchesApi.listDispatches).mockResolvedValue(
       ok([
-        order({ id: 'old-order-id', line_items: [{ stock_description: 'Older', quantity: 1, volume_in_size: 1 }], dispatched_at: 1000 }),
-        order({ id: 'new-order-id', line_items: [{ stock_description: 'Newer', quantity: 1, volume_in_size: 1 }], dispatched_at: 2000 }),
+        order({ id: 'old-order-id', line_items: [{ stock_description: 'Older', quantity: 1, volume_in_size: 1, category: 'General' }], dispatched_at: 1000 }),
+        order({ id: 'new-order-id', line_items: [{ stock_description: 'Newer', quantity: 1, volume_in_size: 1, category: 'General' }], dispatched_at: 2000 }),
       ]),
     );
 

@@ -298,8 +298,8 @@ pub fn stock_snapshot_text(godown: &Godown, stock: &Stock) -> String {
         String::new()
     };
     format!(
-        "Godown '{}' ({}) holds {} units of {}{}.",
-        godown.name, godown.address, stock.quantity, stock.description, threshold_note
+        "Godown '{}' ({}) holds {} units of {} (category: {}){}.",
+        godown.name, godown.address, stock.quantity, stock.description, stock.category, threshold_note
     )
 }
 
@@ -629,6 +629,7 @@ mod tests {
                 stock_description: "Cement".to_string(),
                 quantity: 10,
                 volume_in_size: 1,
+                category: "General".to_string(),
             }],
             status: DispatchStatus::InTransit,
             dispatched_at: 1_700_000_000,
@@ -694,7 +695,16 @@ mod tests {
         assert!(text.contains("Chennai Central"));
         assert!(text.contains("12 Anna Salai, Chennai"));
         assert!(text.contains("40 units of Cement"));
+        assert!(text.contains("category: General"));
         assert!(!text.contains("below its reorder threshold"));
+    }
+
+    #[test]
+    fn stock_snapshot_text_includes_an_explicit_category() {
+        let godown = sample_godown();
+        let stock = Stock::new(1, 40, "Cement").with_category("Building Materials");
+        let text = stock_snapshot_text(&godown, &stock);
+        assert!(text.contains("category: Building Materials"));
     }
 
     #[test]

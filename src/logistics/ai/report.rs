@@ -131,7 +131,7 @@ pub async fn generate_report_summary(report: &OpsReport) -> Result<String, Strin
 mod tests {
     use super::*;
     use crate::logistics::reports::{
-        DeliveryPerformance, DispatchVolumePoint, GodownInventory, VehicleUtilization,
+        CategoryUnits, DeliveryPerformance, DispatchVolumePoint, GodownInventory, VehicleUtilization,
     };
     use uuid::Uuid;
 
@@ -155,6 +155,10 @@ mod tests {
                 units_on_hand: 120,
                 distinct_items: 3,
                 capacity_used_percent: Some(92.0),
+                category_breakdown: vec![CategoryUnits {
+                    category: "General".to_string(),
+                    units: 120,
+                }],
             }],
             dispatch_volume: vec![
                 DispatchVolumePoint { date: "2026-09-10".to_string(), count: 2 },

@@ -81,13 +81,25 @@ describe('godowns api client', () => {
     });
   });
 
-  it('addGodownStock POSTs the snake_cased stock payload to /godowns/{gid}/stock', async () => {
+  it('addGodownStock POSTs the snake_cased stock payload to /godowns/{gid}/stock, defaulting category to General', async () => {
     vi.mocked(api.post).mockResolvedValue(envelope({}));
     await addGodownStock('g1', 'Cement Bags', 100, 2.5);
     expect(api.post).toHaveBeenCalledWith('/godowns/g1/stock', {
       description: 'Cement Bags',
       quantity: 100,
       volume_in_size: 2.5,
+      category: 'General',
+    });
+  });
+
+  it('addGodownStock includes an explicit category when supplied', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({}));
+    await addGodownStock('g1', 'Cement Bags', 100, 2.5, 'Building Materials');
+    expect(api.post).toHaveBeenCalledWith('/godowns/g1/stock', {
+      description: 'Cement Bags',
+      quantity: 100,
+      volume_in_size: 2.5,
+      category: 'Building Materials',
     });
   });
 

@@ -118,6 +118,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             volume_in_size BIGINT NOT NULL,
             quantity BIGINT NOT NULL,
             description VARCHAR(255) NOT NULL,
+            category VARCHAR(255) NOT NULL DEFAULT 'General',
             reorder_threshold BIGINT DEFAULT NULL,
             godown_id VARCHAR(36) NOT NULL,
             CONSTRAINT fk_stock_godown FOREIGN KEY (godown_id) REFERENCES Godowns(id) ON DELETE CASCADE
@@ -134,6 +135,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             description VARCHAR(255) NOT NULL,
             quantity BIGINT NOT NULL,
             volume_in_size BIGINT NOT NULL,
+            category VARCHAR(255) NOT NULL DEFAULT 'General',
             transferred_at BIGINT NOT NULL,
             CONSTRAINT fk_stock_transfer_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
         )",
@@ -279,6 +281,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             stock_description VARCHAR(255) NOT NULL,
             quantity BIGINT NOT NULL,
             volume_in_size BIGINT NOT NULL,
+            category VARCHAR(255) NOT NULL DEFAULT 'General',
             CONSTRAINT fk_dispatch_line_item_dispatch
                 FOREIGN KEY (dispatch_id) REFERENCES Dispatches(id) ON DELETE CASCADE
         )",

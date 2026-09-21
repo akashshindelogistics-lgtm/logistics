@@ -298,6 +298,7 @@ export default function Dispatches() {
                         {o.line_items.map((li, i) => (
                           <div key={i}>
                             {li.stock_description}
+                            <span className="muted" style={{ marginLeft: 4 }}>({li.category})</span>
                             <span className="muted" style={{ marginLeft: 4 }}>×{li.quantity}</span>
                           </div>
                         ))}

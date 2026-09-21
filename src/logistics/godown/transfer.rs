@@ -30,6 +30,11 @@ pub struct StockTransfer {
     /// Per-unit volume of the item at the time of the move, copied from the
     /// source godown's stock so the audit row is self-contained.
     pub volume_in_size: i64,
+    /// The source godown's category for this item at the time of the move,
+    /// copied for the same self-contained-audit-row reason as
+    /// `volume_in_size` — what actually moved, not the post-merge category
+    /// at the destination (see `execute`'s merge-vs-new-row handling).
+    pub category: String,
     /// Unix seconds, stamped server-side when the move committed.
     pub transferred_at: i64,
 }
@@ -111,10 +116,23 @@ impl StockTransfer {
                 description VARCHAR(255) NOT NULL,
                 quantity BIGINT NOT NULL,
                 volume_in_size BIGINT NOT NULL,
+                category VARCHAR(255) NOT NULL DEFAULT 'General',
                 transferred_at BIGINT NOT NULL,
                 CONSTRAINT fk_stock_transfer_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
         )?;
+
+        let has_category: Option<i64> = conn.exec_first(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'StockTransfers' AND column_name = 'category'",
+            (),
+        )?;
+        if has_category.is_none() {
+            conn.query_drop(
+                "ALTER TABLE StockTransfers ADD COLUMN category VARCHAR(255) NOT NULL DEFAULT 'General'",
+            )?;
+        }
+
         Ok(())
     }
 
@@ -168,6 +186,9 @@ impl StockTransfer {
         let effective_volume = existing_dest
             .map(|s| s.volume_in_size)
             .unwrap_or(source_item.volume_in_size);
+        let effective_category = existing_dest
+            .map(|s| s.category.clone())
+            .unwrap_or_else(|| source_item.category.clone());
         let dest_final_qty = existing_dest.map(|s| s.quantity).unwrap_or(0) + quantity;
 
         to.check_capacity_for(
@@ -189,6 +210,7 @@ impl StockTransfer {
             description: description.to_string(),
             quantity,
             volume_in_size: source_item.volume_in_size,
+            category: source_item.category.clone(),
             transferred_at: now,
         };
 
@@ -229,12 +251,13 @@ impl StockTransfer {
             )?;
         } else {
             tx.exec_drop(
-                "INSERT INTO Stock (volume_in_size, quantity, description, reorder_threshold, godown_id)
-                 VALUES (:volume_in_size, :quantity, :description, NULL, :godown_id)",
+                "INSERT INTO Stock (volume_in_size, quantity, description, category, reorder_threshold, godown_id)
+                 VALUES (:volume_in_size, :quantity, :description, :category, NULL, :godown_id)",
                 params! {
                     "volume_in_size" => source_item.volume_in_size,
                     "quantity" => quantity,
                     "description" => description,
+                    "category" => &effective_category,
                     "godown_id" => to.id.to_string(),
                 },
             )?;
@@ -243,9 +266,9 @@ impl StockTransfer {
         // 6. audit row
         tx.exec_drop(
             "INSERT INTO StockTransfers
-                (id, org_id, from_godown_id, to_godown_id, description, quantity, volume_in_size, transferred_at)
+                (id, org_id, from_godown_id, to_godown_id, description, quantity, volume_in_size, category, transferred_at)
              VALUES
-                (:id, :org_id, :from_godown_id, :to_godown_id, :description, :quantity, :volume_in_size, :transferred_at)",
+                (:id, :org_id, :from_godown_id, :to_godown_id, :description, :quantity, :volume_in_size, :category, :transferred_at)",
             params! {
                 "id" => transfer.id.to_string(),
                 "org_id" => transfer.org_id.to_string(),
@@ -254,6 +277,7 @@ impl StockTransfer {
                 "description" => &transfer.description,
                 "quantity" => transfer.quantity,
                 "volume_in_size" => transfer.volume_in_size,
+                "category" => &transfer.category,
                 "transferred_at" => transfer.transferred_at,
             },
         )?;
@@ -271,8 +295,8 @@ impl StockTransfer {
         let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
 
-        let rows: Vec<(String, String, String, String, String, i64, i64, i64)> = conn.exec_map(
-            "SELECT id, org_id, from_godown_id, to_godown_id, description, quantity, volume_in_size, transferred_at
+        let rows: Vec<(String, String, String, String, String, i64, i64, String, i64)> = conn.exec_map(
+            "SELECT id, org_id, from_godown_id, to_godown_id, description, quantity, volume_in_size, category, transferred_at
              FROM StockTransfers WHERE org_id = :org_id ORDER BY transferred_at DESC, id DESC",
             params! { "org_id" => org_id.to_string() },
             |row| row,
@@ -281,7 +305,7 @@ impl StockTransfer {
         Ok(rows
             .into_iter()
             .map(
-                |(id, org_id, from_godown_id, to_godown_id, description, quantity, volume_in_size, transferred_at)| {
+                |(id, org_id, from_godown_id, to_godown_id, description, quantity, volume_in_size, category, transferred_at)| {
                     StockTransfer {
                         id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
                         org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -292,6 +316,7 @@ impl StockTransfer {
                         description,
                         quantity,
                         volume_in_size,
+                        category,
                         transferred_at,
                     }
                 },
@@ -472,6 +497,49 @@ mod tests {
             StockTransfer::execute(&reload(ga.id), &reload(gb.id), "Widget", 1).unwrap_err(),
             TransferError::DifferentOrg
         ));
+    }
+
+    #[test]
+    fn test_execute_carries_category_to_a_new_destination_row() {
+        let _db = TestDb::create();
+        let org = org();
+        let a = Godown::create(org.id, "A", "Addr A", None).expect("a");
+        let b = Godown::create(org.id, "B", "Addr B", None).expect("b");
+        Stock::new(5, 100, "Cement")
+            .with_category("Building Materials")
+            .add_to_godown(a.id)
+            .expect("seed stock");
+
+        let transfer = StockTransfer::execute(&reload(a.id), &reload(b.id), "Cement", 40)
+            .expect("transfer succeeds");
+        assert_eq!(transfer.category, "Building Materials");
+
+        let b_cement = reload(b.id).stock.into_iter().find(|s| s.description == "Cement").unwrap();
+        assert_eq!(b_cement.category, "Building Materials");
+    }
+
+    #[test]
+    fn test_execute_keeps_destination_category_on_merge() {
+        let _db = TestDb::create();
+        let org = org();
+        let a = Godown::create(org.id, "A", "Addr A", None).expect("a");
+        let b = Godown::create(org.id, "B", "Addr B", None).expect("b");
+        Stock::new(5, 100, "Bolts")
+            .with_category("Hardware")
+            .add_to_godown(a.id)
+            .expect("seed a");
+        Stock::new(5, 30, "Bolts")
+            .with_category("Fasteners")
+            .add_to_godown(b.id)
+            .expect("seed b");
+
+        let transfer = StockTransfer::execute(&reload(a.id), &reload(b.id), "Bolts", 50).expect("transfer");
+
+        // The audit row records what actually moved: the source's category.
+        assert_eq!(transfer.category, "Hardware");
+        // The destination's existing category wins on the merged row.
+        let b_bolts = reload(b.id).stock.into_iter().find(|s| s.description == "Bolts").unwrap();
+        assert_eq!(b_bolts.category, "Fasteners");
     }
 
     #[test]

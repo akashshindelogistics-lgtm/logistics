@@ -211,6 +211,7 @@ mod tests {
                 stock_description: description.to_string(),
                 quantity,
                 volume_in_size: 1,
+                category: "General".to_string(),
             }],
             status: DispatchStatus::Delivered,
             dispatched_at,

@@ -96,11 +96,22 @@ fn ensure_line_items_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn E
             stock_description VARCHAR(255) NOT NULL,
             quantity BIGINT NOT NULL,
             volume_in_size BIGINT NOT NULL,
+            category VARCHAR(255) NOT NULL DEFAULT 'General',
             CONSTRAINT fk_dispatch_line_item_dispatch
                 FOREIGN KEY (dispatch_id) REFERENCES Dispatches(id) ON DELETE CASCADE
         )",
         (),
     )?;
+    // `category` was added after this table first shipped; back-fill it onto
+    // a local/deployed database that predates it.
+    let has_category: Option<i64> = conn.exec_first(
+        "SELECT 1 FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'DispatchLineItems' AND column_name = 'category'",
+        (),
+    )?;
+    if has_category.is_none() {
+        conn.query_drop("ALTER TABLE DispatchLineItems ADD COLUMN category VARCHAR(255) NOT NULL DEFAULT 'General'")?;
+    }
     Ok(())
 }
 
@@ -327,13 +338,15 @@ pub struct ProofOfDeliveryInput {
 }
 
 /// One stock line on a dispatch: a description and how many units of it the
-/// shipment carries. `volume_in_size` is the per-unit volume, snapshotted
-/// from the stock item when the dispatch was created.
+/// shipment carries. `volume_in_size` and `category` are snapshotted from
+/// the stock item when the dispatch was created, so the shipment's manifest
+/// is fixed even if the godown's stock record later changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DispatchLineItem {
     pub stock_description: String,
     pub quantity: i64,
     pub volume_in_size: i64,
+    pub category: String,
 }
 
 impl DispatchLineItem {
@@ -341,20 +354,21 @@ impl DispatchLineItem {
         conn: &mut mysql::PooledConn,
         dispatch_id: Uuid,
     ) -> Result<Vec<Self>, Box<dyn Error>> {
-        let rows: Vec<(String, i64, i64)> = conn.exec_map(
-            "SELECT stock_description, quantity, volume_in_size FROM DispatchLineItems
+        let rows: Vec<(String, i64, i64, String)> = conn.exec_map(
+            "SELECT stock_description, quantity, volume_in_size, category FROM DispatchLineItems
              WHERE dispatch_id = :dispatch_id ORDER BY id ASC",
             params! { "dispatch_id" => dispatch_id.to_string() },
-            |(stock_description, quantity, volume_in_size)| {
-                (stock_description, quantity, volume_in_size)
+            |(stock_description, quantity, volume_in_size, category)| {
+                (stock_description, quantity, volume_in_size, category)
             },
         )?;
         Ok(rows
             .into_iter()
-            .map(|(stock_description, quantity, volume_in_size)| DispatchLineItem {
+            .map(|(stock_description, quantity, volume_in_size, category)| DispatchLineItem {
                 stock_description,
                 quantity,
                 volume_in_size,
+                category,
             })
             .collect())
     }
@@ -464,13 +478,14 @@ impl DispatchOrder {
 
         for item in &self.line_items {
             conn.exec_drop(
-                "INSERT INTO DispatchLineItems (dispatch_id, stock_description, quantity, volume_in_size)
-                 VALUES (:dispatch_id, :stock_description, :quantity, :volume_in_size)",
+                "INSERT INTO DispatchLineItems (dispatch_id, stock_description, quantity, volume_in_size, category)
+                 VALUES (:dispatch_id, :stock_description, :quantity, :volume_in_size, :category)",
                 params! {
                     "dispatch_id" => self.id.to_string(),
                     "stock_description" => &item.stock_description,
                     "quantity" => item.quantity,
                     "volume_in_size" => item.volume_in_size,
+                    "category" => &item.category,
                 },
             )?;
         }
@@ -684,12 +699,13 @@ impl DispatchOrder {
                 )?;
             } else {
                 conn.exec_drop(
-                    "INSERT INTO Stock (volume_in_size, quantity, description, reorder_threshold, godown_id)
-                     VALUES (:volume_in_size, :quantity, :description, NULL, :godown_id)",
+                    "INSERT INTO Stock (volume_in_size, quantity, description, category, reorder_threshold, godown_id)
+                     VALUES (:volume_in_size, :quantity, :description, :category, NULL, :godown_id)",
                     params! {
                         "volume_in_size" => item.volume_in_size,
                         "quantity" => item.quantity,
                         "description" => &item.stock_description,
+                        "category" => &item.category,
                         "godown_id" => godown_id.to_string(),
                     },
                 )?;
@@ -849,6 +865,7 @@ mod tests {
             stock_description: desc.to_string(),
             quantity: qty,
             volume_in_size: 1,
+            category: "General".to_string(),
         }
     }
 
@@ -1009,6 +1026,26 @@ mod tests {
     }
 
     #[test]
+    fn test_save_and_reload_round_trips_category() {
+        let _db = TestDb::create();
+        let mut order = sample_order(Pending);
+        order.line_items = vec![
+            DispatchLineItem {
+                stock_description: "Cement".to_string(),
+                quantity: 30,
+                volume_in_size: 1,
+                category: "Building Materials".to_string(),
+            },
+            line("Sand", 12), // defaults to "General" via the `line` helper
+        ];
+        order.save().expect("save");
+
+        let fetched = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
+        assert_eq!(fetched.line_items[0].category, "Building Materials");
+        assert_eq!(fetched.line_items[1].category, "General");
+    }
+
+    #[test]
     fn test_deleting_a_dispatch_cascades_to_its_line_items() {
         let _db = TestDb::create();
         let mut order = sample_order(Pending);
@@ -1132,6 +1169,43 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(in_godown, 2);
+    }
+
+    #[test]
+    fn test_return_credits_a_new_stock_row_with_the_line_items_category() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Return Category Co", "1 Depot Rd").expect("org");
+        let godown = Godown::create(org.id, "Main Godown", "MIDC", None).expect("godown");
+        Stock::new(1, 100, "Cement").add_to_godown(godown.id).expect("stock");
+
+        let mut order = DispatchOrder {
+            id: Uuid::new_v4(),
+            org_id: org.id,
+            customer_id: Uuid::new_v4(),
+            vehicle_registration_number: "RET-VH-2".to_string(),
+            line_items: vec![DispatchLineItem {
+                stock_description: "Sand".to_string(),
+                quantity: 12,
+                volume_in_size: 1,
+                category: "Building Materials".to_string(),
+            }],
+            status: InTransit,
+            dispatched_at: 1_700_000_000,
+            status_history: Vec::new(),
+            proof_of_delivery: None,
+            trip_id: None,
+            stop_sequence: None,
+        };
+        order.save().expect("save dispatch");
+
+        order
+            .transition_to(Returned, None, None)
+            .expect("IN_TRANSIT -> RETURNED is legal");
+
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        let loaded = Stock::list_by_godown(&mut conn, godown.id).expect("list");
+        let sand = loaded.iter().find(|s| s.description == "Sand").unwrap();
+        assert_eq!(sand.category, "Building Materials");
     }
 
     #[test]

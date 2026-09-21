@@ -118,9 +118,11 @@ carries a list of line items instead of a single `stock_description` +
 `quantity`.
 
 - `DispatchOrder.line_items: Vec<DispatchLineItem>` where
-  `DispatchLineItem { stock_description, quantity, volume_in_size }`.
-  `volume_in_size` is snapshotted from the stock item at dispatch time.
-  `DispatchOrder::total_quantity()` sums across the lines.
+  `DispatchLineItem { stock_description, quantity, volume_in_size, category }`.
+  `volume_in_size` and `category` are both snapshotted from the stock item
+  at dispatch time (see `docs/stock-categories.md` for how `category` is
+  resolved when several godowns are drawn from). `DispatchOrder::total_quantity()`
+  sums across the lines.
 - Stored in a `DispatchLineItems` table (`ON DELETE CASCADE` from
   `Dispatches`), read back with the same N+1-per-parent pattern as
   `status_history` / `proof_of_delivery`. The old

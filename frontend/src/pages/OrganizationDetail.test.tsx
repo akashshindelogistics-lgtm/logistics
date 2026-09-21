@@ -214,9 +214,46 @@ describe('OrganizationDetail page', () => {
     await user.type(screen.getByLabelText(/stock item/i), 'Cement Bags');
     await user.type(screen.getByLabelText(/stock quantity/i), '100');
     await user.type(screen.getByLabelText(/volume/i), '3');
+    await user.type(screen.getByLabelText(/category/i), 'Building Materials');
     await user.click(screen.getByRole('button', { name: /add stock/i }));
 
-    expect(godownsApi.addGodownStock).toHaveBeenCalledWith('g1', 'Cement Bags', 100, 3);
+    expect(godownsApi.addGodownStock).toHaveBeenCalledWith('g1', 'Cement Bags', 100, 3, 'Building Materials');
+  });
+
+  it('defaults the category to General when the field is left blank', async () => {
+    const user = userEvent.setup();
+    const godown = { id: 'g1', org_id: 'o1', name: 'North Godown', address: 'Plot 5', stock: [] };
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([customer]));
+    vi.mocked(orgsApi.getOrg).mockResolvedValue(ok(org({ godowns: [godown] })));
+    vi.mocked(godownsApi.addGodownStock).mockResolvedValue(ok({} as never));
+
+    renderPage();
+    await screen.findByText('North Godown');
+
+    await user.type(screen.getByLabelText(/stock item/i), 'Sand');
+    await user.type(screen.getByLabelText(/stock quantity/i), '50');
+    await user.type(screen.getByLabelText(/volume/i), '1');
+    await user.click(screen.getByRole('button', { name: /add stock/i }));
+
+    expect(godownsApi.addGodownStock).toHaveBeenCalledWith('g1', 'Sand', 50, 1, 'General');
+  });
+
+  it('renders a Category column in the godown stock table', async () => {
+    mockLoad(
+      org({
+        godowns: [
+          {
+            id: 'g1', org_id: 'o1', name: 'North Godown', address: 'Plot 5',
+            stock: [{ description: 'Cement', quantity: 100, volume_in_size: 5, category: 'Building Materials' }],
+          },
+        ],
+      }),
+    );
+
+    renderPage();
+    await screen.findByText('North Godown');
+
+    expect(await screen.findByText('Building Materials')).toBeInTheDocument();
   });
 
   it('transfers stock from one godown to another via the inline form', async () => {
@@ -224,7 +261,7 @@ describe('OrganizationDetail page', () => {
     const godowns = [
       {
         id: 'g1', org_id: 'o1', name: 'North Godown', address: 'Plot 5',
-        stock: [{ description: 'Cement', quantity: 100, volume_in_size: 5 }],
+        stock: [{ description: 'Cement', quantity: 100, volume_in_size: 5, category: 'General' }],
       },
       { id: 'g2', org_id: 'o1', name: 'South Godown', address: 'Plot 9', stock: [] },
     ];
@@ -257,7 +294,7 @@ describe('OrganizationDetail page', () => {
       ok([
         {
           id: 't1', org_id: 'o1', from_godown_id: 'g1', to_godown_id: 'g2',
-          description: 'Cement', quantity: 40, volume_in_size: 5, transferred_at: 1_700_000_000,
+          description: 'Cement', quantity: 40, volume_in_size: 5, category: 'General', transferred_at: 1_700_000_000,
         },
       ]),
     );

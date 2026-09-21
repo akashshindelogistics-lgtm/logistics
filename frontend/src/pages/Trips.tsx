@@ -225,7 +225,7 @@ export default function Trips() {
                           <td>{s.stop_sequence}</td>
                           <td className="entity-name">{custName(s.customer_id)}</td>
                           <td className="muted">
-                            {s.line_items.map(li => `${li.stock_description} ×${li.quantity}`).join(', ')}
+                            {s.line_items.map(li => `${li.stock_description} (${li.category}) ×${li.quantity}`).join(', ')}
                           </td>
                           <td><span className={`status-tag ${STATUS_TAG_CLASS[s.status]}`}>{formatStatus(s.status)}</span></td>
                           <td style={{ textAlign: 'right' }}>

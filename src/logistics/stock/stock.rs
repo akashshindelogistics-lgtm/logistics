@@ -5,13 +5,24 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use uuid::Uuid;
 
+/// The default category for a stock item that doesn't specify one, so every
+/// existing caller/payload that predates categories keeps working.
+pub fn default_category() -> String {
+    "General".to_string()
+}
+
 /// A stock item held in a godown. Identified within a godown by its
-/// `description`.
+/// `description` — `category` is a free-text, org-defined tag layered on
+/// top of that identity (e.g. "Cement", "Electronics"), not part of it.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Stock {
     pub volume_in_size: i64,
     pub quantity: i64,
     pub description: String,
+    /// Free-text, org-defined category (e.g. "Cement", "Electronics").
+    /// Defaults to `"General"` when not supplied.
+    #[serde(default = "default_category")]
+    pub category: String,
     /// Reorder point: when `quantity` falls below this, [`Stock::below_threshold`]
     /// is set so the godown can flag the item for restocking. `None` disables
     /// the check.
@@ -30,9 +41,16 @@ impl Stock {
             volume_in_size,
             quantity,
             description: description.into(),
+            category: default_category(),
             reorder_threshold: None,
             below_threshold: false,
         }
+    }
+
+    /// Tag this item with a category, overriding the `"General"` default.
+    pub fn with_category(mut self, category: impl Into<String>) -> Self {
+        self.category = category.into();
+        self
     }
 
     /// Set a reorder threshold, recomputing [`Stock::below_threshold`].
@@ -57,11 +75,23 @@ impl Stock {
                 volume_in_size BIGINT NOT NULL,
                 quantity BIGINT NOT NULL,
                 description VARCHAR(255) NOT NULL,
+                category VARCHAR(255) NOT NULL DEFAULT 'General',
                 reorder_threshold BIGINT DEFAULT NULL,
                 godown_id VARCHAR(36) NOT NULL,
                 CONSTRAINT fk_stock_godown FOREIGN KEY (godown_id) REFERENCES Godowns(id) ON DELETE CASCADE
             )",
         )?;
+        // `category` was added after this table first shipped; back-fill it
+        // onto a local/deployed database that predates it. Fresh databases
+        // always get it via CREATE TABLE above.
+        let has_category: Option<i64> = conn.exec_first(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'Stock' AND column_name = 'category'",
+            (),
+        )?;
+        if has_category.is_none() {
+            conn.query_drop("ALTER TABLE Stock ADD COLUMN category VARCHAR(255) NOT NULL DEFAULT 'General'")?;
+        }
         Ok(())
     }
 
@@ -72,17 +102,18 @@ impl Stock {
         godown_id: Uuid,
     ) -> Result<Vec<Self>, Box<dyn Error>> {
         Self::ensure_table(conn)?;
-        let rows: Vec<(i64, i64, String, Option<i64>)> = conn.exec_map(
-            "SELECT volume_in_size, quantity, description, reorder_threshold FROM Stock WHERE godown_id = :godown_id ORDER BY description",
+        let rows: Vec<(i64, i64, String, String, Option<i64>)> = conn.exec_map(
+            "SELECT volume_in_size, quantity, description, category, reorder_threshold FROM Stock WHERE godown_id = :godown_id ORDER BY description",
             params! { "godown_id" => godown_id.to_string() },
-            |(vol, qty, desc, threshold)| (vol, qty, desc, threshold),
+            |(vol, qty, desc, category, threshold)| (vol, qty, desc, category, threshold),
         )?;
         Ok(rows
             .into_iter()
-            .map(|(volume_in_size, quantity, description, reorder_threshold)| Stock {
+            .map(|(volume_in_size, quantity, description, category, reorder_threshold)| Stock {
                 volume_in_size,
                 quantity,
                 description,
+                category,
                 reorder_threshold,
                 below_threshold: Self::is_below(quantity, reorder_threshold),
             })
@@ -95,12 +126,13 @@ impl Stock {
         Self::ensure_table(&mut conn)?;
 
         conn.exec_drop(
-            "INSERT INTO Stock (volume_in_size, quantity, description, reorder_threshold, godown_id)
-             VALUES (:volume_in_size, :quantity, :description, :reorder_threshold, :godown_id)",
+            "INSERT INTO Stock (volume_in_size, quantity, description, category, reorder_threshold, godown_id)
+             VALUES (:volume_in_size, :quantity, :description, :category, :reorder_threshold, :godown_id)",
             params! {
                 "volume_in_size" => self.volume_in_size,
                 "quantity" => self.quantity,
                 "description" => &self.description,
+                "category" => &self.category,
                 "reorder_threshold" => self.reorder_threshold,
                 "godown_id" => godown_id.to_string(),
             },
@@ -117,16 +149,19 @@ impl Stock {
         godown_id: Uuid,
         volume_in_size: i64,
         quantity: i64,
+        category: impl Into<String>,
         reorder_threshold: Option<i64>,
     ) -> Result<(), Box<dyn Error>> {
         let mut conn = DbConnection::from_env()
             .get_connection()?;
+        let category = category.into();
 
         conn.exec_drop(
-            "UPDATE Stock SET volume_in_size = :volume_in_size, quantity = :quantity, reorder_threshold = :reorder_threshold WHERE godown_id = :godown_id AND description = :description",
+            "UPDATE Stock SET volume_in_size = :volume_in_size, quantity = :quantity, category = :category, reorder_threshold = :reorder_threshold WHERE godown_id = :godown_id AND description = :description",
             params! {
                 "volume_in_size" => volume_in_size,
                 "quantity" => quantity,
+                "category" => &category,
                 "reorder_threshold" => reorder_threshold,
                 "description" => &self.description,
                 "godown_id" => godown_id.to_string(),
@@ -135,6 +170,7 @@ impl Stock {
 
         self.volume_in_size = volume_in_size;
         self.quantity = quantity;
+        self.category = category;
         self.reorder_threshold = reorder_threshold;
         self.below_threshold = Self::is_below(quantity, reorder_threshold);
         crate::logistics::ai::chunk::reindex_stock_by_description_best_effort(
@@ -207,6 +243,35 @@ mod tests {
     }
 
     #[test]
+    fn test_add_stock_defaults_category_to_general() {
+        let _db = TestDb::create();
+        let godown = make_godown();
+
+        Stock::new(10, 20, "Unlabeled Widget").add_to_godown(godown.id).expect("add");
+
+        let mut conn = DbConnection::from_env().get_connection().expect("connect");
+        let loaded = Stock::list_by_godown(&mut conn, godown.id).expect("list");
+        let widget = loaded.iter().find(|s| s.description == "Unlabeled Widget").unwrap();
+        assert_eq!(widget.category, "General");
+    }
+
+    #[test]
+    fn test_add_stock_with_an_explicit_category() {
+        let _db = TestDb::create();
+        let godown = make_godown();
+
+        Stock::new(10, 20, "Server Rack")
+            .with_category("Electronics")
+            .add_to_godown(godown.id)
+            .expect("add");
+
+        let mut conn = DbConnection::from_env().get_connection().expect("connect");
+        let loaded = Stock::list_by_godown(&mut conn, godown.id).expect("list");
+        let rack = loaded.iter().find(|s| s.description == "Server Rack").unwrap();
+        assert_eq!(rack.category, "Electronics");
+    }
+
+    #[test]
     fn test_update_stock() {
         let _db = TestDb::create();
         let godown = make_godown();
@@ -214,10 +279,11 @@ mod tests {
         let mut stock = Stock::new(50, 200, "Raw Aluminum Sheets");
         stock.add_to_godown(godown.id).expect("Failed to add stock to godown");
 
-        let update_res = stock.update_in_godown(godown.id, 120, 800, None);
+        let update_res = stock.update_in_godown(godown.id, 120, 800, "Metals", None);
         assert!(update_res.is_ok(), "Failed to update stock");
         assert_eq!(stock.volume_in_size, 120);
         assert_eq!(stock.quantity, 800);
+        assert_eq!(stock.category, "Metals");
 
         let mut conn = DbConnection::from_env()
             .get_connection()
@@ -308,14 +374,14 @@ mod tests {
 
         // Drop quantity under a freshly set threshold.
         stock
-            .update_in_godown(godown.id, 5, 30, Some(50))
+            .update_in_godown(godown.id, 5, 30, "General", Some(50))
             .expect("update");
         assert!(stock.below_threshold);
         assert_eq!(stock.reorder_threshold, Some(50));
 
         // Clearing the threshold clears the flag.
         stock
-            .update_in_godown(godown.id, 5, 30, None)
+            .update_in_godown(godown.id, 5, 30, "General", None)
             .expect("update again");
         assert!(!stock.below_threshold);
 
@@ -341,7 +407,7 @@ mod tests {
             "adding stock should index it: {results:?}"
         );
 
-        stock.update_in_godown(godown.id, 1, 5, Some(50)).expect("update");
+        stock.update_in_godown(godown.id, 1, 5, "General", Some(50)).expect("update");
         let results = chunk::search_by_org(godown.org_id, "Pallets", 8).expect("search");
         assert!(
             results.iter().any(|c| c.text.contains("5 units of Pallets")
