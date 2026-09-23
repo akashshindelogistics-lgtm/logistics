@@ -123,12 +123,16 @@ operations, live location maps, and AI-generated dispatch summaries.
 │   │   └── vehicle/     # Vehicle domain model
 │   ├── bin/gen_openapi.rs  # Generates the OpenAPI spec for Swagger UI
 │   └── main.rs
-└── frontend/
-    ├── src/
-    │   ├── api/         # Axios clients per resource
-    │   ├── components/  # Shared UI (navbar, sidebar, map, icons)
-    │   └── pages/        # Dashboard, orgs, vehicles, customers, dispatches, auth
-    └── tests/           # Playwright end-to-end tests
+├── frontend/
+│   ├── src/
+│   │   ├── api/         # Axios clients per resource
+│   │   ├── components/  # Shared UI (navbar, sidebar, map, icons)
+│   │   └── pages/        # Dashboard, orgs, vehicles, customers, dispatches, auth
+│   └── tests/           # Playwright end-to-end tests
+└── mobile/              # Expo driver app — see mobile/README.md
+    └── src/
+        ├── app/          # Screens (Expo Router): pairing, status
+        └── lib/          # Offline queue, API client, background location task
 ```
 
 ## Getting started
