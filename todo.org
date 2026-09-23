@@ -1024,4 +1024,23 @@
    README route table updated.
 ** TODO Phase 2: dashboard - driver pairing panel (token/QR, regenerate), last-fix source on vehicle detail, unit + Playwright + standalone demo flow
 ** TODO Phase 3: VehicleLocationHistory table with retention, history endpoint, trail on the trip map
-** TODO Phase 4: minimal React Native driver app (pairing, background reporting, offline queue)
+** DONE Phase 4: minimal React Native driver app (pairing, background reporting, offline queue)
+   Plan/as-built: [[file:docs/driver-phone-tracking.md]] (section "Phase 4 as
+   built"), app docs: [[file:mobile/README.md]]. Built ahead of phases 2-3 at
+   the user's request.
+   New mobile/ Expo (SDK 57, TypeScript, Expo Router) app: pairing screen
+   (paste device token + server address, stored via expo-secure-store),
+   status screen (sharing toggle, queued-fix count, last sync outcome,
+   sync-now, unpair). expo-location + expo-task-manager background task
+   posts fixes every 30s/50m even while backgrounded/locked. Fixes are
+   validated client-side with the same rules as the server's
+   validate_driver_fix before being queued in AsyncStorage; the queue is
+   flushed in batches of up to 100 after every update or on demand, and a
+   batch the server rejects for an account reason (401/403/409) is left
+   queued rather than dropped. 53 Jest tests (pure queue/validation/API
+   logic, storage wrappers, one screen with
+   @testing-library/react-native), tsc --noEmit and eslint . both clean,
+   npx expo-doctor 21/21. Not exercised on a real device/simulator (no
+   Android SDK or macOS in this environment) — see mobile/README.md's
+   "Known gaps" for that and for QR pairing / a "who am I" read endpoint,
+   both deferred to phase 2.
