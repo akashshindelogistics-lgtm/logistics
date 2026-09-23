@@ -1,5 +1,6 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import { Platform } from 'react-native';
 import {
   LOCATION_DISTANCE_INTERVAL_M,
   LOCATION_TASK_NAME,
@@ -38,7 +39,24 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   await flushQueue();
 });
 
+/**
+ * Background location — `expo-task-manager`'s `isTaskRegisteredAsync` and
+ * `expo-location`'s `startLocationUpdatesAsync`/`stopLocationUpdatesAsync` —
+ * has no web implementation and throws `UnavailabilityError` if called
+ * there; browsers have no persistent background-execution model to run it
+ * on, so this isn't a gap to work around, only one to fail on clearly. Found
+ * while screenshotting this app's `expo start --web` preview: pairing is
+ * useful to see on web, but a driver's phone is always iOS or Android.
+ */
+const backgroundLocationSupported = Platform.OS !== 'web';
+
 export async function requestLocationPermissions(): Promise<{ granted: boolean; reason?: string }> {
+  if (!backgroundLocationSupported) {
+    return {
+      granted: false,
+      reason: 'Background location reporting needs the iOS or Android app — it is not available in a browser.',
+    };
+  }
   const foreground = await Location.requestForegroundPermissionsAsync();
   if (foreground.status !== 'granted') {
     return { granted: false, reason: 'Location permission was not granted.' };
@@ -54,10 +72,19 @@ export async function requestLocationPermissions(): Promise<{ granted: boolean; 
 }
 
 export async function isTracking(): Promise<boolean> {
+  if (!backgroundLocationSupported) {
+    return false;
+  }
   return TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
 }
 
 export async function startTracking(): Promise<void> {
+  if (!backgroundLocationSupported) {
+    // status.tsx never reaches this — requestLocationPermissions() already
+    // returned granted: false on web — but guard directly too, so a future
+    // caller gets a clear error instead of expo-location's native one.
+    throw new Error('Background location reporting is not available on web.');
+  }
   await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
     accuracy: Location.Accuracy.Balanced,
     timeInterval: LOCATION_TIME_INTERVAL_MS,

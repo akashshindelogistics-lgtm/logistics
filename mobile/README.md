@@ -77,6 +77,30 @@ npx expo run:ios       # local iOS build, needs a Mac + Xcode
 npx eas-cli@latest build --profile development --platform android
 ```
 
+### Previewing the UI without a phone or emulator
+
+```bash
+npm run web    # expo start --web, then open the printed localhost URL
+```
+
+This is how the screens were first checked, in an environment with no
+Android SDK and no macOS. It's a real preview (react-native-web, not a
+mock) that's good for checking layout, but it is not how the app runs for a
+driver: the pairing and status screens work, but nothing in this app
+actually *tracks* on web. Two real gaps surfaced this way and are now
+handled rather than crashing:
+
+- `expo-secure-store` has no web implementation at all (`ExpoSecureStore.web.js`
+  is an empty stub) — `storage.ts` falls back to `AsyncStorage` on
+  `Platform.OS === 'web'`, since there's no OS keychain to defer to there
+  either way.
+- `expo-task-manager`/`expo-location`'s background-task APIs
+  (`isTaskRegisteredAsync`, `startLocationUpdatesAsync`) aren't implemented
+  on web — browsers have no persistent background-execution model to run
+  them on. `locationTask.ts` short-circuits on web instead: the "Sharing
+  location" toggle reports "not available in a browser" rather than
+  crashing the screen.
+
 ## Testing
 
 ```bash
@@ -85,9 +109,12 @@ npm run typecheck
 npm run lint
 ```
 
-There is no Detox/Maestro end-to-end suite yet — the app has not been
-exercised on a real device or simulator in this environment (no Android SDK,
-no macOS). Before shipping, pair a real phone against a running backend and
+There is no Detox/Maestro end-to-end suite yet, and the app has not run on a
+real device or emulator in this environment (no Android SDK, no macOS). The
+pairing and status screens were visually checked via the web preview above —
+real layout, real navigation, real validation — but that preview cannot
+exercise actual background location, since browsers don't support it (see
+above). Before shipping, pair a real phone against a running backend and
 walk through: pairing, granting background location, backgrounding the app
 and confirming the vehicle still moves on the dashboard map, going offline
 and back online, and unpairing.

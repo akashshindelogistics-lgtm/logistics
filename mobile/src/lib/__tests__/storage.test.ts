@@ -3,6 +3,15 @@ jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(),
   deleteItemAsync: jest.fn(),
 }));
+// storage.ts also imports AsyncStorage (used on web only — see the comment
+// there), so it needs a factory mock too, for the same reason every other
+// AsyncStorage-adjacent test file needs one: automocking would otherwise
+// evaluate the real module and hit its "native module is null" guard.
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  setItem: jest.fn(),
+  getItem: jest.fn(),
+  removeItem: jest.fn(),
+}));
 
 import * as SecureStore from 'expo-secure-store';
 import { clearPairing, loadPairing, savePairing } from '../storage';
