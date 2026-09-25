@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
-import { listVendors, createVendor, updateVendor, deleteVendor, listVehicleHires, assignVehicleHire } from './vendors';
+import {
+  listVendors, createVendor, updateVendor, deleteVendor, listVehicleHires, assignVehicleHire,
+  recordVendorPayment, listVendorPayments,
+} from './vendors';
 
 vi.mock('./client', () => ({
   default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
@@ -57,5 +60,19 @@ describe('vendors api client', () => {
     };
     await assignVehicleHire('h1', input);
     expect(api.put).toHaveBeenCalledWith('/vehicle-hires/h1/assign', input);
+  });
+
+  it('recordVendorPayment POSTs to /vehicle-hires/{id}/payments', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({ id: 'h1' }));
+    await recordVendorPayment('h1', { amount: 2000, paid_on: '2026-09-24', note: 'balance' });
+    expect(api.post).toHaveBeenCalledWith('/vehicle-hires/h1/payments', {
+      amount: 2000, paid_on: '2026-09-24', note: 'balance',
+    });
+  });
+
+  it('listVendorPayments GETs /vehicle-hires/{id}/payments', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope([]));
+    await listVendorPayments('h1');
+    expect(api.get).toHaveBeenCalledWith('/vehicle-hires/h1/payments');
   });
 });

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import Vendors from './Vendors';
 import * as vendorsApi from '../api/vendors';
 import * as authApi from '../api/auth';
-import type { VehicleVendor } from '../types';
+import type { VehicleHire, VehicleVendor } from '../types';
 
 vi.mock('../api/vendors');
 vi.mock('../api/auth');
@@ -137,5 +137,94 @@ describe('Vendors page', () => {
     expect(screen.queryByRole('button', { name: /add vendor/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /edit sharma roadlines/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /deactivate/i })).not.toBeInTheDocument();
+  });
+
+  describe('vehicle hires and payments', () => {
+    const hire = (o: Partial<VehicleHire> = {}): VehicleHire => ({
+      id: 'h1', org_id: 'o1', vendor_id: 'v1', vendor_name: 'Sharma Roadlines', dispatch_id: 'd1234567-x',
+      trip_id: null, required_volume: 10, status: 'CONFIRMED', registration_number: 'MH12 HR 1',
+      capacity: 20, unit: 'MetricTon', driver_name: 'Ravi', driver_phone: '1', driver_license: null,
+      freight_amount: 9000, advance_paid: 6000, total_paid: 6000, balance_due: 3000,
+      requested_at: 1, confirmed_at: 2, closed_at: null, ...o,
+    });
+
+    it('shows what is owed per vendor and per hire', async () => {
+      vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([vendor()]));
+      vi.mocked(vendorsApi.listVehicleHires).mockResolvedValue(ok([
+        hire(),
+        hire({ id: 'h2', status: 'RELEASED', total_paid: 9000, balance_due: 0, registration_number: 'MH12 HR 2' }),
+        hire({ id: 'h3', status: 'REQUESTED', registration_number: null, freight_amount: null, total_paid: 0, balance_due: null }),
+      ]));
+      render(<Vendors />);
+
+      expect(await screen.findByTestId('vendor-outstanding')).toHaveTextContent('3,000');
+      const rows = await screen.findAllByTestId('hire-row');
+      expect(rows).toHaveLength(3);
+      expect(within(rows[0]).getByText('MH12 HR 1')).toBeInTheDocument();
+      expect(within(rows[0]).getByRole('button', { name: /record payment/i })).toBeInTheDocument();
+      expect(within(rows[1]).getByText('Paid')).toBeInTheDocument();
+      expect(within(rows[1]).queryByRole('button', { name: /record payment/i })).not.toBeInTheDocument();
+      expect(within(rows[2]).getByText('Awaiting truck')).toBeInTheDocument();
+    });
+
+    it('records a payment, pre-filled with the balance, and reloads the hires', async () => {
+      const u = userEvent.setup();
+      vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([vendor()]));
+      vi.mocked(vendorsApi.listVehicleHires)
+        .mockResolvedValueOnce(ok([hire()]))
+        .mockResolvedValueOnce(ok([hire({ total_paid: 9000, balance_due: 0 })]));
+      vi.mocked(vendorsApi.recordVendorPayment).mockResolvedValue(ok(hire({ total_paid: 9000, balance_due: 0 })));
+      render(<Vendors />);
+
+      await u.click(await screen.findByRole('button', { name: /record payment/i }));
+      expect(screen.getByLabelText('Amount')).toHaveValue(3000);
+      await u.type(screen.getByLabelText('Note'), 'balance on POD');
+      await u.click(screen.getByRole('button', { name: /save payment/i }));
+
+      expect(vendorsApi.recordVendorPayment).toHaveBeenCalledWith('h1', expect.objectContaining({
+        amount: 3000, note: 'balance on POD',
+      }));
+      await waitFor(() => expect(within(screen.getByTestId('hire-row')).getByText('Paid')).toBeInTheDocument());
+    });
+
+    it('shows the server message when a payment is refused', async () => {
+      const u = userEvent.setup();
+      vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([vendor()]));
+      vi.mocked(vendorsApi.listVehicleHires).mockResolvedValue(ok([hire()]));
+      vi.mocked(vendorsApi.recordVendorPayment).mockRejectedValue({
+        response: { data: { message: 'payment of 5000 is more than the 3000 still owed to the vendor' } },
+      });
+      render(<Vendors />);
+
+      await u.click(await screen.findByRole('button', { name: /record payment/i }));
+      await u.clear(screen.getByLabelText('Amount'));
+      await u.type(screen.getByLabelText('Amount'), '5000');
+      await u.click(screen.getByRole('button', { name: /save payment/i }));
+      expect(await screen.findByText(/more than the 3000 still owed/i)).toBeInTheDocument();
+    });
+
+    it('lists the advance and later payments in the history', async () => {
+      const u = userEvent.setup();
+      vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([vendor()]));
+      vi.mocked(vendorsApi.listVehicleHires).mockResolvedValue(ok([hire()]));
+      vi.mocked(vendorsApi.listVendorPayments).mockResolvedValue(ok([
+        { id: 'p1', hire_id: 'h1', amount: 1000, paid_on: '2026-09-20', note: 'part', recorded_at: 1 },
+      ]));
+      render(<Vendors />);
+
+      await u.click(await screen.findByRole('button', { name: /^payments$/i }));
+      const history = await screen.findByTestId('payment-history');
+      expect(history).toHaveTextContent('Advance at assignment: 6,000');
+      expect(history).toHaveTextContent('2026-09-20: 1,000');
+    });
+
+    it('does not offer payments to warehouse staff', async () => {
+      vi.mocked(authApi.getRole).mockReturnValue('WAREHOUSE_STAFF');
+      vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([vendor()]));
+      vi.mocked(vendorsApi.listVehicleHires).mockResolvedValue(ok([hire()]));
+      render(<Vendors />);
+      await screen.findAllByTestId('hire-row');
+      expect(screen.queryByRole('button', { name: /record payment/i })).not.toBeInTheDocument();
+    });
   });
 });

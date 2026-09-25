@@ -454,7 +454,8 @@ describe('Dispatches page', () => {
       id: 'hire-1', org_id: 'org-1', vendor_id: 'v1', vendor_name: 'Sharma Roadlines',
       dispatch_id: 'order-1', trip_id: null, required_volume: 50, status: 'REQUESTED',
       registration_number: null, capacity: null, unit: null, driver_name: null, driver_phone: null,
-      driver_license: null, freight_amount: null, advance_paid: 0, requested_at: 1_700_000_000,
+      driver_license: null, freight_amount: null, advance_paid: 0, total_paid: 0, balance_due: null,
+      requested_at: 1_700_000_000,
       confirmed_at: null, closed_at: null,
     };
     const awaiting = makeOrder({

@@ -74,6 +74,7 @@ jobs:
               '/api/vehicles/{reg}', '/api/vehicles/{reg}/driver',
               '/api/orgs/{id}/vendors', '/api/vendors/{id}',
               '/api/orgs/{id}/vehicle-hires', '/api/vehicle-hires/{id}/assign',
+              '/api/vehicle-hires/{id}/payments',
               '/api/vehicles/{reg}/documents', '/api/vehicle-documents/{id}',
               '/api/orgs/{id}/vehicle-documents',
               '/api/vehicles/{reg}/maintenance', '/api/vehicle-maintenance/{id}',

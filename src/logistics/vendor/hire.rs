@@ -95,6 +95,13 @@ pub struct VehicleHire {
     pub freight_amount: Option<i64>,
     /// Paid to the vendor up front (usually at loading).
     pub advance_paid: i64,
+    /// `advance_paid` plus every later [`VendorPayment`] on this hire.
+    #[serde(default)]
+    pub total_paid: i64,
+    /// `freight_amount - total_paid`: what the org still owes the vendor.
+    /// `None` until a truck (and so a rate) has been assigned.
+    #[serde(default)]
+    pub balance_due: Option<i64>,
     pub requested_at: i64,
     pub confirmed_at: Option<i64>,
     pub closed_at: Option<i64>,
@@ -111,6 +118,21 @@ pub struct HireAssignment {
     pub driver_license: Option<String>,
     pub freight_amount: i64,
     pub advance_paid: i64,
+}
+
+/// A payment to the vendor after the advance, usually the balance against
+/// proof of delivery. Insert-only.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct VendorPayment {
+    pub id: Uuid,
+    pub hire_id: Uuid,
+    /// Whole currency units, > 0.
+    pub amount: i64,
+    /// ISO `YYYY-MM-DD`; defaults to today.
+    pub paid_on: String,
+    pub note: Option<String>,
+    /// Server-stamped Unix seconds.
+    pub recorded_at: i64,
 }
 
 #[derive(Debug)]
@@ -148,7 +170,8 @@ impl From<Box<dyn Error>> for HireError {
 const SELECT_HIRE: &str = "SELECT h.id, h.org_id, h.vendor_id, COALESCE(v.name, ''), h.dispatch_id, h.trip_id,
         h.required_volume, h.status, h.registration_number, h.capacity, h.unit,
         h.driver_name, h.driver_phone, h.driver_license, h.freight_amount, h.advance_paid,
-        h.requested_at, h.confirmed_at, h.closed_at
+        h.requested_at, h.confirmed_at, h.closed_at,
+        (SELECT COALESCE(SUM(p.amount), 0) FROM VendorPayments p WHERE p.hire_id = h.id)
      FROM VehicleHires h LEFT JOIN VehicleVendors v ON v.id = h.vendor_id";
 
 fn parse_uuid(s: &str) -> Uuid {
@@ -180,6 +203,18 @@ impl VehicleHire {
                 confirmed_at BIGINT DEFAULT NULL,
                 closed_at BIGINT DEFAULT NULL,
                 CONSTRAINT fk_hire_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+            )",
+        )?;
+        conn.query_drop(
+            "CREATE TABLE IF NOT EXISTS VendorPayments (
+                id VARCHAR(36) PRIMARY KEY,
+                org_id VARCHAR(36) NOT NULL,
+                hire_id VARCHAR(36) NOT NULL,
+                amount BIGINT NOT NULL,
+                paid_on VARCHAR(10) NOT NULL,
+                note TEXT DEFAULT NULL,
+                recorded_at BIGINT NOT NULL,
+                CONSTRAINT fk_vendor_payment_hire FOREIGN KEY (hire_id) REFERENCES VehicleHires(id) ON DELETE CASCADE
             )",
         )?;
         Ok(())
@@ -216,6 +251,8 @@ impl VehicleHire {
     fn from_row(row: mysql::Row) -> Self {
         let get_s = |r: &mysql::Row, i: usize| r.get::<Option<String>, _>(i).flatten();
         let get_i = |r: &mysql::Row, i: usize| r.get::<Option<i64>, _>(i).flatten();
+        let freight_amount = get_i(&row, 14);
+        let total_paid = get_i(&row, 15).unwrap_or(0) + get_i(&row, 19).unwrap_or(0);
         VehicleHire {
             id: parse_uuid(&get_s(&row, 0).unwrap_or_default()),
             org_id: parse_uuid(&get_s(&row, 1).unwrap_or_default()),
@@ -231,8 +268,10 @@ impl VehicleHire {
             driver_name: get_s(&row, 11),
             driver_phone: get_s(&row, 12),
             driver_license: get_s(&row, 13),
-            freight_amount: get_i(&row, 14),
+            freight_amount,
             advance_paid: get_i(&row, 15).unwrap_or(0),
+            total_paid,
+            balance_due: freight_amount.map(|f| f - total_paid),
             requested_at: get_i(&row, 16).unwrap_or(0),
             confirmed_at: get_i(&row, 17),
             closed_at: get_i(&row, 18),
@@ -396,6 +435,8 @@ impl VehicleHire {
         self.driver_license = driver_license;
         self.freight_amount = Some(input.freight_amount);
         self.advance_paid = input.advance_paid;
+        self.total_paid = input.advance_paid;
+        self.balance_due = Some(input.freight_amount - input.advance_paid);
         self.confirmed_at = Some(now);
 
         let mut released = Vec::with_capacity(released_ids.len());
@@ -407,6 +448,93 @@ impl VehicleHire {
         }
         released.sort_by_key(|d| d.stop_sequence);
         Ok(released)
+    }
+
+    /// Record a payment to the vendor against this hire.
+    ///
+    /// The hire must have a truck and rate (`CONFIRMED` or `RELEASED`);
+    /// `amount` must be positive and no more than `balance_due`, so a hire
+    /// can't be overpaid. `paid_on` defaults to today. Updates `total_paid` /
+    /// `balance_due` in place.
+    pub fn record_payment(
+        &mut self,
+        amount: i64,
+        paid_on: Option<String>,
+        note: Option<String>,
+    ) -> Result<VendorPayment, HireError> {
+        let balance = match (self.status, self.balance_due) {
+            (HireStatus::Confirmed | HireStatus::Released, Some(b)) => b,
+            _ => {
+                return Err(HireError::Conflict(
+                    "no truck or rate has been assigned to this hire, so there is nothing to pay".into(),
+                ))
+            }
+        };
+        if amount <= 0 {
+            return Err(HireError::InvalidInput("payment amount must be greater than zero".into()));
+        }
+        if amount > balance {
+            return Err(HireError::InvalidInput(format!(
+                "payment of {amount} is more than the {balance} still owed to the vendor"
+            )));
+        }
+        let paid_on = paid_on
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(crate::logistics::billing::invoice::today_iso);
+        if !crate::logistics::billing::invoice::is_valid_iso_date(&paid_on) {
+            return Err(HireError::InvalidInput(format!("'{paid_on}' is not a YYYY-MM-DD date")));
+        }
+        let note = note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+
+        let payment = VendorPayment {
+            id: Uuid::new_v4(),
+            hire_id: self.id,
+            amount,
+            paid_on,
+            note,
+            recorded_at: now_unix(),
+        };
+        let mut conn = DbConnection::from_env().get_connection()?;
+        Self::ensure_table(&mut conn)?;
+        conn.exec_drop(
+            "INSERT INTO VendorPayments (id, org_id, hire_id, amount, paid_on, note, recorded_at)
+             VALUES (:id, :org_id, :hire_id, :amount, :paid_on, :note, :recorded_at)",
+            params! {
+                "id" => payment.id.to_string(),
+                "org_id" => self.org_id.to_string(),
+                "hire_id" => self.id.to_string(),
+                "amount" => payment.amount,
+                "paid_on" => &payment.paid_on,
+                "note" => &payment.note,
+                "recorded_at" => payment.recorded_at,
+            },
+        )?;
+        self.total_paid += amount;
+        self.balance_due = Some(balance - amount);
+        Ok(payment)
+    }
+
+    /// Payments recorded against this hire after the advance, oldest first.
+    pub fn payments(&self) -> Result<Vec<VendorPayment>, Box<dyn Error>> {
+        let mut conn = DbConnection::from_env().get_connection()?;
+        Self::ensure_table(&mut conn)?;
+        let rows: Vec<(String, i64, String, Option<String>, i64)> = conn.exec(
+            "SELECT id, amount, paid_on, note, recorded_at FROM VendorPayments
+             WHERE hire_id = :hire_id ORDER BY recorded_at ASC, id ASC",
+            params! { "hire_id" => self.id.to_string() },
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, amount, paid_on, note, recorded_at)| VendorPayment {
+                id: parse_uuid(&id),
+                hire_id: self.id,
+                amount,
+                paid_on,
+                note,
+                recorded_at,
+            })
+            .collect())
     }
 
     /// Called after a dispatch on `hire_id` reaches a terminal status. Once
@@ -733,5 +861,50 @@ mod tests {
         assert_eq!(requested.len(), 1);
         assert_eq!(requested[0].status, HireStatus::Requested);
         assert!(VehicleHire::exists_for_vendor(vendor.id).unwrap());
+    }
+
+    #[test]
+    fn test_vendor_payments_track_the_balance_and_refuse_overpaying() {
+        let _db = TestDb::create();
+        let (org, customer, vendor) = fleetless_org();
+        let order = org
+            .dispatch_stock_on_hired_vehicle(&customer, &[line("Cement", 10)], vendor.id)
+            .expect("hired dispatch");
+        let mut hire = VehicleHire::get_by_id(order.hire_id.unwrap()).unwrap().unwrap();
+
+        // Nothing to pay before a truck and rate exist.
+        assert!(matches!(hire.record_payment(100, None, None), Err(HireError::Conflict(_))));
+        assert_eq!(hire.balance_due, None);
+
+        hire.assign(truck("MH12 PAY 1", 20)).expect("assign"); // 12,000 with 10,000 advance
+        assert_eq!(hire.total_paid, 10_000);
+        assert_eq!(hire.balance_due, Some(2_000));
+
+        assert!(matches!(hire.record_payment(0, None, None), Err(HireError::InvalidInput(_))));
+        let over = hire.record_payment(2_001, None, None).expect_err("overpay");
+        assert!(over.to_string().contains("more than the 2000"), "{over}");
+        assert!(matches!(
+            hire.record_payment(500, Some("2026-02-30".into()), None),
+            Err(HireError::InvalidInput(_))
+        ));
+
+        let first = hire
+            .record_payment(1_500, Some("2026-09-20".into()), Some("  part payment ".into()))
+            .expect("pay 1");
+        assert_eq!(first.note.as_deref(), Some("part payment"));
+        assert_eq!(hire.balance_due, Some(500));
+        let second = hire.record_payment(500, None, None).expect("pay rest");
+        assert_eq!(second.paid_on.len(), 10, "defaults to today's ISO date");
+        assert_eq!(hire.balance_due, Some(0));
+
+        let stored = VehicleHire::get_by_id(hire.id).unwrap().unwrap();
+        assert_eq!(stored.total_paid, 12_000);
+        assert_eq!(stored.balance_due, Some(0));
+        let payments = stored.payments().unwrap();
+        assert_eq!(payments.iter().map(|p| p.amount).collect::<Vec<_>>(), [1_500, 500]);
+
+        // Deleting the org takes the hire and its payments with it.
+        org.remove_organization().expect("remove org");
+        assert!(VehicleHire::get_by_id(hire.id).unwrap().is_none());
     }
 }

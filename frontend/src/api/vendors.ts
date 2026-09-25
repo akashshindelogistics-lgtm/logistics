@@ -1,5 +1,7 @@
 import api from './client';
-import type { ApiResponse, HireAssignmentInput, HireStatus, VehicleHire, VehicleVendor, VendorInput } from '../types';
+import type {
+  ApiResponse, HireAssignmentInput, HireStatus, VehicleHire, VehicleVendor, VendorInput, VendorPayment,
+} from '../types';
 
 export const listVendors = (orgId: string) =>
   api.get<ApiResponse<VehicleVendor[]>>(`/orgs/${orgId}/vendors`).then(r => r.data);
@@ -22,3 +24,12 @@ export const listVehicleHires = (orgId: string, status?: HireStatus) =>
 /** Record the vendor's truck, driver and rate; its dispatches move to PENDING. */
 export const assignVehicleHire = (hireId: string, input: HireAssignmentInput) =>
   api.put<ApiResponse<VehicleHire>>(`/vehicle-hires/${hireId}/assign`, input).then(r => r.data);
+
+/** Pay the vendor against a hire; returns the hire with its new balance. */
+export const recordVendorPayment = (
+  hireId: string,
+  input: { amount: number; paid_on?: string; note?: string },
+) => api.post<ApiResponse<VehicleHire>>(`/vehicle-hires/${hireId}/payments`, input).then(r => r.data);
+
+export const listVendorPayments = (hireId: string) =>
+  api.get<ApiResponse<VendorPayment[]>>(`/vehicle-hires/${hireId}/payments`).then(r => r.data);

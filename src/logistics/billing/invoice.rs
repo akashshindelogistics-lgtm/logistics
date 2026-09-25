@@ -142,7 +142,7 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 }
 
 /// Today (UTC) as an ISO `YYYY-MM-DD` string.
-fn today_iso() -> String {
+pub(crate) fn today_iso() -> String {
     let days = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -150,6 +150,11 @@ fn today_iso() -> String {
         .div_euclid(86_400);
     let (y, m, d) = civil_from_days(days);
     format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Whether `s` is a real calendar date written as ISO `YYYY-MM-DD`.
+pub(crate) fn is_valid_iso_date(s: &str) -> bool {
+    validate_iso_date(s).is_ok()
 }
 
 /// Validate an ISO `YYYY-MM-DD` string, rejecting calendar-invalid dates.

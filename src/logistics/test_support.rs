@@ -319,6 +319,20 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create VehicleHires");
 
     conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS VendorPayments (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            hire_id VARCHAR(36) NOT NULL,
+            amount BIGINT NOT NULL,
+            paid_on VARCHAR(10) NOT NULL,
+            note TEXT DEFAULT NULL,
+            recorded_at BIGINT NOT NULL,
+            CONSTRAINT fk_vendor_payment_hire FOREIGN KEY (hire_id) REFERENCES VehicleHires(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create VendorPayments");
+
+    conn.query_drop(
         "CREATE TABLE IF NOT EXISTS DispatchLineItems (
             id INT AUTO_INCREMENT PRIMARY KEY,
             dispatch_id VARCHAR(36) NOT NULL,

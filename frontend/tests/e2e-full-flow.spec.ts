@@ -383,6 +383,16 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await expect(page.getByText('Awaiting vehicle')).toHaveCount(0, { timeout: 8000 });
   });
 
+  await test.step('Pay the vendor the balance on the hired truck', async () => {
+    await page.goto('/vendors');
+    const hireRow = page.getByTestId('hire-row').filter({ hasText: vendorName });
+    await hireRow.getByRole('button', { name: /record payment/i }).click();
+    await expect(page.getByLabel('Amount')).toHaveValue('2000');
+    await page.getByLabel('Note').fill('balance on delivery');
+    await page.getByRole('button', { name: /save payment/i }).click();
+    await expect(hireRow.getByText('Paid', { exact: true })).toBeVisible({ timeout: 8000 });
+  });
+
   await test.step('Edit the vehicle, driver and godown from their detail pages', async () => {
     await page.goto('/vehicles');
     await page.getByRole('link', { name: vehicleReg }).click();

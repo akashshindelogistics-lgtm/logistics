@@ -281,6 +281,43 @@ export interface OpsReport {
     category_breakdown: Array<{ category: string; units: number }>;
   }>;
   dispatch_volume: Array<{ date: string; count: number }>;
+  /** Own vs hired trucks, vendor spend and margin on hires. Optional so an
+   *  older backend without it still renders. */
+  hired_transport?: HiredTransport;
+}
+
+// Mirrors HiredTransport / VendorSpend / HireMargin in src/logistics/reports/mod.rs.
+export interface VendorSpend {
+  vendor_id: string;
+  vendor_name: string;
+  hires: number;
+  hire_cost: number;
+  paid: number;
+  outstanding: number;
+}
+
+export interface HireMargin {
+  hire_id: string;
+  vendor_name: string;
+  registration_number: string | null;
+  trip_id: string | null;
+  dispatches: number;
+  invoiced_dispatches: number;
+  invoiced: number;
+  hire_cost: number;
+  margin: number;
+}
+
+export interface HiredTransport {
+  own_dispatches: number;
+  hired_dispatches: number;
+  hired_share_percent: number | null;
+  hire_cost_total: number;
+  paid_to_vendors: number;
+  outstanding_to_vendors: number;
+  awaiting_truck: number;
+  vendors: VendorSpend[];
+  hire_margins: HireMargin[];
 }
 
 export interface ApiResponse<T> {
@@ -356,6 +393,10 @@ export interface VehicleHire {
   driver_license: string | null;
   freight_amount: number | null;
   advance_paid: number;
+  /** advance_paid plus every later vendor payment. */
+  total_paid: number;
+  /** freight_amount - total_paid; null until a rate is assigned. */
+  balance_due: number | null;
   requested_at: number;
   confirmed_at: number | null;
   closed_at: number | null;
@@ -370,4 +411,14 @@ export interface HireAssignmentInput {
   driver_license?: string | null;
   freight_amount: number;
   advance_paid: number;
+}
+
+/** A payment to a vendor after the advance. Mirrors VendorPayment in hire.rs. */
+export interface VendorPayment {
+  id: string;
+  hire_id: string;
+  amount: number;
+  paid_on: string;
+  note: string | null;
+  recorded_at: number;
 }

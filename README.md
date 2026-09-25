@@ -42,7 +42,10 @@ operations, live location maps, and AI-generated dispatch summaries.
   multi-stop trip can go out on a hired truck: the stock is reserved and the
   dispatch waits as `AWAITING_VEHICLE` until the dispatcher enters the truck,
   driver and agreed rate the vendor confirms; from then on it runs like any
-  other dispatch. See [`docs/vehicle-vendors.md`](docs/vehicle-vendors.md).
+  other dispatch. Payments to the vendor (advance, then the balance) are
+  tracked per hire, and the Reports page shows hired share, spend and what's
+  owed per vendor, and the margin each hire made. See
+  [`docs/vehicle-vendors.md`](docs/vehicle-vendors.md).
 - **Stock** — add, update, and remove stock items held in an organization's
   godowns, and transfer a stock item between two godowns with a recorded
   audit trail of every move. Each stock item carries a free-text, org-defined
@@ -234,6 +237,7 @@ npm run test:e2e:demo:uploads        # proof-of-delivery file uploads
 npm run test:e2e:demo:stock-categories # stock categories
 npm run test:e2e:demo:vendors        # vehicle vendors
 npm run test:e2e:demo:hired-vehicles # dispatching on a hired truck
+npm run test:e2e:demo:vendor-payments # paying vendors + hired-transport report
 ```
 
 ## API overview
@@ -274,6 +278,7 @@ All routes are served under the `/api` prefix.
 | PUT/DELETE | `/api/vendors/{id}` | Update (incl. active flag) or remove a vehicle vendor (409 once it has hire history) |
 | GET | `/api/orgs/{id}/vehicle-hires` | The org's hired trucks, newest first (optional `?status=`) |
 | PUT | `/api/vehicle-hires/{id}/assign` | Enter the vendor's truck, driver and rate; the waiting dispatches move to `PENDING` |
+| POST/GET | `/api/vehicle-hires/{id}/payments` | Pay a vendor against a hire (no more than the balance owed) / list the payments |
 | GET/POST | `/api/vehicles/{reg}/documents` | List / record a vehicle's compliance paperwork (insurance, RC, permit, PUC, fitness) |
 | PUT/DELETE | `/api/vehicle-documents/{id}` | Renew (update) or delete a compliance document |
 | GET | `/api/orgs/{id}/vehicle-documents` | Whole-fleet compliance list, soonest expiry first |

@@ -39,7 +39,21 @@ and books a "market truck" for the trip. This plan adds that path.
     assigned. Own-fleet vehicle selection ignores hired dispatches
     (`vehicle_source = 'OWN'`), so a hired truck sharing a number with an own
     truck never makes it look busy.
-- Phases 3–4: not started.
+- **Phase 3 (vendor payables and reports): done.** A `VendorPayments` table
+  (insert-only, cascades with the hire) records payments made after the
+  advance, via `POST`/`GET /api/vehicle-hires/{id}/payments`. Every hire
+  reports `total_paid` (advance plus payments) and `balance_due`
+  (hire cost minus `total_paid`). A payment can't exceed the balance, and a
+  hire with no truck assigned yet can't be paid. `OpsReport.hired_transport`
+  adds own vs hired dispatch counts and share, hire cost / paid / owed
+  totals, a per-vendor spend table, and **margin per hire**: freight invoiced
+  on the hire's dispatches minus the hire cost, with how many of them are
+  invoiced yet. Margin is per hire, not per dispatch, because a trip's hire
+  covers all its stops. The AI report briefing mentions hired trucks when
+  there are any. UI: an Outstanding column and a Vehicle Hires table (Record
+  payment, payment history) on the Vendors page, and a Hired transport
+  section on the Reports page.
+- Phase 4: not started.
 
 ## Decisions
 

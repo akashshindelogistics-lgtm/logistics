@@ -51,6 +51,22 @@ fn build_report_prompt(report: &OpsReport) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
+    let hired = &report.hired_transport;
+    let hired_line = if hired.hired_dispatches == 0 {
+        "No dispatches have gone out on hired trucks.".to_string()
+    } else {
+        format!(
+            "Hired trucks: {} of {} dispatches ({}%), {} still awaiting a truck; hire cost {}, \
+            of which {} is still owed to vendors.",
+            hired.hired_dispatches,
+            hired.hired_dispatches + hired.own_dispatches,
+            hired.hired_share_percent.unwrap_or(0.0),
+            hired.awaiting_truck,
+            hired.hire_cost_total,
+            hired.outstanding_to_vendors,
+        )
+    };
+
     format!(
         "You are a logistics operations analyst. Write a short, plain-English briefing \
         (3-5 sentences) for a dispatcher looking at their operations dashboard. Call out what \
@@ -62,7 +78,8 @@ fn build_report_prompt(report: &OpsReport) -> String {
         On-time rate: {on_time}.\n\
         Units dispatched in the last 30 days: {recent_units}.\n\
         Godown inventory: {inventory}.\n\
-        Dispatch volume over the last 14 days (date: count): {volume_trend}.",
+        Dispatch volume over the last 14 days (date: count): {volume_trend}.\n\
+        {hired_line}",
         util_on = utilization.vehicles_on_active_trip,
         util_total = utilization.total_vehicles,
         util_pct = utilization.utilization_percent,
@@ -73,6 +90,7 @@ fn build_report_prompt(report: &OpsReport) -> String {
         recent_units = report.units_dispatched_recently,
         inventory = inventory,
         volume_trend = volume_trend,
+        hired_line = hired_line,
     )
 }
 
@@ -164,6 +182,7 @@ mod tests {
                 DispatchVolumePoint { date: "2026-09-10".to_string(), count: 2 },
                 DispatchVolumePoint { date: "2026-09-11".to_string(), count: 5 },
             ],
+            hired_transport: Default::default(),
         }
     }
 
@@ -219,5 +238,19 @@ mod tests {
             .await
             .expect_err("should fail without an API key");
         assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn build_report_prompt_mentions_hired_trucks_only_when_used() {
+        let mut report = sample_report();
+        assert!(build_report_prompt(&report).contains("No dispatches have gone out on hired trucks"));
+        report.hired_transport.own_dispatches = 3;
+        report.hired_transport.hired_dispatches = 1;
+        report.hired_transport.hired_share_percent = Some(25.0);
+        report.hired_transport.hire_cost_total = 9000;
+        report.hired_transport.outstanding_to_vendors = 2000;
+        let prompt = build_report_prompt(&report);
+        assert!(prompt.contains("Hired trucks: 1 of 4 dispatches (25%)"), "{prompt}");
+        assert!(prompt.contains("2000 is still owed"), "{prompt}");
     }
 }

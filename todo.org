@@ -1042,5 +1042,22 @@
    frontend unit tests, a 2-flow Playwright spec, a full-demo step and
    `npm run test:e2e:demo:hired-vehicles`. README, pages.yml and
    docs/vehicle-vendors.md updated.
-** TODO Phase 3: Vendor payables (freight, advance, payments, balance) and reports (spend per vendor, own vs hired, margin per hired dispatch)
+** DONE Phase 3: Vendor payables (freight, advance, payments, balance) and reports (spend per vendor, own vs hired, margin per hired dispatch)
+   VendorPayments table + VendorPayment model in src/logistics/vendor/hire.rs
+   (insert-only, cascades with the hire). VehicleHire now reports total_paid
+   (advance + payments) and balance_due. record_payment refuses a hire with
+   no truck/rate yet (409), a non-positive amount, more than the balance, or
+   a bad date (400); paid_on defaults to today. Routes: POST/GET
+   /api/vehicle-hires/{id}/payments (writes Admin|Dispatcher). OpsReport gains
+   hired_transport: own vs hired dispatch counts and share, hire cost / paid /
+   owed totals, trucks still awaited, spend per vendor, and margin per hire
+   (invoiced on its dispatches - hire cost, with an invoiced x/y count; per
+   hire rather than per dispatch because a trip's hire covers every stop).
+   The AI report prompt mentions hired trucks. Frontend: Outstanding column
+   plus a Vehicle Hires table (Record payment pre-filled with the balance,
+   payment history) on /vendors, and a Hired transport section on /reports.
+   5 new Rust tests (1 model, 2 report, 1 AI prompt, 1 route), 9 new frontend
+   unit tests, a Playwright spec, a full-demo step and
+   `npm run test:e2e:demo:vendor-payments`. README, pages.yml and
+   docs/vehicle-vendors.md updated.
 ** TODO Phase 4: Optional - vendor rate cards, per-hire GPS tracker key, delay alert for dispatches stuck awaiting a vehicle

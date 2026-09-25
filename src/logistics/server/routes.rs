@@ -19,13 +19,14 @@ use crate::logistics::notification::notification::{
 };
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::reports::{
-    CategoryUnits, DeliveryPerformance, DispatchVolumePoint, GodownInventory, OpsReport,
+    CategoryUnits, DeliveryPerformance, DispatchVolumePoint, GodownInventory, HireMargin,
+    HiredTransport, OpsReport, VendorSpend,
     VehicleUtilization,
 };
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::upload::upload::{UploadedFile, UploadError, MAX_UPLOAD_BYTES};
 use crate::logistics::user::user::{OrgRole, OrgUser, UserError};
-use crate::logistics::vendor::hire::{HireAssignment, HireError, HireStatus, VehicleHire};
+use crate::logistics::vendor::hire::{HireAssignment, HireError, HireStatus, VehicleHire, VendorPayment};
 use crate::logistics::vendor::vendor::{VehicleVendor, VendorError, VendorInput};
 use crate::logistics::vehicle::document::{
     ComplianceDocType, ComplianceStatus, VehicleDocument, VehicleDocumentError,
@@ -427,6 +428,18 @@ pub struct AssignHirePayload {
     pub advance_paid: i64,
 }
 
+/// A payment to a vendor against one hire, after the advance.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct VendorPaymentPayload {
+    /// Whole currency units; > 0 and no more than the hire's `balance_due`.
+    pub amount: i64,
+    /// ISO `YYYY-MM-DD`; defaults to today.
+    #[serde(default)]
+    pub paid_on: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 fn default_hire_unit() -> Unit {
     Unit::MetricTon
 }
@@ -611,6 +624,13 @@ pub struct VehicleHireListResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Vec<VehicleHire>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VendorPaymentListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<VendorPayment>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -2087,6 +2107,122 @@ pub async fn list_vehicle_hires(
     }
 }
 
+/// Load a hire by id, returning an error `HttpResponse` unless it exists and
+/// belongs to the caller's organization.
+fn load_owned_hire(hire_id: Uuid, auth_org_id: Uuid) -> Result<VehicleHire, HttpResponse> {
+    match VehicleHire::get_by_id(hire_id) {
+        Ok(Some(h)) if h.org_id == auth_org_id => Ok(h),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: hire belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Vehicle hire not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch vehicle hire: {}", err),
+            data: None,
+        })),
+    }
+}
+
+fn hire_error_response(action: &str, err: HireError) -> HttpResponse {
+    match err {
+        HireError::InvalidInput(msg) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: msg,
+            data: None,
+        }),
+        HireError::Conflict(msg) => HttpResponse::Conflict().json(ApiResponse::<String> {
+            success: false,
+            message: msg,
+            data: None,
+        }),
+        HireError::Db(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to {action}: {err}"),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/vehicle-hires/{id}/payments",
+    tag = "Vehicle vendors",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vehicle hire UUID")),
+    request_body = VendorPaymentPayload,
+    responses(
+        (status = 201, description = "Payment recorded; returns the hire with its new balance", body = VehicleHireResponse),
+        (status = 400, description = "Non-positive amount, more than the balance owed, or a bad date", body = EmptyResponse),
+        (status = 403, description = "Forbidden (other org, or not Admin/Dispatcher)", body = EmptyResponse),
+        (status = 404, description = "Hire not found", body = EmptyResponse),
+        (status = 409, description = "No truck or rate assigned to the hire yet", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/vehicle-hires/{id}/payments")]
+pub async fn record_vendor_payment(
+    path: web::Path<Uuid>,
+    payload: web::Json<VendorPaymentPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let mut hire = match load_owned_hire(path.into_inner(), auth.org_id) {
+        Ok(h) => h,
+        Err(resp) => return resp,
+    };
+    let payload = payload.into_inner();
+    match hire.record_payment(payload.amount, payload.paid_on, payload.note) {
+        Ok(_) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: "Vendor payment recorded".to_string(),
+            data: Some(hire),
+        }),
+        Err(err) => hire_error_response("record vendor payment", err),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/vehicle-hires/{id}/payments",
+    tag = "Vehicle vendors",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vehicle hire UUID")),
+    responses(
+        (status = 200, description = "Payments after the advance, oldest first", body = VendorPaymentListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Hire not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/vehicle-hires/{id}/payments")]
+pub async fn list_vendor_payments(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let hire = match load_owned_hire(path.into_inner(), auth.org_id) {
+        Ok(h) => h,
+        Err(resp) => return resp,
+    };
+    match hire.payments() {
+        Ok(payments) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} vendor payments", payments.len()),
+            data: Some(payments),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list vendor payments: {}", err),
+            data: None,
+        }),
+    }
+}
+
 #[utoipa::path(
     put,
     path = "/api/vehicle-hires/{id}/assign",
@@ -2112,29 +2248,9 @@ pub async fn assign_vehicle_hire(
     if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
         return resp;
     }
-    let mut hire = match VehicleHire::get_by_id(path.into_inner()) {
-        Ok(Some(h)) if h.org_id == auth.org_id => h,
-        Ok(Some(_)) => {
-            return HttpResponse::Forbidden().json(ApiResponse::<String> {
-                success: false,
-                message: "Access denied: hire belongs to a different organization".to_string(),
-                data: None,
-            })
-        }
-        Ok(None) => {
-            return HttpResponse::NotFound().json(ApiResponse::<String> {
-                success: false,
-                message: "Vehicle hire not found".to_string(),
-                data: None,
-            })
-        }
-        Err(err) => {
-            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
-                success: false,
-                message: format!("Failed to fetch vehicle hire: {}", err),
-                data: None,
-            })
-        }
+    let mut hire = match load_owned_hire(path.into_inner(), auth.org_id) {
+        Ok(h) => h,
+        Err(resp) => return resp,
     };
 
     let payload = payload.into_inner();
@@ -2166,21 +2282,7 @@ pub async fn assign_vehicle_hire(
                 data: Some(hire),
             })
         }
-        Err(HireError::InvalidInput(msg)) => HttpResponse::BadRequest().json(ApiResponse::<String> {
-            success: false,
-            message: msg,
-            data: None,
-        }),
-        Err(HireError::Conflict(msg)) => HttpResponse::Conflict().json(ApiResponse::<String> {
-            success: false,
-            message: msg,
-            data: None,
-        }),
-        Err(HireError::Db(err)) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to assign vehicle hire: {}", err),
-            data: None,
-        }),
+        Err(err) => hire_error_response("assign vehicle hire", err),
     }
 }
 
@@ -5010,6 +5112,8 @@ impl Modify for SecurityAddon {
         delete_vendor,
         list_vehicle_hires,
         assign_vehicle_hire,
+        record_vendor_payment,
+        list_vendor_payments,
         list_vehicle_documents,
         add_vehicle_document,
         update_vehicle_document,
@@ -5071,6 +5175,8 @@ impl Modify for SecurityAddon {
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
             CreateVendorPayload, UpdateVendorPayload, VehicleVendor,
             VehicleHire, HireStatus, AssignHirePayload, HireListQuery, VehicleSource,
+            VendorPayment, VendorPaymentPayload, VendorPaymentListResponse,
+            HiredTransport, VendorSpend, HireMargin,
             VehicleDocumentPayload, VehicleMaintenancePayload, RecordMileagePayload,
             TransferStockPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload, InvoicePayload,
@@ -5159,6 +5265,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(delete_vendor)
             .service(list_vehicle_hires)
             .service(assign_vehicle_hire)
+            .service(record_vendor_payment)
+            .service(list_vendor_payments)
             .service(list_vehicle_documents)
             .service(add_vehicle_document)
             .service(update_vehicle_document)
@@ -10192,5 +10300,96 @@ mod tests {
             .unwrap();
         assert_eq!(trip.vehicle_registration_number.as_deref(), Some("MH12 TRIP 9"));
         assert!(trip.stops.iter().all(|s| s.status == DispatchStatus::Pending));
+    }
+
+    #[actix_web::test]
+    async fn test_vendor_payments_over_the_api() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth, customer, vendor) = setup_hire_org(&app, "Hire Payments").await;
+        let order = Organization::get_by_id(org.id)
+            .unwrap()
+            .unwrap()
+            .dispatch_stock_on_hired_vehicle(
+                &customer,
+                &[DispatchLineItemInput { stock_description: "Hire Goods".into(), requested_quantity: 1 }],
+                vendor.id,
+            )
+            .expect("hired dispatch");
+        let hire_id = order.hire_id.unwrap();
+        let pay = |amount: i64| VendorPaymentPayload {
+            amount,
+            paid_on: Some("2026-09-24".to_string()),
+            note: Some("balance on POD".to_string()),
+        };
+
+        // Before a truck is assigned there is nothing to pay -> 409.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&pay(100))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
+
+        // Assign at 8,000 with 6,000 advance.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&assign_payload("MH12 PAY 9", 10))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        // Overpaying -> 400; warehouse staff -> 403.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&pay(2_001))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+        let warehouse =
+            add_user_and_login(&app, org.id, &auth, "pay-wh@example.com", OrgRole::WarehouseStaff).await;
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
+            .insert_header(("Authorization", warehouse.clone()))
+            .set_json(&pay(100))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        // Pay the balance.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&pay(2_000))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let hire = test::read_body_json::<ApiResponse<VehicleHire>, _>(resp).await.data.unwrap();
+        assert_eq!((hire.total_paid, hire.balance_due), (8_000, Some(0)));
+
+        // Every role can read the payment history.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
+            .insert_header(("Authorization", warehouse))
+            .to_request();
+        let payments = test::read_body_json::<ApiResponse<Vec<VendorPayment>>, _>(
+            test::call_service(&app, req).await,
+        )
+        .await
+        .data
+        .unwrap();
+        assert_eq!(payments.len(), 1);
+        assert_eq!(payments[0].note.as_deref(), Some("balance on POD"));
+
+        // The report shows the vendor as fully paid.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/reports", org.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let report = test::read_body_json::<ApiResponse<OpsReport>, _>(test::call_service(&app, req).await)
+            .await
+            .data
+            .unwrap();
+        assert_eq!(report.hired_transport.hire_cost_total, 8_000);
+        assert_eq!(report.hired_transport.outstanding_to_vendors, 0);
     }
 }

@@ -8,9 +8,11 @@
 //! [`crate::logistics::billing::invoice::Invoice::customer_summary`] works off
 //! the full invoice list.
 
+use crate::logistics::billing::invoice::Invoice;
 use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus, VehicleSource};
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::vehicle::vehicle::Vehicle;
+use crate::logistics::vendor::hire::{HireStatus, VehicleHire};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -118,6 +120,61 @@ pub struct DispatchVolumePoint {
     pub count: i64,
 }
 
+/// What one vendor has been paid, and is still owed, across its hires.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct VendorSpend {
+    pub vendor_id: Uuid,
+    pub vendor_name: String,
+    /// Hires with a truck and rate assigned (`CONFIRMED` or `RELEASED`).
+    pub hires: i64,
+    /// Σ agreed hire cost over those hires.
+    pub hire_cost: i64,
+    pub paid: i64,
+    pub outstanding: i64,
+}
+
+/// Freight invoiced against the dispatches one hire carried, minus what the
+/// truck cost. A trip's hire covers all its stops, so margin is per hire.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct HireMargin {
+    pub hire_id: Uuid,
+    pub vendor_name: String,
+    pub registration_number: Option<String>,
+    /// `Some` when the hire was for a multi-stop trip.
+    pub trip_id: Option<Uuid>,
+    /// Dispatches on this hire that weren't cancelled.
+    pub dispatches: i64,
+    /// How many of those have an invoice yet. Until every one does, `margin`
+    /// understates what the hire will earn.
+    pub invoiced_dispatches: i64,
+    /// Σ invoice amount over those dispatches.
+    pub invoiced: i64,
+    pub hire_cost: i64,
+    /// `invoiced - hire_cost`.
+    pub margin: i64,
+}
+
+/// How much the org leans on hired trucks, and what they cost.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct HiredTransport {
+    /// Non-cancelled dispatches on the org's own vehicles.
+    pub own_dispatches: i64,
+    /// Non-cancelled dispatches on hired trucks (assigned or still awaiting).
+    pub hired_dispatches: i64,
+    /// `hired / (own + hired) * 100`, one decimal. `None` with no dispatches.
+    pub hired_share_percent: Option<f64>,
+    /// Σ agreed hire cost over hires with a truck assigned.
+    pub hire_cost_total: i64,
+    pub paid_to_vendors: i64,
+    pub outstanding_to_vendors: i64,
+    /// Hires still waiting for the vendor's truck.
+    pub awaiting_truck: i64,
+    /// One row per vendor with an assigned hire, most spent first.
+    pub vendors: Vec<VendorSpend>,
+    /// One row per assigned hire, newest first.
+    pub hire_margins: Vec<HireMargin>,
+}
+
 /// The whole report for one organisation.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsReport {
@@ -131,6 +188,9 @@ pub struct OpsReport {
     /// One point per day for the last `VOLUME_WINDOW_DAYS` (14) days, oldest
     /// first. Days with no dispatches are present with `count: 0`.
     pub dispatch_volume: Vec<DispatchVolumePoint>,
+    /// Own vs hired trucks, vendor spend and margin on hires.
+    #[serde(default)]
+    pub hired_transport: HiredTransport,
 }
 
 impl OpsReport {
@@ -138,6 +198,8 @@ impl OpsReport {
         let vehicles = Vehicle::list_by_org(org_id)?;
         let dispatches = DispatchOrder::list_by_org(org_id)?;
         let godowns = Godown::list_by_org(org_id)?;
+        let hires = VehicleHire::list_by_org(org_id, None)?;
+        let invoices = Invoice::list_by_org(org_id)?;
         let now = now_unix();
 
         Ok(Self {
@@ -149,7 +211,91 @@ impl OpsReport {
             ),
             godown_inventory: godowns.iter().map(godown_inventory).collect(),
             dispatch_volume: dispatch_volume(&dispatches, now),
+            hired_transport: hired_transport(&dispatches, &hires, &invoices),
         })
+    }
+}
+
+fn hired_transport(
+    dispatches: &[DispatchOrder],
+    hires: &[VehicleHire],
+    invoices: &[Invoice],
+) -> HiredTransport {
+    let live: Vec<&DispatchOrder> = dispatches
+        .iter()
+        .filter(|d| d.status != DispatchStatus::Cancelled)
+        .collect();
+    let hired_dispatches = live.iter().filter(|d| d.vehicle_source == VehicleSource::Hired).count() as i64;
+    let own_dispatches = live.len() as i64 - hired_dispatches;
+    let hired_share_percent = (!live.is_empty())
+        .then(|| round1(hired_dispatches as f64 / live.len() as f64 * 100.0));
+
+    let invoice_by_dispatch: HashMap<Uuid, i64> =
+        invoices.iter().map(|i| (i.dispatch_id, i.amount)).collect();
+
+    // Hires with a truck and rate; a REQUESTED or CANCELLED hire has no cost.
+    let assigned: Vec<&VehicleHire> = hires
+        .iter()
+        .filter(|h| matches!(h.status, HireStatus::Confirmed | HireStatus::Released))
+        .collect();
+
+    let mut by_vendor: HashMap<Uuid, VendorSpend> = HashMap::new();
+    for h in &assigned {
+        let v = by_vendor.entry(h.vendor_id).or_insert_with(|| VendorSpend {
+            vendor_id: h.vendor_id,
+            vendor_name: h.vendor_name.clone(),
+            hires: 0,
+            hire_cost: 0,
+            paid: 0,
+            outstanding: 0,
+        });
+        v.hires += 1;
+        v.hire_cost += h.freight_amount.unwrap_or(0);
+        v.paid += h.total_paid;
+        v.outstanding += h.balance_due.unwrap_or(0);
+    }
+    let mut vendors: Vec<VendorSpend> = by_vendor.into_values().collect();
+    vendors.sort_by(|a, b| b.hire_cost.cmp(&a.hire_cost).then_with(|| a.vendor_name.cmp(&b.vendor_name)));
+
+    let mut hire_margins: Vec<(i64, HireMargin)> = assigned
+        .iter()
+        .map(|h| {
+            let on_hire: Vec<&&DispatchOrder> =
+                live.iter().filter(|d| d.hire_id == Some(h.id)).collect();
+            let amounts: Vec<i64> = on_hire
+                .iter()
+                .filter_map(|d| invoice_by_dispatch.get(&d.id).copied())
+                .collect();
+            let invoiced: i64 = amounts.iter().sum();
+            let hire_cost = h.freight_amount.unwrap_or(0);
+            (
+                h.requested_at,
+                HireMargin {
+                    hire_id: h.id,
+                    vendor_name: h.vendor_name.clone(),
+                    registration_number: h.registration_number.clone(),
+                    trip_id: h.trip_id,
+                    dispatches: on_hire.len() as i64,
+                    invoiced_dispatches: amounts.len() as i64,
+                    invoiced,
+                    hire_cost,
+                    margin: invoiced - hire_cost,
+                },
+            )
+        })
+        .collect();
+    hire_margins.sort_by(|a, b| b.0.cmp(&a.0));
+
+    HiredTransport {
+        own_dispatches,
+        hired_dispatches,
+        hired_share_percent,
+        hire_cost_total: assigned.iter().map(|h| h.freight_amount.unwrap_or(0)).sum(),
+        paid_to_vendors: assigned.iter().map(|h| h.total_paid).sum(),
+        outstanding_to_vendors: assigned.iter().map(|h| h.balance_due.unwrap_or(0)).sum(),
+        awaiting_truck: hires.iter().filter(|h| h.status == HireStatus::Requested).count() as i64,
+        vendors,
+        hire_margins: hire_margins.into_iter().map(|(_, m)| m).collect(),
     }
 }
 
