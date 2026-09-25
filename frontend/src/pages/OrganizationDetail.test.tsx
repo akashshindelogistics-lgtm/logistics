@@ -8,7 +8,8 @@ import * as vehiclesApi from '../api/vehicles';
 import * as customersApi from '../api/customers';
 import * as godownsApi from '../api/godowns';
 import * as driversApi from '../api/drivers';
-import type { Customer, Driver, Organization } from '../types';
+import * as vendorsApi from '../api/vendors';
+import type { Customer, Driver, Organization, VehicleVendor } from '../types';
 
 vi.mock('react-router-dom', async importOriginal => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
@@ -19,6 +20,7 @@ vi.mock('../api/vehicles');
 vi.mock('../api/customers');
 vi.mock('../api/godowns');
 vi.mock('../api/drivers');
+vi.mock('../api/vendors');
 vi.mock('../components/LocationMap', () => ({
   default: ({ pins }: { pins: unknown[] }) => <div data-testid="map">{pins.length} pins</div>,
 }));
@@ -64,6 +66,7 @@ describe('OrganizationDetail page', () => {
     vi.mocked(godownsApi.listStockTransfers).mockResolvedValue(ok([]));
     vi.mocked(vehiclesApi.listOrgVehicleDocuments).mockResolvedValue(ok([]));
     vi.mocked(vehiclesApi.listOrgVehicleMaintenance).mockResolvedValue(ok([]));
+    vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([]));
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -137,7 +140,7 @@ describe('OrganizationDetail page', () => {
 
     expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', [
       { stockDescription: 'Cement', requestedQuantity: 30 },
-    ]);
+    ], undefined);
     expect(await screen.findByText(/dispatch successful/i)).toBeInTheDocument();
     expect(screen.getByLabelText('Stock Description')).toHaveValue('');
   });
@@ -161,7 +164,7 @@ describe('OrganizationDetail page', () => {
     expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', [
       { stockDescription: 'Cement', requestedQuantity: 30 },
       { stockDescription: 'Sand', requestedQuantity: 10 },
-    ]);
+    ], undefined);
   });
 
   it('removes an extra stock line before dispatching', async () => {
@@ -182,7 +185,7 @@ describe('OrganizationDetail page', () => {
 
     expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', [
       { stockDescription: 'Cement', requestedQuantity: 30 },
-    ]);
+    ], undefined);
   });
 
   it('shows a failure message when the dispatch call rejects', async () => {
@@ -494,5 +497,57 @@ describe('OrganizationDetail page', () => {
     await user.selectOptions(select, 'd1');
 
     expect(driversApi.assignVehicleDriver).toHaveBeenCalledWith('MH01AB1234', 'd1');
+  });
+
+  describe('dispatching on a hired vehicle', () => {
+    const vendor: VehicleVendor = {
+      id: 'v1', org_id: 'o1', name: 'Sharma Roadlines', contact_person: null,
+      phone: '+91 1', gstin: null, notes: null, is_active: true,
+    };
+    const parked: VehicleVendor = { ...vendor, id: 'v2', name: 'Parked Vendor', is_active: false };
+
+    it('reserves stock against the chosen vendor, offering only active vendors', async () => {
+      const user = userEvent.setup();
+      mockLoad(org());
+      vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([vendor, parked]));
+      vi.mocked(orgsApi.dispatchStock).mockResolvedValue(ok({} as never));
+
+      renderPage();
+      await screen.findByRole('heading', { name: 'Express Freight' });
+
+      await user.selectOptions(screen.getByLabelText('Vehicle source'), 'HIRED');
+      const vendorSelect = screen.getByLabelText('Vendor');
+      expect(within(vendorSelect).queryByText(/parked vendor/i)).not.toBeInTheDocument();
+      await user.selectOptions(vendorSelect, 'v1');
+      await user.selectOptions(screen.getByLabelText(/customer/i), 'c1');
+      await user.type(screen.getByLabelText('Stock Description'), 'Cement');
+      await user.type(screen.getByLabelText('Quantity'), '30');
+      await user.click(screen.getByRole('button', { name: /reserve & request truck/i }));
+
+      expect(orgsApi.dispatchStock).toHaveBeenCalledWith('o1', 'c1', [
+        { stockDescription: 'Cement', requestedQuantity: 30 },
+      ], 'v1');
+      expect(await screen.findByText(/stock reserved/i)).toBeInTheDocument();
+    });
+
+    it('offers to hire when no own vehicle is free', async () => {
+      const user = userEvent.setup();
+      mockLoad(org());
+      vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([vendor]));
+      vi.mocked(orgsApi.dispatchStock).mockRejectedValue({
+        response: { data: { message: 'Dispatch failed: No vehicles registered under this organization for dispatch; hire a truck from a vendor instead' } },
+      });
+
+      renderPage();
+      await screen.findByRole('heading', { name: 'Express Freight' });
+      await user.selectOptions(screen.getByLabelText(/customer/i), 'c1');
+      await user.type(screen.getByLabelText('Stock Description'), 'Cement');
+      await user.type(screen.getByLabelText('Quantity'), '30');
+      await user.click(screen.getByRole('button', { name: /dispatch stock/i }));
+
+      await user.click(await screen.findByRole('button', { name: /hire a truck from a vendor instead/i }));
+      expect(screen.getByLabelText('Vehicle source')).toHaveValue('HIRED');
+      expect(screen.getByLabelText('Vendor')).toBeInTheDocument();
+    });
   });
 });

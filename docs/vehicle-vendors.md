@@ -17,7 +17,29 @@ and books a "market truck" for the trip. This plan adds that path.
   `/vendors` page is in `frontend/src/pages/Vendors.tsx`. Deleting a vendor
   is unconditional for now: the "refused while it has an open hire" check
   arrives with `VehicleHires` in phase 2.
-- Phases 2–4: not started.
+- **Phase 2 (hire-based dispatch): done.** `src/logistics/vendor/hire.rs`
+  has `VehicleHire` and the `VehicleHires` table. The org gets
+  `dispatch_stock_on_hired_vehicle` / `dispatch_trip_on_hired_vehicle`, and
+  there are two new routes (`GET /api/orgs/{id}/vehicle-hires`,
+  `PUT /api/vehicle-hires/{id}/assign`). The dispatch form and the trip form
+  have a *Vehicle source* choice, and the Dispatches page has the
+  *Assign truck* form. Where the build differs from the plan below:
+  - **Deleting a vendor** is refused (`409`) once it has *any* hire, open or
+    closed, not only while a hire is open. Deleting it would orphan the hire
+    history; deactivate it instead.
+  - **Cancelling before a truck is assigned** credits the stock back through
+    the same godown choice a return uses (a godown already holding the item,
+    else the org's first). A dispatch doesn't record which godowns the stock
+    came from, so it may not land in the exact godown it was drawn from.
+  - **A closed hire** is `RELEASED` if a truck was assigned and `CANCELLED`
+    if not. On a trip, the hire closes when the last stop finishes.
+  - **Notifications** for a hired dispatch go out on assignment, not at
+    creation: until then there is no driver to tell.
+  - **The truck's number** is stored on the dispatch and the trip once
+    assigned. Own-fleet vehicle selection ignores hired dispatches
+    (`vehicle_source = 'OWN'`), so a hired truck sharing a number with an own
+    truck never makes it look busy.
+- Phases 3–4: not started.
 
 ## Decisions
 

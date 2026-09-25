@@ -269,11 +269,13 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             id VARCHAR(36) PRIMARY KEY,
             org_id VARCHAR(36) NOT NULL,
             customer_id VARCHAR(36) NOT NULL,
-            vehicle_registration_number VARCHAR(255) NOT NULL,
+            vehicle_registration_number VARCHAR(255) DEFAULT NULL,
             status VARCHAR(50) NOT NULL,
             dispatched_at BIGINT NOT NULL,
             trip_id VARCHAR(36) DEFAULT NULL,
-            stop_sequence BIGINT DEFAULT NULL
+            stop_sequence BIGINT DEFAULT NULL,
+            vehicle_source VARCHAR(10) NOT NULL DEFAULT 'OWN',
+            hire_id VARCHAR(36) DEFAULT NULL
         )",
     )
     .expect("migrate: create Dispatches");
@@ -282,12 +284,39 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
         "CREATE TABLE IF NOT EXISTS Trips (
             id VARCHAR(36) PRIMARY KEY,
             org_id VARCHAR(36) NOT NULL,
-            vehicle_registration_number VARCHAR(255) NOT NULL,
+            vehicle_registration_number VARCHAR(255) DEFAULT NULL,
             created_at BIGINT NOT NULL,
+            vehicle_source VARCHAR(10) NOT NULL DEFAULT 'OWN',
+            hire_id VARCHAR(36) DEFAULT NULL,
             CONSTRAINT fk_trip_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
         )",
     )
     .expect("migrate: create Trips");
+
+    conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS VehicleHires (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            vendor_id VARCHAR(36) NOT NULL,
+            dispatch_id VARCHAR(36) DEFAULT NULL,
+            trip_id VARCHAR(36) DEFAULT NULL,
+            required_volume BIGINT NOT NULL,
+            status VARCHAR(20) NOT NULL,
+            registration_number VARCHAR(255) DEFAULT NULL,
+            capacity BIGINT DEFAULT NULL,
+            unit VARCHAR(50) DEFAULT NULL,
+            driver_name VARCHAR(255) DEFAULT NULL,
+            driver_phone VARCHAR(64) DEFAULT NULL,
+            driver_license VARCHAR(255) DEFAULT NULL,
+            freight_amount BIGINT DEFAULT NULL,
+            advance_paid BIGINT NOT NULL DEFAULT 0,
+            requested_at BIGINT NOT NULL,
+            confirmed_at BIGINT DEFAULT NULL,
+            closed_at BIGINT DEFAULT NULL,
+            CONSTRAINT fk_hire_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create VehicleHires");
 
     conn.query_drop(
         "CREATE TABLE IF NOT EXISTS DispatchLineItems (

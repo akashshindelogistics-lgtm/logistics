@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
-import { listVendors, createVendor, updateVendor, deleteVendor } from './vendors';
+import { listVendors, createVendor, updateVendor, deleteVendor, listVehicleHires, assignVehicleHire } from './vendors';
 
 vi.mock('./client', () => ({
   default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
@@ -39,5 +39,23 @@ describe('vendors api client', () => {
     vi.mocked(api.delete).mockResolvedValue(envelope(null));
     await deleteVendor('v2');
     expect(api.delete).toHaveBeenCalledWith('/vendors/v2');
+  });
+
+  it('listVehicleHires GETs /orgs/{id}/vehicle-hires, with an optional status filter', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope([]));
+    await listVehicleHires('o1');
+    expect(api.get).toHaveBeenCalledWith('/orgs/o1/vehicle-hires', undefined);
+    await listVehicleHires('o1', 'REQUESTED');
+    expect(api.get).toHaveBeenCalledWith('/orgs/o1/vehicle-hires', { params: { status: 'REQUESTED' } });
+  });
+
+  it('assignVehicleHire PUTs the truck details to /vehicle-hires/{id}/assign', async () => {
+    vi.mocked(api.put).mockResolvedValue(envelope({ id: 'h1' }));
+    const input = {
+      registration_number: 'MH12 HR 1', capacity: 20, driver_name: 'Ravi', driver_phone: '1',
+      freight_amount: 9000, advance_paid: 5000,
+    };
+    await assignVehicleHire('h1', input);
+    expect(api.put).toHaveBeenCalledWith('/vehicle-hires/h1/assign', input);
   });
 });

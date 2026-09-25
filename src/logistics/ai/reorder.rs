@@ -206,7 +206,9 @@ mod tests {
             id: Uuid::new_v4(),
             org_id: Uuid::new_v4(),
             customer_id: Uuid::new_v4(),
-            vehicle_registration_number: "MH12AB1234".to_string(),
+            vehicle_registration_number: Some("MH12AB1234".to_string()),
+            vehicle_source: Default::default(),
+            hire_id: None,
             line_items: vec![DispatchLineItem {
                 stock_description: description.to_string(),
                 quantity,

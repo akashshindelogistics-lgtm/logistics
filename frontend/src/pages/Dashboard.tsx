@@ -91,7 +91,7 @@ export default function Dashboard() {
                 {recent.map(o => (
                   <tr key={o.id}>
                     <td><span className="mono">{o.id.slice(0, 8)}…</span></td>
-                    <td className="entity-name">{o.vehicle_registration_number}</td>
+                    <td className="entity-name">{o.vehicle_registration_number ?? <span className="muted">Awaiting vehicle</span>}</td>
                     <td>
                       {o.line_items.length === 1
                         ? o.line_items[0].stock_description

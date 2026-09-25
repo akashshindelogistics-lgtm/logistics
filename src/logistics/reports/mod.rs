@@ -8,7 +8,7 @@
 //! [`crate::logistics::billing::invoice::Invoice::customer_summary`] works off
 //! the full invoice list.
 
-use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus};
+use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus, VehicleSource};
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::vehicle::vehicle::Vehicle;
 use serde::{Deserialize, Serialize};
@@ -156,8 +156,9 @@ impl OpsReport {
 fn vehicle_utilization(vehicles: &[Vehicle], dispatches: &[DispatchOrder]) -> VehicleUtilization {
     let active_regs: HashSet<&str> = dispatches
         .iter()
-        .filter(|d| !d.status.is_terminal())
-        .map(|d| d.vehicle_registration_number.as_str())
+        // Hired trucks aren't part of the fleet being measured.
+        .filter(|d| !d.status.is_terminal() && d.vehicle_source == VehicleSource::Own)
+        .filter_map(|d| d.vehicle_registration_number.as_deref())
         .collect();
 
     let total_vehicles = vehicles.len() as i64;

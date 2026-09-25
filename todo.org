@@ -1017,6 +1017,30 @@
    a step in the full e2e demo, and a standalone `npm run test:e2e:demo:vendors`.
    README (feature bullet, endpoint table, demo list - also added the missing
    assistant/uploads/stock-categories demo scripts) and pages.yml updated.
-** TODO Phase 2: Hire-based dispatch - AWAITING_VEHICLE status, Dispatches.vehicle_source + hire_id, nullable vehicle_registration_number, PUT /api/vehicle-hires/{id}/assign, stock credited back when an awaiting dispatch is cancelled, own-fleet selection ignores hired dispatches, Vehicle source toggle + Assign form in the UI, trips included
+** DONE Phase 2: Hire-based dispatch - AWAITING_VEHICLE status, Dispatches.vehicle_source + hire_id, nullable vehicle_registration_number, PUT /api/vehicle-hires/{id}/assign, stock credited back when an awaiting dispatch is cancelled, own-fleet selection ignores hired dispatches, Vehicle source toggle + Assign form in the UI, trips included
+   New VehicleHire model (src/logistics/vendor/hire.rs) + VehicleHires table
+   (REQUESTED -> CONFIRMED -> RELEASED, or CANCELLED). DispatchStatus gains
+   AWAITING_VEHICLE (only -> CANCELLED by status change; -> PENDING only by
+   assigning the truck). Dispatches and Trips gain vehicle_source (OWN|HIRED)
+   and hire_id, and vehicle_registration_number becomes nullable
+   (ensure_hire_columns upgrades an old database in place). POST /dispatch and
+   /trips take vehicle_source + vendor_id: stock is drawn down straight away,
+   no own vehicle is picked, and one hire covers the dispatch or the whole trip.
+   PUT /api/vehicle-hires/{id}/assign validates truck, driver, rate and
+   capacity >= the load, then in one transaction confirms the hire, puts the
+   truck number on every waiting dispatch (and the trip) and moves them to
+   PENDING, then notifies customer + hired driver. GET /api/orgs/{id}/vehicle-hires
+   (?status=). Cancelling an AWAITING_VEHICLE dispatch credits its stock back;
+   the hire closes once every dispatch on it is terminal. Own-fleet selection
+   ignores hired dispatches; the "no vehicle free" errors now suggest hiring;
+   vendor delete is 409 once it has any hire. Utilisation report counts own
+   trucks only. Frontend: Vehicle source + vendor pickers on the dispatch and
+   trip forms (plus a "Hire a truck from a vendor instead" button when no own
+   truck is free), an Assign truck form + Hired/vendor tag + "Awaiting vehicle"
+   on the Dispatches page, and null-safe truck display on Dashboard/Trips.
+   13 new Rust tests (9 model, 1 migration, 3 route; fixtures updated), 11 new
+   frontend unit tests, a 2-flow Playwright spec, a full-demo step and
+   `npm run test:e2e:demo:hired-vehicles`. README, pages.yml and
+   docs/vehicle-vendors.md updated.
 ** TODO Phase 3: Vendor payables (freight, advance, payments, balance) and reports (spend per vendor, own vs hired, margin per hired dispatch)
 ** TODO Phase 4: Optional - vendor rate cards, per-hire GPS tracker key, delay alert for dispatches stuck awaiting a vehicle

@@ -440,7 +440,9 @@ mod tests {
             id: Uuid::new_v4(),
             org_id: org.id,
             customer_id: customer.id,
-            vehicle_registration_number: "KA01 BILL 1".to_string(),
+            vehicle_registration_number: Some("KA01 BILL 1".to_string()),
+            vehicle_source: Default::default(),
+            hire_id: None,
             line_items: vec![DispatchLineItem {
                 stock_description: "Cement".to_string(),
                 quantity: 10,
@@ -558,7 +560,9 @@ mod tests {
                 id: Uuid::new_v4(),
                 org_id: org.id,
                 customer_id: customer.id,
-                vehicle_registration_number: format!("KA01 S {i}"),
+                vehicle_registration_number: Some(format!("KA01 S {i}")),
+                vehicle_source: Default::default(),
+                hire_id: None,
                 line_items: vec![DispatchLineItem {
                     stock_description: "Goods".to_string(),
                     quantity: 1,

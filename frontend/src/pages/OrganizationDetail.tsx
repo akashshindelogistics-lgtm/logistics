@@ -17,6 +17,7 @@ import {
 import { listCustomers } from '../api/customers';
 import { createGodown, deleteGodown, addGodownStock, transferGodownStock, listStockTransfers } from '../api/godowns';
 import { listDrivers, addDriver, deleteDriver, updateDriver, assignVehicleDriver } from '../api/drivers';
+import { listVendors } from '../api/vendors';
 import type {
   Organization,
   Customer,
@@ -25,6 +26,7 @@ import type {
   ComplianceDocType,
   VehicleDocument,
   VehicleMaintenance,
+  VehicleVendor,
 } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck, IconUsers } from '../components/Icons';
@@ -139,6 +141,13 @@ export default function OrganizationDetail() {
   ]);
   const [dMsg, setDMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [dSubmitting, setDSubmitting] = useState(false);
+  // 'OWN' picks a free fleet vehicle; 'HIRED' reserves the stock and waits
+  // for a truck from the chosen vendor (docs/vehicle-vendors.md).
+  const [dSource, setDSource] = useState<'OWN' | 'HIRED'>('OWN');
+  const [dVendorId, setDVendorId] = useState('');
+  const [vendors, setVendors] = useState<VehicleVendor[]>([]);
+  // Set when an own-fleet dispatch fails for want of a free vehicle.
+  const [dNoFreeVehicle, setDNoFreeVehicle] = useState(false);
 
   const load = () =>
     Promise.all([
@@ -159,7 +168,14 @@ export default function OrganizationDetail() {
       })
       .finally(() => setLoading(false));
 
-  useEffect(() => { load(); }, [id]);
+  // Loaded apart from the rest so a vendor-list failure never blocks the page.
+  const loadVendors = () =>
+    Promise.resolve()
+      .then(() => listVendors(id!))
+      .then(r => setVendors((r?.data ?? []).filter(v => v.is_active)))
+      .catch(() => setVendors([]));
+
+  useEffect(() => { load(); loadVendors(); }, [id]);
 
   const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -408,12 +424,22 @@ export default function OrganizationDetail() {
         setDMsg({ text: 'Add at least one stock line with a description and quantity.', ok: false });
         return;
       }
-      await dispatchStock(id!, dCustomerId, lineItems);
-      setDMsg({ text: 'Dispatch successful! Stock is on its way.', ok: true });
+      if (dSource === 'HIRED' && !dVendorId) {
+        setDMsg({ text: 'Pick the vendor you are hiring the truck from.', ok: false });
+        return;
+      }
+      setDNoFreeVehicle(false);
+      await dispatchStock(id!, dCustomerId, lineItems, dSource === 'HIRED' ? dVendorId : undefined);
+      setDMsg(
+        dSource === 'HIRED'
+          ? { text: 'Stock reserved. Assign the hired truck on the Dispatches page once the vendor confirms.', ok: true }
+          : { text: 'Dispatch successful! Stock is on its way.', ok: true },
+      );
       setDLineItems([{ description: '', quantity: '' }]);
       load();
     } catch (err) {
       const apiMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setDNoFreeVehicle(dSource === 'OWN' && !!apiMsg && /hire a truck/i.test(apiMsg));
       setDMsg({
         text: apiMsg
           ? `Dispatch failed: ${apiMsg}`
@@ -1206,6 +1232,25 @@ export default function OrganizationDetail() {
                   {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
+              <div className="field">
+                <label htmlFor="d-source">Vehicle source</label>
+                <select id="d-source" value={dSource} onChange={e => setDSource(e.target.value as 'OWN' | 'HIRED')}>
+                  <option value="OWN">Own fleet</option>
+                  <option value="HIRED">Hire from vendor</option>
+                </select>
+              </div>
+              {dSource === 'HIRED' && (
+                <div className="field">
+                  <label htmlFor="d-vendor">Vendor</label>
+                  <select id="d-vendor" value={dVendorId} onChange={e => setDVendorId(e.target.value)} required>
+                    <option value="">Select a vendor…</option>
+                    {vendors.map(v => <option key={v.id} value={v.id}>{v.name} · {v.phone}</option>)}
+                  </select>
+                  {vendors.length === 0 && (
+                    <p className="muted" style={{ marginTop: 6 }}>No active vendors yet. Add one on the <Link to="/vendors">Vendors</Link> page.</p>
+                  )}
+                </div>
+              )}
               <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '4px 0 10px' }}>Stock Lines</p>
               {dLineItems.map((li, i) => {
                 const suffix = i === 0 ? '' : ` ${i + 1}`;
@@ -1254,9 +1299,19 @@ export default function OrganizationDetail() {
                   {dMsg.text}
                 </div>
               )}
+              {dNoFreeVehicle && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{ marginBottom: 14 }}
+                  onClick={() => { setDSource('HIRED'); setDNoFreeVehicle(false); setDMsg(null); }}
+                >
+                  <IconTruck size={13} />Hire a truck from a vendor instead
+                </button>
+              )}
 
               <button className="btn btn-primary" type="submit" disabled={dSubmitting} style={{ width: '100%', justifyContent: 'center' }}>
-                <IconDispatch size={14} />{dSubmitting ? 'Dispatching…' : 'Dispatch Stock'}
+                <IconDispatch size={14} />{dSubmitting ? 'Dispatching…' : dSource === 'HIRED' ? 'Reserve & Request Truck' : 'Dispatch Stock'}
               </button>
             </form>
           </div>

@@ -30,6 +30,15 @@ describe('trips api client', () => {
     expect(api.post).toHaveBeenCalledWith('/orgs/o1/trips', { stops, optimize_route: true });
   });
 
+  it('createTrip puts the trip on a hired vehicle when a vendor is given', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({ id: 't1' }));
+    const stops = [{ customer_id: 'c1', line_items: [{ stock_description: 'Cement', requested_quantity: 1 }] }];
+    await createTrip('o1', stops, false, 'vend-1');
+    expect(api.post).toHaveBeenCalledWith('/orgs/o1/trips', {
+      stops, optimize_route: false, vehicle_source: 'HIRED', vendor_id: 'vend-1',
+    });
+  });
+
   it('listOrgTrips GETs /orgs/{id}/trips', async () => {
     vi.mocked(api.get).mockResolvedValue(envelope([]));
     await listOrgTrips('o1');

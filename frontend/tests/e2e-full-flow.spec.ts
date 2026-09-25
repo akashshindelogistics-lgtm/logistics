@@ -356,6 +356,33 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await expect(page.getByTestId('godown-card').filter({ hasText: stockC }).getByText('60')).toBeVisible({ timeout: 8000 });
   });
 
+  await test.step('Send a shipment on a truck hired from the vendor', async () => {
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Vehicle source').selectOption('HIRED');
+    await page.getByLabel('Vendor', { exact: true }).selectOption({ label: `${vendorName} · +91 98200 11111` });
+    await page.getByLabel('Customer').selectOption({ label: custName });
+    await page.getByLabel('Stock Description').fill(stockA);
+    await page.getByLabel('Quantity', { exact: true }).fill('1');
+    await page.getByRole('button', { name: /reserve & request truck/i }).click();
+    // Wait for whichever outcome message the form shows, so a failure reports its text.
+    const outcome = page.getByText(/stock reserved|dispatch failed|pick the vendor/i);
+    await expect(outcome).toBeVisible({ timeout: 10000 });
+    await expect(outcome).toHaveText(/stock reserved/i);
+
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').filter({ hasText: 'Awaiting vehicle' }).first();
+    await expect(row.getByText(new RegExp(`Hired · ${vendorName}`))).toBeVisible({ timeout: 8000 });
+    await row.getByRole('button', { name: 'Assign truck' }).click();
+    await page.getByLabel('Truck number').fill(`MH14HR${uid().toUpperCase()}`);
+    await page.getByLabel('Capacity').fill('20');
+    await page.getByLabel('Driver name').fill('Suresh Patil');
+    await page.getByLabel('Driver phone').fill('+91 97000 12345');
+    await page.getByLabel('Hire cost').fill('9000');
+    await page.getByLabel('Advance paid').fill('7000');
+    await page.getByRole('button', { name: /save truck/i }).click();
+    await expect(page.getByText('Awaiting vehicle')).toHaveCount(0, { timeout: 8000 });
+  });
+
   await test.step('Edit the vehicle, driver and godown from their detail pages', async () => {
     await page.goto('/vehicles');
     await page.getByRole('link', { name: vehicleReg }).click();

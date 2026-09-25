@@ -5,9 +5,10 @@ import { listOrgInvoices, createDispatchInvoice, payInvoice } from '../api/billi
 import { listDispatchNotifications } from '../api/notifications';
 import { uploadFile, uploadedFileHref } from '../api/uploads';
 import { getOrgId } from '../api/auth';
+import { listVehicleHires, assignVehicleHire } from '../api/vendors';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, isRunningLate, type NextAction } from '../lib/dispatchLifecycle';
-import type { DispatchOrder, Invoice, Notification, NotificationStatus, PaymentStatus } from '../types';
+import type { DispatchOrder, Invoice, Notification, NotificationStatus, PaymentStatus, VehicleHire } from '../types';
 import './page.css';
 
 const PAYMENT_TAG_CLASS: Record<PaymentStatus, string> = {
@@ -30,6 +31,12 @@ function defaultDueDate(): string {
   d.setDate(d.getDate() + 30);
   return d.toISOString().slice(0, 10);
 }
+
+const emptyHireForm = {
+  registration_number: '', capacity: '', driver_name: '', driver_phone: '',
+  driver_license: '', freight_amount: '', advance_paid: '',
+};
+type HireFormState = typeof emptyHireForm;
 
 export default function Dispatches() {
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
@@ -57,6 +64,13 @@ export default function Dispatches() {
   const [invBusyId, setInvBusyId] = useState<string | null>(null);
   const [invError, setInvError] = useState<Record<string, string>>({});
 
+  // Hires by id, for the vendor tag and the "Assign hired truck" form.
+  const [hires, setHires] = useState<Record<string, VehicleHire>>({});
+  const [hireDraftId, setHireDraftId] = useState<string | null>(null);
+  const [hireForm, setHireForm] = useState<HireFormState>(emptyHireForm);
+  const [hireBusy, setHireBusy] = useState(false);
+  const [hireError, setHireError] = useState('');
+
   const [notifsOpenId, setNotifsOpenId] = useState<string | null>(null);
   const [notifs, setNotifs] = useState<Record<string, Notification[]>>({});
   const [notifsLoadingId, setNotifsLoadingId] = useState<string | null>(null);
@@ -74,13 +88,30 @@ export default function Dispatches() {
     }
   };
 
-  useEffect(() => {
+  const loadOrders = () =>
     listDispatches()
       .then(r => {
         const sorted = [...(r.data ?? [])].sort((a, b) => b.dispatched_at - a.dispatched_at);
         setOrders(sorted);
       })
       .finally(() => setLoading(false));
+
+  const loadHires = () => {
+    const orgId = getOrgId();
+    if (!orgId) return;
+    Promise.resolve()
+      .then(() => listVehicleHires(orgId))
+      .then(r => {
+        const byId: Record<string, VehicleHire> = {};
+        for (const h of r?.data ?? []) byId[h.id] = h;
+        setHires(byId);
+      })
+      .catch(() => { /* hired-vehicle details are best-effort on this page */ });
+  };
+
+  useEffect(() => {
+    loadOrders();
+    loadHires();
 
     const orgId = getOrgId();
     if (orgId) {
@@ -225,6 +256,40 @@ export default function Dispatches() {
     });
   }
 
+  function openHireForm(order: DispatchOrder) {
+    setHireDraftId(order.id);
+    setHireForm(emptyHireForm);
+    setHireError('');
+  }
+
+  async function handleAssignHire(hire: VehicleHire) {
+    setHireBusy(true);
+    setHireError('');
+    try {
+      await assignVehicleHire(hire.id, {
+        registration_number: hireForm.registration_number,
+        capacity: Number(hireForm.capacity),
+        driver_name: hireForm.driver_name,
+        driver_phone: hireForm.driver_phone,
+        driver_license: hireForm.driver_license.trim() || null,
+        freight_amount: Number(hireForm.freight_amount),
+        advance_paid: Number(hireForm.advance_paid || 0),
+      });
+      setHireDraftId(null);
+      // One hire can cover every stop of a trip, so refresh them all.
+      loadOrders();
+      loadHires();
+    } catch (err) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setHireError(msg || 'Could not assign the hired truck.');
+    } finally {
+      setHireBusy(false);
+    }
+  }
+
+  const setHireField = (field: keyof HireFormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setHireForm(prev => ({ ...prev, [field]: e.target.value }));
+
   function handleConfirmReturn() {
     if (!returnDraft) return;
     applyStatus(returnDraft.order, returnDraft.action, undefined, returnGodownId || undefined);
@@ -291,7 +356,16 @@ export default function Dispatches() {
                           <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--green-bg)', color: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                             <IconDispatch size={13} />
                           </div>
-                          <span className="entity-name">{o.vehicle_registration_number}</span>
+                          <div>
+                            {o.vehicle_registration_number
+                              ? <span className="entity-name">{o.vehicle_registration_number}</span>
+                              : <span className="muted">Awaiting vehicle</span>}
+                            {o.vehicle_source === 'HIRED' && (
+                              <div className="badge tag-amber" style={{ marginTop: 4 }}>
+                                Hired{o.hire_id && hires[o.hire_id]?.vendor_name ? ` · ${hires[o.hire_id].vendor_name}` : ''}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td>
@@ -351,6 +425,11 @@ export default function Dispatches() {
                       <td>
                         {NEXT_ACTIONS[o.status] ? (
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {o.status === 'AWAITING_VEHICLE' && o.hire_id && hires[o.hire_id] && (
+                              <button className="btn btn-sm btn-primary" onClick={() => openHireForm(o)}>
+                                Assign truck
+                              </button>
+                            )}
                             {NEXT_ACTIONS[o.status]!.map(action => (
                               <button
                                 key={action.status}
@@ -437,6 +516,55 @@ export default function Dispatches() {
                             <button className="btn btn-ghost btn-sm" onClick={() => setInvoiceDraftId(null)}>
                               <IconX size={13} /> Cancel
                             </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {hireDraftId === o.id && o.hire_id && hires[o.hire_id] && (
+                      <tr key={`${o.id}-hire`}>
+                        <td colSpan={10} style={{ padding: '0 16px 14px' }}>
+                          <div style={{ padding: 12, background: 'var(--surface)', borderRadius: 8 }}>
+                            <p className="muted" style={{ margin: '0 0 10px' }}>
+                              Truck from <strong>{hires[o.hire_id].vendor_name}</strong>
+                              {hires[o.hire_id].trip_id && ' for every stop of this trip'}
+                              {' '}· needs capacity of at least {hires[o.hire_id].required_volume}
+                            </p>
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                              {([
+                                ['registration_number', 'Truck number', 'text', 'MH12 AB 1234'],
+                                ['capacity', 'Capacity', 'number', `≥ ${hires[o.hire_id].required_volume}`],
+                                ['driver_name', 'Driver name', 'text', ''],
+                                ['driver_phone', 'Driver phone', 'text', '+91 …'],
+                                ['driver_license', 'Driver licence', 'text', 'Optional'],
+                                ['freight_amount', 'Hire cost', 'number', 'Agreed amount'],
+                                ['advance_paid', 'Advance paid', 'number', '0'],
+                              ] as const).map(([field, label, type, placeholder]) => (
+                                <div className="field" style={{ marginBottom: 0, minWidth: 130 }} key={field}>
+                                  <label htmlFor={`hire-${field}-${o.id}`}>{label}</label>
+                                  <input
+                                    id={`hire-${field}-${o.id}`}
+                                    type={type}
+                                    placeholder={placeholder}
+                                    value={hireForm[field]}
+                                    onChange={setHireField(field)}
+                                  />
+                                </div>
+                              ))}
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => handleAssignHire(hires[o.hire_id!])}
+                                disabled={
+                                  hireBusy || !hireForm.registration_number.trim() || !hireForm.capacity
+                                  || !hireForm.driver_name.trim() || !hireForm.driver_phone.trim() || !hireForm.freight_amount
+                                }
+                              >
+                                <IconCheck size={13} /> Save Truck
+                              </button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => setHireDraftId(null)}>
+                                <IconX size={13} /> Cancel
+                              </button>
+                            </div>
+                            {hireError && <div className="errortxt" style={{ marginTop: 8 }}>{hireError}</div>}
                           </div>
                         </td>
                       </tr>

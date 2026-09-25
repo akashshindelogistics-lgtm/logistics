@@ -151,6 +151,7 @@ export interface Notification {
 // Mirrors DispatchStatus in src/logistics/dispatch/dispatch.rs. Keep in sync
 // if the backend state machine changes.
 export type DispatchStatus =
+  | 'AWAITING_VEHICLE'
   | 'PENDING'
   | 'CONFIRMED'
   | 'LOADED'
@@ -183,7 +184,12 @@ export interface DispatchOrder {
   id: string;
   org_id: string;
   customer_id: string;
-  vehicle_registration_number: string;
+  /** Null only while a hired dispatch is AWAITING_VEHICLE. */
+  vehicle_registration_number: string | null;
+  /** Whose truck: the org's own fleet, or one hired from a vendor. */
+  vehicle_source?: VehicleSource;
+  /** The VehicleHire behind a hired dispatch. */
+  hire_id?: string | null;
   line_items: DispatchLineItem[];
   status: DispatchStatus;
   dispatched_at: number;
@@ -200,7 +206,10 @@ export type TripStatus = 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED';
 export interface Trip {
   id: string;
   org_id: string;
-  vehicle_registration_number: string;
+  /** Null only while a hired trip is waiting for its truck. */
+  vehicle_registration_number: string | null;
+  vehicle_source?: VehicleSource;
+  hire_id?: string | null;
   created_at: number;
   status: TripStatus;
   stops: DispatchOrder[];
@@ -320,4 +329,45 @@ export interface VendorInput {
   phone: string;
   gstin: string | null;
   notes: string | null;
+}
+
+// Mirrors VehicleSource in src/logistics/dispatch/dispatch.rs.
+export type VehicleSource = 'OWN' | 'HIRED';
+
+// Mirrors HireStatus / VehicleHire in src/logistics/vendor/hire.rs.
+export type HireStatus = 'REQUESTED' | 'CONFIRMED' | 'RELEASED' | 'CANCELLED';
+
+/** One vendor truck booked for a dispatch (dispatch_id) or a trip (trip_id). */
+export interface VehicleHire {
+  id: string;
+  org_id: string;
+  vendor_id: string;
+  vendor_name: string;
+  dispatch_id: string | null;
+  trip_id: string | null;
+  /** The assigned truck's capacity must be at least this. */
+  required_volume: number;
+  status: HireStatus;
+  registration_number: string | null;
+  capacity: number | null;
+  unit: string | null;
+  driver_name: string | null;
+  driver_phone: string | null;
+  driver_license: string | null;
+  freight_amount: number | null;
+  advance_paid: number;
+  requested_at: number;
+  confirmed_at: number | null;
+  closed_at: number | null;
+}
+
+/** What the dispatcher enters once the vendor confirms a truck. */
+export interface HireAssignmentInput {
+  registration_number: string;
+  capacity: number;
+  driver_name: string;
+  driver_phone: string;
+  driver_license?: string | null;
+  freight_amount: number;
+  advance_paid: number;
 }

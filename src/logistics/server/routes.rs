@@ -8,7 +8,7 @@ use crate::logistics::billing::invoice::{
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::{
     DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus, DispatchStatusEvent,
-    ProofOfDelivery, ProofOfDeliveryInput,
+    ProofOfDelivery, ProofOfDeliveryInput, VehicleSource,
 };
 use crate::logistics::dispatch::trip::{Trip, TripStatus};
 use crate::logistics::driver::driver::Driver;
@@ -25,6 +25,7 @@ use crate::logistics::reports::{
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::upload::upload::{UploadedFile, UploadError, MAX_UPLOAD_BYTES};
 use crate::logistics::user::user::{OrgRole, OrgUser, UserError};
+use crate::logistics::vendor::hire::{HireAssignment, HireError, HireStatus, VehicleHire};
 use crate::logistics::vendor::vendor::{VehicleVendor, VendorError, VendorInput};
 use crate::logistics::vehicle::document::{
     ComplianceDocType, ComplianceStatus, VehicleDocument, VehicleDocumentError,
@@ -364,6 +365,14 @@ pub struct DispatchRequestPayload {
     /// The stock lines this shipment carries. Must contain at least one item;
     /// a description may not be repeated.
     pub line_items: Vec<DispatchLineItemPayload>,
+    /// `OWN` (default) picks a free vehicle from the org's fleet. `HIRED`
+    /// reserves the stock and asks `vendor_id` for a truck: the dispatch
+    /// starts `AWAITING_VEHICLE` until `PUT /api/vehicle-hires/{id}/assign`.
+    #[serde(default)]
+    pub vehicle_source: VehicleSource,
+    /// Required when `vehicle_source` is `HIRED`: an active vendor of this org.
+    #[serde(default)]
+    pub vendor_id: Option<Uuid>,
 }
 
 /// A natural-language question for the org-scoped "ask your data" assistant.
@@ -390,6 +399,43 @@ pub struct CreateTripPayload {
     /// order given).
     #[serde(default)]
     pub optimize_route: bool,
+    /// As on a single dispatch: `HIRED` puts the whole trip on one truck
+    /// hired from `vendor_id`.
+    #[serde(default)]
+    pub vehicle_source: VehicleSource,
+    #[serde(default)]
+    pub vendor_id: Option<Uuid>,
+}
+
+/// The vendor's truck, driver and agreed rate, entered after the vendor
+/// confirms a hire.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct AssignHirePayload {
+    pub registration_number: String,
+    /// Must be at least the hire's `required_volume`.
+    pub capacity: i64,
+    #[serde(default = "default_hire_unit")]
+    pub unit: Unit,
+    pub driver_name: String,
+    pub driver_phone: String,
+    #[serde(default)]
+    pub driver_license: Option<String>,
+    /// Agreed hire cost for the whole trip, whole currency units, > 0.
+    pub freight_amount: i64,
+    /// Paid up front; 0..=freight_amount. Defaults to 0.
+    #[serde(default)]
+    pub advance_paid: i64,
+}
+
+fn default_hire_unit() -> Unit {
+    Unit::MetricTon
+}
+
+#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
+pub struct HireListQuery {
+    /// Only hires in this status: REQUESTED, CONFIRMED, RELEASED or CANCELLED.
+    #[serde(default)]
+    pub status: Option<HireStatus>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -551,6 +597,20 @@ pub struct VendorResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<VehicleVendor>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VehicleHireResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<VehicleHire>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VehicleHireListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<VehicleHire>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1936,6 +1996,7 @@ pub async fn update_vendor(
     params(("id" = Uuid, Path, description = "Vendor UUID")),
     responses(
         (status = 200, description = "Vendor deleted", body = EmptyResponse),
+        (status = 409, description = "Vendor has hire history; deactivate it instead", body = EmptyResponse),
         (status = 403, description = "Forbidden (other org, or not Admin/Dispatcher)", body = EmptyResponse),
         (status = 404, description = "Vendor not found", body = EmptyResponse),
         (status = 401, description = "Unauthorized", body = EmptyResponse)
@@ -1950,6 +2011,26 @@ pub async fn delete_vendor(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> imp
     if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
         return resp;
     }
+    match VehicleHire::exists_for_vendor(vendor.id) {
+        Ok(true) => {
+            return HttpResponse::Conflict().json(ApiResponse::<String> {
+                success: false,
+                message: format!(
+                    "{} has hire history and can't be deleted; deactivate it instead",
+                    vendor.name
+                ),
+                data: None,
+            })
+        }
+        Ok(false) => {}
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to check vendor hires: {}", err),
+                data: None,
+            })
+        }
+    }
     match vendor.delete() {
         Ok(()) => HttpResponse::Ok().json(ApiResponse::<String> {
             success: true,
@@ -1959,6 +2040,145 @@ pub async fn delete_vendor(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> imp
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to delete vendor: {}", err),
+            data: None,
+        }),
+    }
+}
+
+// ── Vehicle hire handlers (protected) ─────────────────────────────────────────
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/vehicle-hires",
+    tag = "Vehicle vendors",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID"), HireListQuery),
+    responses(
+        (status = 200, description = "The organization's vehicle hires, newest first", body = VehicleHireListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/vehicle-hires")]
+pub async fn list_vehicle_hires(
+    path: web::Path<Uuid>,
+    query: web::Query<HireListQuery>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match VehicleHire::list_by_org(org_id, query.status) {
+        Ok(hires) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} vehicle hires", hires.len()),
+            data: Some(hires),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list vehicle hires: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/vehicle-hires/{id}/assign",
+    tag = "Vehicle vendors",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vehicle hire UUID")),
+    request_body = AssignHirePayload,
+    responses(
+        (status = 200, description = "Truck assigned; the hire is CONFIRMED and its dispatches are PENDING", body = VehicleHireResponse),
+        (status = 400, description = "Missing field, bad amount, or truck too small for the load", body = EmptyResponse),
+        (status = 403, description = "Forbidden (other org, or not Admin/Dispatcher)", body = EmptyResponse),
+        (status = 404, description = "Hire not found", body = EmptyResponse),
+        (status = 409, description = "Hire already assigned or closed", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/vehicle-hires/{id}/assign")]
+pub async fn assign_vehicle_hire(
+    path: web::Path<Uuid>,
+    payload: web::Json<AssignHirePayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let mut hire = match VehicleHire::get_by_id(path.into_inner()) {
+        Ok(Some(h)) if h.org_id == auth.org_id => h,
+        Ok(Some(_)) => {
+            return HttpResponse::Forbidden().json(ApiResponse::<String> {
+                success: false,
+                message: "Access denied: hire belongs to a different organization".to_string(),
+                data: None,
+            })
+        }
+        Ok(None) => {
+            return HttpResponse::NotFound().json(ApiResponse::<String> {
+                success: false,
+                message: "Vehicle hire not found".to_string(),
+                data: None,
+            })
+        }
+        Err(err) => {
+            return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle hire: {}", err),
+                data: None,
+            })
+        }
+    };
+
+    let payload = payload.into_inner();
+    let assignment = HireAssignment {
+        registration_number: payload.registration_number,
+        capacity: payload.capacity,
+        unit: payload.unit,
+        driver_name: payload.driver_name,
+        driver_phone: payload.driver_phone,
+        driver_license: payload.driver_license,
+        freight_amount: payload.freight_amount,
+        advance_paid: payload.advance_paid,
+    };
+    match hire.assign(assignment) {
+        Ok(released) => {
+            // The dispatches are now real: tell each customer and the hired
+            // driver, as an own-fleet dispatch does at creation.
+            for order in &released {
+                if let Ok(Some(customer)) = Customer::get_by_id(order.customer_id) {
+                    notify_dispatch_created(auth.org_id, order, &customer).await;
+                }
+            }
+            HttpResponse::Ok().json(ApiResponse {
+                success: true,
+                message: format!(
+                    "Hired truck assigned; {} dispatch(es) moved to PENDING",
+                    released.len()
+                ),
+                data: Some(hire),
+            })
+        }
+        Err(HireError::InvalidInput(msg)) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: msg,
+            data: None,
+        }),
+        Err(HireError::Conflict(msg)) => HttpResponse::Conflict().json(ApiResponse::<String> {
+            success: false,
+            message: msg,
+            data: None,
+        }),
+        Err(HireError::Db(err)) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to assign vehicle hire: {}", err),
             data: None,
         }),
     }
@@ -3323,24 +3543,37 @@ pub async fn dispatch_stock(
         })
         .collect();
 
-    match org.dispatch_stock_to_customer(&customer, &line_items) {
+    let result = match (payload.vehicle_source, payload.vendor_id) {
+        (VehicleSource::Own, _) => org.dispatch_stock_to_customer(&customer, &line_items),
+        (VehicleSource::Hired, Some(vendor_id)) => {
+            org.dispatch_stock_on_hired_vehicle(&customer, &line_items, vendor_id)
+        }
+        (VehicleSource::Hired, None) => {
+            return HttpResponse::BadRequest().json(ApiResponse::<String> {
+                success: false,
+                message: "vendor_id is required when vehicle_source is HIRED".to_string(),
+                data: None,
+            })
+        }
+    };
+
+    match result {
         Ok(order) => {
             // Best-effort: tell the customer and the assigned driver. A
-            // recording failure must not fail the dispatch itself.
-            let driver_phone = driver_phone_for_vehicle(&order.vehicle_registration_number, org_id);
-            if let Ok(notifs) = Notification::record_dispatch_created(
-                org_id,
-                order.id,
-                &customer,
-                driver_phone.as_deref(),
-            )
-            .await
-            {
-                Notification::deliver_queued_best_effort(&notifs).await;
+            // recording failure must not fail the dispatch itself. A hired
+            // dispatch has no truck or driver yet; its notifications go out
+            // when the vendor's truck is assigned.
+            if order.vehicle_source == VehicleSource::Own {
+                notify_dispatch_created(org_id, &order, &customer).await;
             }
+            let message = if order.status == DispatchStatus::AwaitingVehicle {
+                "Stock reserved; awaiting the hired vehicle"
+            } else {
+                "Stock dispatched successfully"
+            };
             HttpResponse::Ok().json(ApiResponse {
                 success: true,
-                message: "Stock dispatched successfully".to_string(),
+                message: message.to_string(),
                 data: Some(order),
             })
         }
@@ -3349,6 +3582,28 @@ pub async fn dispatch_stock(
             message: format!("Dispatch failed: {}", err),
             data: None,
         }),
+    }
+}
+
+/// Record (and try to send) the dispatch-created notifications for one
+/// dispatch: to its customer, and to whoever drives its truck.
+async fn notify_dispatch_created(org_id: Uuid, order: &DispatchOrder, customer: &Customer) {
+    let driver_phone = driver_phone_for_dispatch(order, org_id);
+    if let Ok(notifs) =
+        Notification::record_dispatch_created(org_id, order.id, customer, driver_phone.as_deref()).await
+    {
+        Notification::deliver_queued_best_effort(&notifs).await;
+    }
+}
+
+/// The phone of whoever drives this dispatch's truck: the hired driver on a
+/// hired dispatch, otherwise the active driver assigned to the own vehicle.
+fn driver_phone_for_dispatch(order: &DispatchOrder, org_id: Uuid) -> Option<String> {
+    match order.vehicle_source {
+        VehicleSource::Hired => {
+            VehicleHire::get_by_id(order.hire_id?).ok().flatten()?.driver_phone
+        }
+        VehicleSource::Own => driver_phone_for_vehicle(order.vehicle_registration_number.as_deref()?, org_id),
     }
 }
 
@@ -3446,21 +3701,28 @@ pub async fn create_trip(
     let stops_ref: Vec<(&Customer, &[DispatchLineItemInput])> =
         resolved.iter().map(|(c, l)| (c, l.as_slice())).collect();
 
-    match org.dispatch_trip_to_customers(&stops_ref, payload.optimize_route) {
+    let result = match (payload.vehicle_source, payload.vendor_id) {
+        (VehicleSource::Own, _) => org.dispatch_trip_to_customers(&stops_ref, payload.optimize_route),
+        (VehicleSource::Hired, Some(vendor_id)) => {
+            org.dispatch_trip_on_hired_vehicle(&stops_ref, payload.optimize_route, vendor_id)
+        }
+        (VehicleSource::Hired, None) => {
+            return HttpResponse::BadRequest().json(ApiResponse::<String> {
+                success: false,
+                message: "vendor_id is required when vehicle_source is HIRED".to_string(),
+                data: None,
+            })
+        }
+    };
+
+    match result {
         Ok(trip) => {
-            // Best-effort per-stop notifications.
-            for stop in &trip.stops {
-                if let Some((customer, _)) = resolved.iter().find(|(c, _)| c.id == stop.customer_id) {
-                    let phone = driver_phone_for_vehicle(&stop.vehicle_registration_number, org_id);
-                    if let Ok(notifs) = Notification::record_dispatch_created(
-                        org_id,
-                        stop.id,
-                        customer,
-                        phone.as_deref(),
-                    )
-                    .await
-                    {
-                        Notification::deliver_queued_best_effort(&notifs).await;
+            // Best-effort per-stop notifications; a hired trip's go out when
+            // its truck is assigned.
+            if trip.vehicle_source == VehicleSource::Own {
+                for stop in &trip.stops {
+                    if let Some((customer, _)) = resolved.iter().find(|(c, _)| c.id == stop.customer_id) {
+                        notify_dispatch_created(org_id, stop, customer).await;
                     }
                 }
             }
@@ -4746,6 +5008,8 @@ impl Modify for SecurityAddon {
         add_vendor,
         update_vendor,
         delete_vendor,
+        list_vehicle_hires,
+        assign_vehicle_hire,
         list_vehicle_documents,
         add_vehicle_document,
         update_vehicle_document,
@@ -4806,6 +5070,7 @@ impl Modify for SecurityAddon {
             CreateCustomerPayload, DispatchRequestPayload, DispatchLineItemPayload,
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
             CreateVendorPayload, UpdateVendorPayload, VehicleVendor,
+            VehicleHire, HireStatus, AssignHirePayload, HireListQuery, VehicleSource,
             VehicleDocumentPayload, VehicleMaintenancePayload, RecordMileagePayload,
             TransferStockPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload, InvoicePayload,
@@ -4824,7 +5089,7 @@ impl Modify for SecurityAddon {
             StockTransferResponse, StockTransferListResponse,
             CustomerResponse, CustomerListResponse,
             DriverResponse, DriverListResponse,
-            VendorResponse, VendorListResponse,
+            VendorResponse, VendorListResponse, VehicleHireResponse, VehicleHireListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
             OpsReportResponse, UserResponse, UserListResponse, NotificationListResponse,
@@ -4842,7 +5107,7 @@ impl Modify for SecurityAddon {
         (name = "Organizations", description = "Organization management"),
         (name = "Vehicles", description = "Vehicle fleet management"),
         (name = "Drivers", description = "Driver records and vehicle assignment"),
-        (name = "Vehicle vendors", description = "Transporters and brokers the organization hires vehicles from"),
+        (name = "Vehicle vendors", description = "Transporters and brokers the organization hires vehicles from, and the trucks hired from them"),
         (name = "Vehicle compliance", description = "Vehicle paperwork (insurance, RC, permit, PUC, fitness) and expiry tracking"),
         (name = "Vehicle maintenance", description = "Preventive maintenance scheduling by due date and/or odometer mileage, with alerts"),
         (name = "Godowns", description = "Warehouse (godown) and stock management"),
@@ -4892,6 +5157,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(add_vendor)
             .service(update_vendor)
             .service(delete_vendor)
+            .service(list_vehicle_hires)
+            .service(assign_vehicle_hire)
             .service(list_vehicle_documents)
             .service(add_vehicle_document)
             .service(update_vehicle_document)
@@ -5911,6 +6178,8 @@ mod tests {
             .uri(&format!("/api/orgs/{}/dispatch", org.id))
             .insert_header(("Authorization", auth.clone()))
             .set_json(&DispatchRequestPayload {
+                vehicle_source: VehicleSource::Own,
+                vendor_id: None,
                 customer_id: customer.id,
                 line_items: vec![DispatchLineItemPayload {
                     stock_description: "Dispatch Test Goods".to_string(),
@@ -6803,6 +7072,8 @@ mod tests {
             .uri(&format!("/api/orgs/{}/dispatch", org_a.id))
             .insert_header(("Authorization", auth_a))
             .set_json(&DispatchRequestPayload {
+                vehicle_source: VehicleSource::Own,
+                vendor_id: None,
                 customer_id: foreign_customer.id,
                 line_items: vec![DispatchLineItemPayload {
                     stock_description: "Anything".to_string(),
@@ -6823,6 +7094,8 @@ mod tests {
         let org_id = Uuid::new_v4();
         let customer_id = Uuid::new_v4();
         let payload = DispatchRequestPayload {
+            vehicle_source: VehicleSource::Own,
+            vendor_id: None,
             customer_id,
             line_items: vec![DispatchLineItemPayload {
                 stock_description: "Nonexistent Stock Description".to_string(),
@@ -6929,6 +7202,8 @@ mod tests {
             .uri(&format!("/api/orgs/{}/dispatch", org.id))
             .insert_header(("Authorization", auth.clone()))
             .set_json(&DispatchRequestPayload {
+                vehicle_source: VehicleSource::Own,
+                vendor_id: None,
                 customer_id: first.customer_id,
                 line_items: vec![
                     DispatchLineItemPayload { stock_description: "Bricks".to_string(), requested_quantity: 120 },
@@ -6950,6 +7225,8 @@ mod tests {
             .uri(&format!("/api/orgs/{}/dispatch", org.id))
             .insert_header(("Authorization", auth))
             .set_json(&DispatchRequestPayload {
+                vehicle_source: VehicleSource::Own,
+                vendor_id: None,
                 customer_id: first.customer_id,
                 line_items: vec![
                     DispatchLineItemPayload { stock_description: "Bricks".to_string(), requested_quantity: 1 },
@@ -7953,6 +8230,8 @@ mod tests {
         let target_org_id = Uuid::new_v4();
         let attacker_org_id = Uuid::new_v4();
         let payload = DispatchRequestPayload {
+            vehicle_source: VehicleSource::Own,
+            vendor_id: None,
             customer_id: Uuid::new_v4(),
             line_items: vec![DispatchLineItemPayload {
                 stock_description: "Stolen Stock".to_string(),
@@ -8342,7 +8621,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)], optimize_route: false })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)], optimize_route: false, vehicle_source: VehicleSource::Own, vendor_id: None })
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status().as_u16(), 200);
@@ -8407,7 +8686,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1)], optimize_route: false })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1)], optimize_route: false, vehicle_source: VehicleSource::Own, vendor_id: None })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -8415,7 +8694,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)], optimize_route: false })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)], optimize_route: false, vehicle_source: VehicleSource::Own, vendor_id: None })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -8425,7 +8704,7 @@ mod tests {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", wh))
-            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)], optimize_route: false })
+            .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)], optimize_route: false, vehicle_source: VehicleSource::Own, vendor_id: None })
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     }
@@ -8455,6 +8734,8 @@ mod tests {
             .uri(&format!("/api/orgs/{}/trips", org.id))
             .insert_header(("Authorization", auth.clone()))
             .set_json(&CreateTripPayload {
+                vehicle_source: VehicleSource::Own,
+                vendor_id: None,
                 stops: vec![trip_stop(c1, 1), trip_stop(c_far, 1), trip_stop(c_near, 1)],
                 optimize_route: true,
             })
@@ -8777,6 +9058,10 @@ mod tests {
         let warehouse = add_user_and_login(&app, org.id, &admin, "w@example.com", OrgRole::WarehouseStaff).await;
 
         let body = DispatchRequestPayload {
+
+            vehicle_source: VehicleSource::Own,
+
+            vendor_id: None,
             customer_id,
             line_items: vec![DispatchLineItemPayload {
                 stock_description: "Dispatch Test Goods".to_string(),
@@ -9095,6 +9380,8 @@ mod tests {
             .uri(&format!("/api/orgs/{}/dispatch", org.id))
             .insert_header(("Authorization", auth))
             .set_json(&DispatchRequestPayload {
+                vehicle_source: VehicleSource::Own,
+                vendor_id: None,
                 customer_id: customer.id,
                 line_items: vec![DispatchLineItemPayload {
                     stock_description: "Widgets".to_string(),
@@ -9668,5 +9955,242 @@ mod tests {
         let body: ApiResponse<Vec<VehicleVendor>> =
             test::read_body_json(test::call_service(&app, req).await).await;
         assert_eq!(body.data.unwrap().len(), 1);
+    }
+
+    // ── Vehicle hires ─────────────────────────────────────────────────────────
+
+    /// An org with no vehicles: one godown with 50 "Hire Goods" (volume 1),
+    /// a located customer, and an active vendor created through the API.
+    async fn setup_hire_org(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        name: &str,
+    ) -> (Organization, String, Customer, VehicleVendor) {
+        let (org, auth) = setup_org(app, name).await;
+        let godown = Godown::create(org.id, "Hire Godown", "MIDC", None).expect("godown");
+        Stock::new(1, 50, "Hire Goods").add_to_godown(godown.id).expect("stock");
+        let mut customer = Customer::create_customer(org.id, "Hire Buyer", "Baner").expect("customer");
+        customer.update_location(18.56, 73.78, Some("Baner")).expect("location");
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&vendor_payload("Route Vendor"))
+            .to_request();
+        let body: ApiResponse<VehicleVendor> =
+            test::read_body_json(test::call_service(app, req).await).await;
+        (org, auth, customer, body.data.expect("vendor"))
+    }
+
+    fn hired_dispatch_payload(customer_id: Uuid, vendor_id: Option<Uuid>) -> DispatchRequestPayload {
+        DispatchRequestPayload {
+            customer_id,
+            line_items: vec![DispatchLineItemPayload {
+                stock_description: "Hire Goods".to_string(),
+                requested_quantity: 5,
+            }],
+            vehicle_source: VehicleSource::Hired,
+            vendor_id,
+        }
+    }
+
+    fn assign_payload(reg: &str, capacity: i64) -> AssignHirePayload {
+        AssignHirePayload {
+            registration_number: reg.to_string(),
+            capacity,
+            unit: Unit::MetricTon,
+            driver_name: "Vendor Driver".to_string(),
+            driver_phone: "+91 97000 00000".to_string(),
+            driver_license: Some("MH-DL-1".to_string()),
+            freight_amount: 8_000,
+            advance_paid: 6_000,
+        }
+    }
+
+    #[actix_web::test]
+    async fn test_hired_dispatch_then_assign_over_the_api() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth, customer, vendor) = setup_hire_org(&app, "Hire Ops").await;
+
+        // HIRED without a vendor -> 400.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&hired_dispatch_payload(customer.id, None))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+
+        // With a vendor -> AWAITING_VEHICLE, and nobody is notified yet.
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/dispatch", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&hired_dispatch_payload(customer.id, Some(vendor.id)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let order = test::read_body_json::<ApiResponse<DispatchOrder>, _>(resp).await.data.unwrap();
+        assert_eq!(order.status, DispatchStatus::AwaitingVehicle);
+        assert_eq!(order.vehicle_registration_number, None);
+        assert!(Notification::list_by_dispatch(order.id).unwrap().is_empty());
+
+        // The hire is listed as REQUESTED.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vehicle-hires?status=REQUESTED", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let hires = test::read_body_json::<ApiResponse<Vec<VehicleHire>>, _>(
+            test::call_service(&app, req).await,
+        )
+        .await
+        .data
+        .unwrap();
+        assert_eq!(hires.len(), 1);
+        assert_eq!(hires[0].vendor_name, "Route Vendor");
+        let hire_id = hires[0].id;
+
+        // Too small a truck -> 400.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&assign_payload("MH12 HR 9", 4))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+
+        // Assign -> CONFIRMED, dispatch PENDING with the truck, notifications out.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&assign_payload("MH12 HR 9", 10))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let hire = test::read_body_json::<ApiResponse<VehicleHire>, _>(resp).await.data.unwrap();
+        assert_eq!(hire.status, HireStatus::Confirmed);
+
+        let dispatch = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
+        assert_eq!(dispatch.status, DispatchStatus::Pending);
+        assert_eq!(dispatch.vehicle_registration_number.as_deref(), Some("MH12 HR 9"));
+        let recipients: Vec<String> = Notification::list_by_dispatch(order.id)
+            .unwrap()
+            .into_iter()
+            .map(|n| n.recipient)
+            .collect();
+        assert_eq!(recipients.len(), 2, "customer + hired driver: {recipients:?}");
+        assert!(recipients.contains(&"+91 97000 00000".to_string()), "{recipients:?}");
+
+        // Assigning twice -> 409.
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&assign_payload("MH12 HR 10", 10))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
+
+        // The vendor now has history, so it can't be deleted.
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/vendors/{}", vendor.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
+    }
+
+    #[actix_web::test]
+    async fn test_vehicle_hire_routes_enforce_org_and_role() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth, customer, vendor) = setup_hire_org(&app, "Hire Guard").await;
+        let order = Organization::get_by_id(org.id)
+            .unwrap()
+            .unwrap()
+            .dispatch_stock_on_hired_vehicle(
+                &customer,
+                &[DispatchLineItemInput { stock_description: "Hire Goods".into(), requested_quantity: 1 }],
+                vendor.id,
+            )
+            .expect("hired dispatch");
+        let hire_id = order.hire_id.unwrap();
+
+        let other = make_auth_header(Uuid::new_v4(), "Attacker");
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
+            .insert_header(("Authorization", other.clone()))
+            .set_json(&assign_payload("X", 10))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vehicle-hires", org.id))
+            .insert_header(("Authorization", other))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        let warehouse =
+            add_user_and_login(&app, org.id, &auth, "hire-wh@example.com", OrgRole::WarehouseStaff).await;
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
+            .insert_header(("Authorization", warehouse))
+            .set_json(&assign_payload("X", 10))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-hires/{}/assign", Uuid::new_v4()))
+            .insert_header(("Authorization", auth))
+            .set_json(&assign_payload("X", 10))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_hired_trip_over_the_api() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth, first, vendor) = setup_hire_org(&app, "Hire Trips").await;
+        let mut second = Customer::create_customer(org.id, "Second Stop", "Aundh").expect("customer");
+        second.update_location(18.55, 73.80, Some("Aundh")).expect("location");
+
+        let stop = |customer_id: Uuid| TripStopPayload {
+            customer_id,
+            line_items: vec![DispatchLineItemPayload {
+                stock_description: "Hire Goods".to_string(),
+                requested_quantity: 2,
+            }],
+        };
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/trips", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&CreateTripPayload {
+                stops: vec![stop(first.id), stop(second.id)],
+                optimize_route: false,
+                vehicle_source: VehicleSource::Hired,
+                vendor_id: Some(vendor.id),
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let trip = test::read_body_json::<ApiResponse<Trip>, _>(resp).await.data.unwrap();
+        assert_eq!(trip.status, TripStatus::Planned);
+        assert!(trip.stops.iter().all(|s| s.status == DispatchStatus::AwaitingVehicle));
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vehicle-hires/{}/assign", trip.hire_id.unwrap()))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&assign_payload("MH12 TRIP 9", 4))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/trips/{}", trip.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let trip = test::read_body_json::<ApiResponse<Trip>, _>(test::call_service(&app, req).await)
+            .await
+            .data
+            .unwrap();
+        assert_eq!(trip.vehicle_registration_number.as_deref(), Some("MH12 TRIP 9"));
+        assert!(trip.stops.iter().all(|s| s.status == DispatchStatus::Pending));
     }
 }
