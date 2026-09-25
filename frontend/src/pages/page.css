@@ -188,7 +188,8 @@ tbody tr:hover td { background: var(--row-hover); }
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   padding: 9px 12px;
   border: 1.5px solid var(--border);
@@ -201,7 +202,8 @@ tbody tr:hover td { background: var(--row-hover); }
 }
 
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 3px var(--brand-glow);
 }

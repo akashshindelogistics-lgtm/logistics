@@ -33,6 +33,7 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
   const vehicleReg = `MH12DM${uid().toUpperCase()}`;
   const driverName = `Ramesh Kulkarni ${uid()}`;
   const custName = `Sunrise Traders ${uid()}`;
+  const vendorName = `Sharma Roadlines ${uid()}`;
 
   const org = await test.step('Register a new organization', async () => {
     const created = await registerOrg(page, orgName);
@@ -177,6 +178,18 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await page.goto('/vehicles');
     const row = page.getByRole('row', { name: new RegExp(vehicleReg) });
     await expect(row.getByText('18.52040')).toBeVisible({ timeout: 8000 });
+  });
+
+  await test.step('Add a vehicle vendor to call when the fleet is fully booked', async () => {
+    await page.getByRole('link', { name: 'Vendors' }).click();
+    await expect(page).toHaveURL(/\/vendors$/);
+    await page.getByRole('button', { name: /add vendor/i }).click();
+    await page.getByLabel('Vendor name').fill(vendorName);
+    await page.getByLabel('Contact person').fill('Anil Sharma');
+    await page.getByLabel('Phone').fill('+91 98200 11111');
+    await page.getByLabel('GSTIN').fill('27AAPFU0939F1ZV');
+    await page.getByRole('button', { name: /^add vendor$/i }).click();
+    await expect(page.getByRole('row', { name: new RegExp(vendorName) })).toBeVisible({ timeout: 8000 });
   });
 
   await test.step('Create a customer with a delivery location', async () => {

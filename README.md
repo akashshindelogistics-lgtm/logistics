@@ -36,6 +36,11 @@ operations, live location maps, and AI-generated dispatch summaries.
   organization and assign one to a vehicle from the dashboard. A vehicle
   needs an **active** assigned driver, spare capacity, and no trip already
   in progress before it can be selected for a dispatch.
+- **Vehicle vendors** — keep a directory of the transporters and brokers an
+  organization phones to hire a truck when it has none of its own free
+  (name, contact, phone, GSTIN, notes, active flag). Hiring a vendor's truck
+  for a dispatch is planned next — see
+  [`docs/vehicle-vendors.md`](docs/vehicle-vendors.md).
 - **Stock** — add, update, and remove stock items held in an organization's
   godowns, and transfer a stock item between two godowns with a recorded
   audit trail of every move. Each stock item carries a free-text, org-defined
@@ -221,6 +226,10 @@ npm run test:e2e:demo:reports        # operations reporting
 npm run test:e2e:demo:roles          # role-scoped team members
 npm run test:e2e:demo:notifications  # dispatch notifications
 npm run test:e2e:demo:trips          # multi-stop trips
+npm run test:e2e:demo:assistant      # "ask your data" assistant
+npm run test:e2e:demo:uploads        # proof-of-delivery file uploads
+npm run test:e2e:demo:stock-categories # stock categories
+npm run test:e2e:demo:vendors        # vehicle vendors
 ```
 
 ## API overview
@@ -257,6 +266,8 @@ All routes are served under the `/api` prefix.
 | PUT | `/api/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
 | GET/POST | `/api/drivers`, `/api/orgs/{id}/drivers` | List / add drivers |
 | PUT/DELETE | `/api/drivers/{id}` | Update (incl. active flag) or remove a driver |
+| GET/POST | `/api/orgs/{id}/vendors` | List / add vehicle vendors (transporters the org hires trucks from) |
+| PUT/DELETE | `/api/vendors/{id}` | Update (incl. active flag) or remove a vehicle vendor |
 | GET/POST | `/api/vehicles/{reg}/documents` | List / record a vehicle's compliance paperwork (insurance, RC, permit, PUC, fitness) |
 | PUT/DELETE | `/api/vehicle-documents/{id}` | Renew (update) or delete a compliance document |
 | GET | `/api/orgs/{id}/vehicle-documents` | Whole-fleet compliance list, soonest expiry first |

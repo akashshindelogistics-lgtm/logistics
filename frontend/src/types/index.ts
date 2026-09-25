@@ -300,3 +300,24 @@ export interface AssistantAnswer {
 export interface AssistantReindexResult {
   chunks_indexed: number;
 }
+
+/** A transporter / broker the org hires vehicles from (docs/vehicle-vendors.md). */
+export interface VehicleVendor {
+  id: string;
+  org_id: string;
+  name: string;
+  contact_person: string | null;
+  phone: string;
+  gstin: string | null;
+  notes: string | null;
+  is_active: boolean;
+}
+
+/** The editable fields of a vendor, as sent on create and update. */
+export interface VendorInput {
+  name: string;
+  contact_person: string | null;
+  phone: string;
+  gstin: string | null;
+  notes: string | null;
+}

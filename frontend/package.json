@@ -20,7 +20,8 @@
     "test:e2e:demo:trips": "playwright test --config=playwright.demo.config.ts trips.demo",
     "test:e2e:demo:assistant": "playwright test --config=playwright.demo.config.ts assistant.demo",
     "test:e2e:demo:uploads": "playwright test --config=playwright.demo.config.ts file-uploads.demo",
-    "test:e2e:demo:stock-categories": "playwright test --config=playwright.demo.config.ts stock-categories.demo"
+    "test:e2e:demo:stock-categories": "playwright test --config=playwright.demo.config.ts stock-categories.demo",
+    "test:e2e:demo:vendors": "playwright test --config=playwright.demo.config.ts vendors.demo"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.22",

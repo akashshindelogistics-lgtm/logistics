@@ -25,6 +25,7 @@ use crate::logistics::reports::{
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::upload::upload::{UploadedFile, UploadError, MAX_UPLOAD_BYTES};
 use crate::logistics::user::user::{OrgRole, OrgUser, UserError};
+use crate::logistics::vendor::vendor::{VehicleVendor, VendorError, VendorInput};
 use crate::logistics::vehicle::document::{
     ComplianceDocType, ComplianceStatus, VehicleDocument, VehicleDocumentError,
 };
@@ -272,6 +273,34 @@ pub struct UpdateDriverPayload {
     pub is_active: bool,
 }
 
+/// Create a vehicle vendor (transporter / broker the org hires trucks from).
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct CreateVendorPayload {
+    pub name: String,
+    #[serde(default)]
+    pub contact_person: Option<String>,
+    pub phone: String,
+    /// Optional 15-character GSTIN.
+    #[serde(default)]
+    pub gstin: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct UpdateVendorPayload {
+    pub name: String,
+    #[serde(default)]
+    pub contact_person: Option<String>,
+    pub phone: String,
+    #[serde(default)]
+    pub gstin: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Inactive vendors stay listed but can't be picked for a new hire.
+    pub is_active: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct AssignDriverPayload {
     /// Driver to assign to the vehicle, or `null` to clear the assignment.
@@ -515,6 +544,20 @@ pub struct DriverListResponse {
     pub success: bool,
     pub message: String,
     pub data: Option<Vec<Driver>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VendorResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<VehicleVendor>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct VendorListResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<Vec<VehicleVendor>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -1709,6 +1752,213 @@ pub async fn assign_vehicle_driver(
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: format!("Failed to assign driver: {}", err),
+            data: None,
+        }),
+    }
+}
+
+// ── Vehicle vendor handlers (protected) ───────────────────────────────────────
+
+/// Load a vendor by id, returning an error `HttpResponse` unless it exists
+/// and belongs to the caller's organization.
+fn load_owned_vendor(vendor_id: Uuid, auth_org_id: Uuid) -> Result<VehicleVendor, HttpResponse> {
+    match VehicleVendor::get_by_id(vendor_id) {
+        Ok(Some(vendor)) if vendor.org_id == auth_org_id => Ok(vendor),
+        Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied: vendor belongs to a different organization".to_string(),
+            data: None,
+        })),
+        Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
+            success: false,
+            message: "Vendor not found".to_string(),
+            data: None,
+        })),
+        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to fetch vendor: {}", err),
+            data: None,
+        })),
+    }
+}
+
+fn vendor_error_response(action: &str, err: VendorError) -> HttpResponse {
+    match err {
+        VendorError::InvalidInput(msg) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: msg,
+            data: None,
+        }),
+        VendorError::Db(e) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to {action} vendor: {e}"),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/orgs/{id}/vendors",
+    tag = "Vehicle vendors",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    responses(
+        (status = 200, description = "The organization's vehicle vendors, active first", body = VendorListResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[get("/orgs/{id}/vendors")]
+pub async fn list_vendors(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    match VehicleVendor::list_by_org(org_id) {
+        Ok(vendors) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: format!("Retrieved {} vendors", vendors.len()),
+            data: Some(vendors),
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to list vendors: {}", err),
+            data: None,
+        }),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/orgs/{id}/vendors",
+    tag = "Vehicle vendors",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Organization UUID")),
+    request_body = CreateVendorPayload,
+    responses(
+        (status = 201, description = "Vendor created", body = VendorResponse),
+        (status = 400, description = "Blank name/phone or malformed GSTIN", body = EmptyResponse),
+        (status = 403, description = "Forbidden (other org, or not Admin/Dispatcher)", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[post("/orgs/{id}/vendors")]
+pub async fn add_vendor(
+    path: web::Path<Uuid>,
+    payload: web::Json<CreateVendorPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let org_id = path.into_inner();
+    if org_id != auth.org_id {
+        return HttpResponse::Forbidden().json(ApiResponse::<String> {
+            success: false,
+            message: "Access denied".to_string(),
+            data: None,
+        });
+    }
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let payload = payload.into_inner();
+    let input = VendorInput {
+        name: payload.name,
+        contact_person: payload.contact_person,
+        phone: payload.phone,
+        gstin: payload.gstin,
+        notes: payload.notes,
+    };
+    match VehicleVendor::create(org_id, input) {
+        Ok(vendor) => HttpResponse::Created().json(ApiResponse {
+            success: true,
+            message: "Vendor created successfully".to_string(),
+            data: Some(vendor),
+        }),
+        Err(err) => vendor_error_response("create", err),
+    }
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/vendors/{id}",
+    tag = "Vehicle vendors",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vendor UUID")),
+    request_body = UpdateVendorPayload,
+    responses(
+        (status = 200, description = "Vendor updated", body = VendorResponse),
+        (status = 400, description = "Blank name/phone or malformed GSTIN", body = EmptyResponse),
+        (status = 403, description = "Forbidden (other org, or not Admin/Dispatcher)", body = EmptyResponse),
+        (status = 404, description = "Vendor not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[put("/vendors/{id}")]
+pub async fn update_vendor(
+    path: web::Path<Uuid>,
+    payload: web::Json<UpdateVendorPayload>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let mut vendor = match load_owned_vendor(path.into_inner(), auth.org_id) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let payload = payload.into_inner();
+    let input = VendorInput {
+        name: payload.name,
+        contact_person: payload.contact_person,
+        phone: payload.phone,
+        gstin: payload.gstin,
+        notes: payload.notes,
+    };
+    match vendor.update(input, payload.is_active) {
+        Ok(()) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "Vendor updated successfully".to_string(),
+            data: Some(vendor),
+        }),
+        Err(err) => vendor_error_response("update", err),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/vendors/{id}",
+    tag = "Vehicle vendors",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Vendor UUID")),
+    responses(
+        (status = 200, description = "Vendor deleted", body = EmptyResponse),
+        (status = 403, description = "Forbidden (other org, or not Admin/Dispatcher)", body = EmptyResponse),
+        (status = 404, description = "Vendor not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+#[delete("/vendors/{id}")]
+pub async fn delete_vendor(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    let vendor = match load_owned_vendor(path.into_inner(), auth.org_id) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    match vendor.delete() {
+        Ok(()) => HttpResponse::Ok().json(ApiResponse::<String> {
+            success: true,
+            message: "Vendor deleted successfully".to_string(),
+            data: None,
+        }),
+        Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+            success: false,
+            message: format!("Failed to delete vendor: {}", err),
             data: None,
         }),
     }
@@ -4492,6 +4742,10 @@ impl Modify for SecurityAddon {
         update_driver,
         delete_driver,
         assign_vehicle_driver,
+        list_vendors,
+        add_vendor,
+        update_vendor,
+        delete_vendor,
         list_vehicle_documents,
         add_vehicle_document,
         update_vehicle_document,
@@ -4551,6 +4805,7 @@ impl Modify for SecurityAddon {
             CreateGodownPayload, UpdateGodownPayload,
             CreateCustomerPayload, DispatchRequestPayload, DispatchLineItemPayload,
             CreateDriverPayload, UpdateDriverPayload, AssignDriverPayload,
+            CreateVendorPayload, UpdateVendorPayload, VehicleVendor,
             VehicleDocumentPayload, VehicleMaintenancePayload, RecordMileagePayload,
             TransferStockPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload, InvoicePayload,
@@ -4569,6 +4824,7 @@ impl Modify for SecurityAddon {
             StockTransferResponse, StockTransferListResponse,
             CustomerResponse, CustomerListResponse,
             DriverResponse, DriverListResponse,
+            VendorResponse, VendorListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
             OpsReportResponse, UserResponse, UserListResponse, NotificationListResponse,
@@ -4586,6 +4842,7 @@ impl Modify for SecurityAddon {
         (name = "Organizations", description = "Organization management"),
         (name = "Vehicles", description = "Vehicle fleet management"),
         (name = "Drivers", description = "Driver records and vehicle assignment"),
+        (name = "Vehicle vendors", description = "Transporters and brokers the organization hires vehicles from"),
         (name = "Vehicle compliance", description = "Vehicle paperwork (insurance, RC, permit, PUC, fitness) and expiry tracking"),
         (name = "Vehicle maintenance", description = "Preventive maintenance scheduling by due date and/or odometer mileage, with alerts"),
         (name = "Godowns", description = "Warehouse (godown) and stock management"),
@@ -4631,6 +4888,10 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(update_driver)
             .service(delete_driver)
             .service(assign_vehicle_driver)
+            .service(list_vendors)
+            .service(add_vendor)
+            .service(update_vendor)
+            .service(delete_vendor)
             .service(list_vehicle_documents)
             .service(add_vehicle_document)
             .service(update_vehicle_document)
@@ -9252,5 +9513,160 @@ mod tests {
             .insert_header(("Authorization", auth_b))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    // ── Vehicle vendors ───────────────────────────────────────────────────────
+
+    fn vendor_payload(name: &str) -> CreateVendorPayload {
+        CreateVendorPayload {
+            name: name.to_string(),
+            contact_person: Some("Anil".to_string()),
+            phone: "+91 98200 00000".to_string(),
+            gstin: Some("27AAPFU0939F1ZV".to_string()),
+            notes: None,
+        }
+    }
+
+    #[actix_web::test]
+    async fn test_vendor_crud_and_listing() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Vendor Ops").await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&vendor_payload("Sharma Roadlines"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 201);
+        let body: ApiResponse<VehicleVendor> = test::read_body_json(resp).await;
+        let vendor = body.data.expect("vendor");
+        assert!(vendor.is_active);
+
+        let req = test::TestRequest::put()
+            .uri(&format!("/api/vendors/{}", vendor.id))
+            .insert_header(("Authorization", auth.clone()))
+            .set_json(&UpdateVendorPayload {
+                name: "Sharma Roadlines Pvt".to_string(),
+                contact_person: None,
+                phone: "+91 98200 11111".to_string(),
+                gstin: None,
+                notes: Some("Mumbai-Pune lane".to_string()),
+                is_active: false,
+            })
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 200);
+        let body: ApiResponse<VehicleVendor> = test::read_body_json(resp).await;
+        let updated = body.data.expect("vendor");
+        assert_eq!(updated.name, "Sharma Roadlines Pvt");
+        assert_eq!(updated.gstin, None);
+        assert!(!updated.is_active);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        let body: ApiResponse<Vec<VehicleVendor>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(body.data.unwrap().len(), 1);
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/vendors/{}", vendor.id))
+            .insert_header(("Authorization", auth.clone()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", auth))
+            .to_request();
+        let body: ApiResponse<Vec<VehicleVendor>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert!(body.data.unwrap().is_empty());
+    }
+
+    #[actix_web::test]
+    async fn test_add_vendor_rejects_invalid_input_with_400() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Vendor Validation").await;
+
+        for payload in [
+            CreateVendorPayload { name: "  ".to_string(), ..vendor_payload("x") },
+            CreateVendorPayload { phone: "".to_string(), ..vendor_payload("No Phone") },
+            CreateVendorPayload { gstin: Some("123".to_string()), ..vendor_payload("Bad GSTIN") },
+        ] {
+            let req = test::TestRequest::post()
+                .uri(&format!("/api/orgs/{}/vendors", org.id))
+                .insert_header(("Authorization", auth.clone()))
+                .set_json(&payload)
+                .to_request();
+            assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
+        }
+    }
+
+    #[actix_web::test]
+    async fn test_vendor_routes_reject_other_org() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, auth) = setup_org(&app, "Vendor Owner").await;
+        let other = make_auth_header(Uuid::new_v4(), "Attacker");
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", auth))
+            .set_json(&vendor_payload("Owned Vendor"))
+            .to_request();
+        let body: ApiResponse<VehicleVendor> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        let vendor = body.data.expect("vendor");
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", other.clone()))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/vendors/{}", vendor.id))
+            .insert_header(("Authorization", other))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_warehouse_staff_cannot_manage_vendors_but_dispatcher_can() {
+        let _db = TestDb::create();
+        let app = test::init_service(App::new().configure(config_routes)).await;
+        let (org, admin) = setup_org(&app, "Vendor Roles").await;
+        let dispatcher =
+            add_user_and_login(&app, org.id, &admin, "vd@example.com", OrgRole::Dispatcher).await;
+        let warehouse =
+            add_user_and_login(&app, org.id, &admin, "vw@example.com", OrgRole::WarehouseStaff).await;
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", warehouse.clone()))
+            .set_json(&vendor_payload("Not Allowed"))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", dispatcher))
+            .set_json(&vendor_payload("Dispatcher Vendor"))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
+
+        // Every role can still read the vendor list.
+        let req = test::TestRequest::get()
+            .uri(&format!("/api/orgs/{}/vendors", org.id))
+            .insert_header(("Authorization", warehouse))
+            .to_request();
+        let body: ApiResponse<Vec<VehicleVendor>> =
+            test::read_body_json(test::call_service(&app, req).await).await;
+        assert_eq!(body.data.unwrap().len(), 1);
     }
 }

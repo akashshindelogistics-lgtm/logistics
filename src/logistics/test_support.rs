@@ -64,6 +64,21 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create Drivers");
 
     conn.query_drop(
+        "CREATE TABLE IF NOT EXISTS VehicleVendors (
+            id VARCHAR(36) PRIMARY KEY,
+            org_id VARCHAR(36) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            contact_person VARCHAR(255) DEFAULT NULL,
+            phone VARCHAR(64) NOT NULL,
+            gstin VARCHAR(15) DEFAULT NULL,
+            notes TEXT DEFAULT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            CONSTRAINT fk_vendor_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
+        )",
+    )
+    .expect("migrate: create VehicleVendors");
+
+    conn.query_drop(
         "CREATE TABLE IF NOT EXISTS Vehicle (
             registration_number VARCHAR(255) PRIMARY KEY,
             capacity BIGINT NOT NULL,

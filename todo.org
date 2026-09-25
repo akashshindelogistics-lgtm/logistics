@@ -997,3 +997,26 @@
   category, transfer between godowns (merge vs. new-row), dispatch, and the
   reports category breakdown.
   Plan/context: [[file:docs/stock-categories.md]]
+* TODO [#B] Let an org dispatch on a vehicle hired from a vendor - an org with no fleet of its own (or a fully booked one) phones a transporter for a "market truck", but today every dispatch must use an own Vehicle with an active org Driver
+  Plan written: [[file:docs/vehicle-vendors.md]]
+  One vendor per hire, the dispatcher enters the truck/driver/rate after the call
+  (vendors never log in), and hiring is always an explicit choice, never automatic.
+  A hired truck lives on a per-dispatch VehicleHire record, not in Vehicle.
+  Phased; each phase ships backend + frontend + unit + Playwright tests + a demo flow:
+** DONE Phase 1: VehicleVendor model + CRUD routes (GET/POST /api/orgs/{id}/vendors, PUT/DELETE /api/vendors/{id}) and a /vendors page
+   New src/logistics/vendor module - VehicleVendor (name, contact_person, phone,
+   gstin, notes, is_active) in a VehicleVendors table cascade-deleted with the
+   org. Name and phone required; a GSTIN, if given, must be 15 letters/digits
+   and is stored upper-case; blank optional fields stored as NULL (400 on bad
+   input). Listing is active-first, then by name. Writes gated to
+   Admin|Dispatcher, every role reads. Delete is unconditional for now - the
+   "refused while a hire is open" check comes with VehicleHires in phase 2.
+   Frontend: a /vendors page (sidebar "Vendors") to add / edit / toggle active /
+   delete, read-only for warehouse staff. 8 new Rust tests (4 model, 4 route),
+   12 new frontend unit tests (4 api client, 8 page), a Playwright spec (2 flows),
+   a step in the full e2e demo, and a standalone `npm run test:e2e:demo:vendors`.
+   README (feature bullet, endpoint table, demo list - also added the missing
+   assistant/uploads/stock-categories demo scripts) and pages.yml updated.
+** TODO Phase 2: Hire-based dispatch - AWAITING_VEHICLE status, Dispatches.vehicle_source + hire_id, nullable vehicle_registration_number, PUT /api/vehicle-hires/{id}/assign, stock credited back when an awaiting dispatch is cancelled, own-fleet selection ignores hired dispatches, Vehicle source toggle + Assign form in the UI, trips included
+** TODO Phase 3: Vendor payables (freight, advance, payments, balance) and reports (spend per vendor, own vs hired, margin per hired dispatch)
+** TODO Phase 4: Optional - vendor rate cards, per-hire GPS tracker key, delay alert for dispatches stuck awaiting a vehicle

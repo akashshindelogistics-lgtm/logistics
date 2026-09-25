@@ -72,6 +72,7 @@ jobs:
               '/api/dispatches/{id}/status', '/api/vehicles/{reg}/location',
               '/api/track/{tracker_key}', '/api/vehicles/{reg}/tracker-key/rotate',
               '/api/vehicles/{reg}', '/api/vehicles/{reg}/driver',
+              '/api/orgs/{id}/vendors', '/api/vendors/{id}',
               '/api/vehicles/{reg}/documents', '/api/vehicle-documents/{id}',
               '/api/orgs/{id}/vehicle-documents',
               '/api/vehicles/{reg}/maintenance', '/api/vehicle-maintenance/{id}',
