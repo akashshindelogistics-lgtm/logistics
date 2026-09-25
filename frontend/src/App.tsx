@@ -14,6 +14,7 @@ import Dispatches from './pages/Dispatches';
 import Reports from './pages/Reports';
 import Trips from './pages/Trips';
 import Team from './pages/Team';
+import Vendors from './pages/Vendors';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import './App.css';
@@ -37,6 +38,7 @@ function AppShell() {
           <Route path="/vehicles/:reg" element={<ProtectedRoute><VehicleDetail /></ProtectedRoute>} />
           <Route path="/drivers/:id" element={<ProtectedRoute><DriverDetail /></ProtectedRoute>} />
           <Route path="/godowns/:id" element={<ProtectedRoute><GodownDetail /></ProtectedRoute>} />
+          <Route path="/vendors" element={<ProtectedRoute><Vendors /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute><Customers /></ProtectedRoute>} />
           <Route path="/dispatches" element={<ProtectedRoute><Dispatches /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />

@@ -4,10 +4,11 @@ import { listOrgTrips, createTrip, type TripStopInput } from '../api/trips';
 import { listCustomers } from '../api/customers';
 import { listVehicles } from '../api/vehicles';
 import { getOrgId } from '../api/auth';
+import { listVendors } from '../api/vendors';
 import { IconDispatch, IconPlus, IconX, IconTruck } from '../components/Icons';
 import { STATUS_TAG_CLASS, formatStatus } from '../lib/dispatchLifecycle';
 import LocationMap, { type MapPin } from '../components/LocationMap';
-import type { Customer, Trip, TripStatus, Vehicle } from '../types';
+import type { Customer, Trip, TripStatus, Vehicle, VehicleVendor } from '../types';
 import './page.css';
 
 const TRIP_TAG: Record<TripStatus, string> = {
@@ -31,6 +32,9 @@ export default function Trips() {
   const [showForm, setShowForm] = useState(false);
   const [stops, setStops] = useState<StopDraft[]>([emptyStop(), emptyStop()]);
   const [optimizeRoute, setOptimizeRoute] = useState(false);
+  // Empty = the org's own fleet; a vendor id = one truck hired for the trip.
+  const [hireVendorId, setHireVendorId] = useState('');
+  const [vendors, setVendors] = useState<VehicleVendor[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [mapOpenId, setMapOpenId] = useState<string | null>(null);
@@ -41,6 +45,10 @@ export default function Trips() {
     Promise.all([listOrgTrips(orgId), listCustomers(), listVehicles()])
       .then(([t, c, v]) => { setTrips(t.data ?? []); setCustomers(c.data ?? []); setVehicles(v.data ?? []); })
       .finally(() => setLoading(false));
+    Promise.resolve()
+      .then(() => listVendors(orgId))
+      .then(r => setVendors((r?.data ?? []).filter(v => v.is_active)))
+      .catch(() => setVendors([]));
   };
   useEffect(load, []);
 
@@ -96,9 +104,10 @@ export default function Trips() {
     setSubmitting(true);
     setError('');
     try {
-      await createTrip(orgId, payload, optimizeRoute);
+      await createTrip(orgId, payload, optimizeRoute, hireVendorId || undefined);
       setStops([emptyStop(), emptyStop()]);
       setOptimizeRoute(false);
+      setHireVendorId('');
       setShowForm(false);
       load();
     } catch (err) {
@@ -162,6 +171,13 @@ export default function Trips() {
               />
               <label htmlFor="optimize-route" style={{ margin: 0 }}>Optimize stop order</label>
             </div>
+            <div className="field" style={{ maxWidth: 360 }}>
+              <label htmlFor="trip-vehicle">Vehicle source</label>
+              <select id="trip-vehicle" value={hireVendorId} onChange={e => setHireVendorId(e.target.value)}>
+                <option value="">Own fleet (nearest free vehicle)</option>
+                {vendors.map(v => <option key={v.id} value={v.id}>Hire from {v.name}</option>)}
+              </select>
+            </div>
             {error && <div className="errortxt" style={{ marginBottom: 12 }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-primary" type="submit" disabled={submitting}>
@@ -191,11 +207,12 @@ export default function Trips() {
               <div key={t.id} className="section-card">
                 <div className="section-card-header">
                   <span className="section-card-title">
-                    <IconTruck size={15} />{t.vehicle_registration_number}
+                    <IconTruck size={15} />{t.vehicle_registration_number ?? 'Awaiting hired vehicle'}
+                    {t.vehicle_source === 'HIRED' && <span className="badge tag-amber" style={{ marginLeft: 8 }}>Hired</span>}
                     <span className="mono muted" style={{ marginLeft: 8 }}>{t.id.slice(0, 8)}…</span>
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span className={`status-tag ${TRIP_TAG[t.status]}`}>{t.status.replace('_', ' ')}</span>
+                    <span className={`status-tag ${TRIP_TAG[t.status]}`}>{t.status.replaceAll('_', ' ')}</span>
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={() => setMapOpenId(mapOpenId === t.id ? null : t.id)}

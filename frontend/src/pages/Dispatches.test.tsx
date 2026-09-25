@@ -9,7 +9,8 @@ import * as billingApi from '../api/billing';
 import * as notificationsApi from '../api/notifications';
 import * as authApi from '../api/auth';
 import * as uploadsApi from '../api/uploads';
-import type { DispatchOrder, Invoice } from '../types';
+import * as vendorsApi from '../api/vendors';
+import type { DispatchOrder, Invoice, VehicleHire } from '../types';
 
 vi.mock('../api/dispatches');
 vi.mock('../api/orgs');
@@ -17,6 +18,7 @@ vi.mock('../api/billing');
 vi.mock('../api/notifications');
 vi.mock('../api/auth');
 vi.mock('../api/uploads');
+vi.mock('../api/vendors');
 
 function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
   return {
@@ -65,6 +67,7 @@ describe('Dispatches page', () => {
     });
     vi.mocked(billingApi.listOrgInvoices).mockResolvedValue({ success: true, message: '', data: [] });
     vi.mocked(notificationsApi.listDispatchNotifications).mockResolvedValue({ success: true, message: '', data: [] });
+    vi.mocked(vendorsApi.listVehicleHires).mockResolvedValue({ success: true, message: '', data: [] });
   });
 
   it('shows an empty state when there are no orders', async () => {
@@ -444,5 +447,85 @@ describe('Dispatches page', () => {
     expect(await screen.findByText(/upload failed/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /confirm delivery/i })).toBeDisabled();
     expect(dispatchesApi.updateDispatchStatus).not.toHaveBeenCalled();
+  });
+
+  describe('hired vehicles', () => {
+    const hire: VehicleHire = {
+      id: 'hire-1', org_id: 'org-1', vendor_id: 'v1', vendor_name: 'Sharma Roadlines',
+      dispatch_id: 'order-1', trip_id: null, required_volume: 50, status: 'REQUESTED',
+      registration_number: null, capacity: null, unit: null, driver_name: null, driver_phone: null,
+      driver_license: null, freight_amount: null, advance_paid: 0, total_paid: 0, balance_due: null,
+      requested_at: 1_700_000_000,
+      confirmed_at: null, closed_at: null,
+    };
+    const awaiting = makeOrder({
+      status: 'AWAITING_VEHICLE', vehicle_registration_number: null,
+      vehicle_source: 'HIRED', hire_id: 'hire-1',
+      status_history: [{ status: 'AWAITING_VEHICLE', changed_at: 1_700_000_000 }],
+    });
+
+    it('shows an awaiting-vehicle order with its vendor, and only Assign/Cancel as actions', async () => {
+      vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [awaiting] });
+      vi.mocked(vendorsApi.listVehicleHires).mockResolvedValue({ success: true, message: '', data: [hire] });
+      render(<Dispatches />);
+
+      expect(await screen.findByText('Awaiting vehicle')).toBeInTheDocument();
+      expect(screen.getByText('AWAITING VEHICLE')).toBeInTheDocument();
+      expect(await screen.findByText(/hired · sharma roadlines/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /assign truck/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^cancel$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^confirm$/i })).not.toBeInTheDocument();
+    });
+
+    it('assigns the hired truck and reloads the orders', async () => {
+      const user = userEvent.setup();
+      vi.mocked(dispatchesApi.listDispatches)
+        .mockResolvedValueOnce({ success: true, message: '', data: [awaiting] })
+        .mockResolvedValueOnce({
+          success: true, message: '',
+          data: [makeOrder({ vehicle_registration_number: 'MH12 HR 7', vehicle_source: 'HIRED', hire_id: 'hire-1' })],
+        });
+      vi.mocked(vendorsApi.listVehicleHires).mockResolvedValue({ success: true, message: '', data: [hire] });
+      vi.mocked(vendorsApi.assignVehicleHire).mockResolvedValue({
+        success: true, message: '', data: { ...hire, status: 'CONFIRMED', registration_number: 'MH12 HR 7' },
+      });
+      render(<Dispatches />);
+
+      await user.click(await screen.findByRole('button', { name: /assign truck/i }));
+      expect(screen.getByText(/needs capacity of at least 50/i)).toBeInTheDocument();
+      await user.type(screen.getByLabelText('Truck number'), 'MH12 HR 7');
+      await user.type(screen.getByLabelText('Capacity'), '60');
+      await user.type(screen.getByLabelText('Driver name'), 'Ravi');
+      await user.type(screen.getByLabelText('Driver phone'), '+91 9');
+      await user.type(screen.getByLabelText('Hire cost'), '9000');
+      await user.type(screen.getByLabelText('Advance paid'), '5000');
+      await user.click(screen.getByRole('button', { name: /save truck/i }));
+
+      await waitFor(() => expect(vendorsApi.assignVehicleHire).toHaveBeenCalledWith('hire-1', {
+        registration_number: 'MH12 HR 7', capacity: 60, driver_name: 'Ravi', driver_phone: '+91 9',
+        driver_license: null, freight_amount: 9000, advance_paid: 5000,
+      }));
+      expect(await screen.findByText('MH12 HR 7')).toBeInTheDocument();
+    });
+
+    it('shows the server message when the truck is too small', async () => {
+      const user = userEvent.setup();
+      vi.mocked(dispatchesApi.listDispatches).mockResolvedValue({ success: true, message: '', data: [awaiting] });
+      vi.mocked(vendorsApi.listVehicleHires).mockResolvedValue({ success: true, message: '', data: [hire] });
+      vi.mocked(vendorsApi.assignVehicleHire).mockRejectedValue({
+        response: { data: { message: 'truck MH12 HR 7 is too small: capacity 10 but the load needs 50' } },
+      });
+      render(<Dispatches />);
+
+      await user.click(await screen.findByRole('button', { name: /assign truck/i }));
+      await user.type(screen.getByLabelText('Truck number'), 'MH12 HR 7');
+      await user.type(screen.getByLabelText('Capacity'), '10');
+      await user.type(screen.getByLabelText('Driver name'), 'Ravi');
+      await user.type(screen.getByLabelText('Driver phone'), '1');
+      await user.type(screen.getByLabelText('Hire cost'), '9000');
+      await user.click(screen.getByRole('button', { name: /save truck/i }));
+
+      expect(await screen.findByText(/too small/i)).toBeInTheDocument();
+    });
   });
 });

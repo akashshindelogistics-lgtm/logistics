@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getOpsReport, getOpsReportSummary } from '../api/reports';
 import { getOrgId } from '../api/auth';
 import { IconChart, IconTruck, IconDispatch, IconClock, IconCheck, IconPackage } from '../components/Icons';
-import type { OpsReport } from '../types';
+import type { HiredTransport, OpsReport } from '../types';
 import './page.css';
 import './Dashboard.css';
 
@@ -177,7 +177,91 @@ export default function Reports() {
               </div>
             )}
           </div>
+
+          {report.hired_transport && <HiredTransportSection hired={report.hired_transport} />}
         </>
+      )}
+    </div>
+  );
+}
+
+function HiredTransportSection({ hired }: { hired: HiredTransport }) {
+  if (hired.hired_dispatches === 0 && hired.vendors.length === 0) {
+    return (
+      <div className="section-card" style={{ marginTop: 20 }}>
+        <div className="section-card-header">
+          <span className="section-card-title"><IconTruck size={15} />Hired transport</span>
+        </div>
+        <div style={{ padding: 20 }} className="muted">No dispatches have gone out on hired trucks yet.</div>
+      </div>
+    );
+  }
+  const total = hired.own_dispatches + hired.hired_dispatches;
+  return (
+    <div className="section-card" style={{ marginTop: 20 }} data-testid="hired-transport">
+      <div className="section-card-header">
+        <span className="section-card-title"><IconTruck size={15} />Hired transport</span>
+        <span className="muted">
+          {hired.hired_dispatches} of {total} dispatches on hired trucks ({fmtPct(hired.hired_share_percent)})
+          {hired.awaiting_truck > 0 && ` · ${hired.awaiting_truck} awaiting a truck`}
+        </span>
+      </div>
+      <div style={{ padding: '4px 20px 12px', display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+        <div><div className="muted">Hire cost</div><div style={{ fontWeight: 700, fontSize: 18 }}>{hired.hire_cost_total.toLocaleString()}</div></div>
+        <div><div className="muted">Paid to vendors</div><div style={{ fontWeight: 700, fontSize: 18 }}>{hired.paid_to_vendors.toLocaleString()}</div></div>
+        <div><div className="muted">Still owed</div><div style={{ fontWeight: 700, fontSize: 18 }} data-testid="owed-to-vendors">{hired.outstanding_to_vendors.toLocaleString()}</div></div>
+      </div>
+      {hired.vendors.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Vendor</th><th>Hires</th><th>Hire cost</th><th>Paid</th><th>Outstanding</th></tr>
+            </thead>
+            <tbody>
+              {hired.vendors.map(v => (
+                <tr key={v.vendor_id}>
+                  <td className="entity-name">{v.vendor_name}</td>
+                  <td className="muted">{v.hires}</td>
+                  <td>{v.hire_cost.toLocaleString()}</td>
+                  <td>{v.paid.toLocaleString()}</td>
+                  <td>{v.outstanding > 0 ? <strong>{v.outstanding.toLocaleString()}</strong> : <span className="muted">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {hired.hire_margins.length > 0 && (
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table>
+            <thead>
+              <tr><th>Hired truck</th><th>Vendor</th><th>Invoiced</th><th>Hire cost</th><th>Margin</th></tr>
+            </thead>
+            <tbody>
+              {hired.hire_margins.map(m => (
+                <tr key={m.hire_id} data-testid="hire-margin-row">
+                  <td className="entity-name">
+                    {m.registration_number ?? '—'}
+                    {m.trip_id && <span className="badge tag-blue" style={{ marginLeft: 6 }}>Trip</span>}
+                  </td>
+                  <td className="muted">{m.vendor_name}</td>
+                  <td>
+                    {m.invoiced.toLocaleString()}
+                    {m.invoiced_dispatches < m.dispatches && (
+                      <span className="muted" style={{ marginLeft: 6 }} title="Some dispatches on this hire haven't been invoiced yet">
+                        ({m.invoiced_dispatches}/{m.dispatches} invoiced)
+                      </span>
+                    )}
+                  </td>
+                  <td>{m.hire_cost.toLocaleString()}</td>
+                  <td style={{ fontWeight: 700, color: m.margin < 0 ? 'var(--red)' : 'var(--green)' }}>
+                    {m.margin.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

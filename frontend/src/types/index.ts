@@ -151,6 +151,7 @@ export interface Notification {
 // Mirrors DispatchStatus in src/logistics/dispatch/dispatch.rs. Keep in sync
 // if the backend state machine changes.
 export type DispatchStatus =
+  | 'AWAITING_VEHICLE'
   | 'PENDING'
   | 'CONFIRMED'
   | 'LOADED'
@@ -183,7 +184,12 @@ export interface DispatchOrder {
   id: string;
   org_id: string;
   customer_id: string;
-  vehicle_registration_number: string;
+  /** Null only while a hired dispatch is AWAITING_VEHICLE. */
+  vehicle_registration_number: string | null;
+  /** Whose truck: the org's own fleet, or one hired from a vendor. */
+  vehicle_source?: VehicleSource;
+  /** The VehicleHire behind a hired dispatch. */
+  hire_id?: string | null;
   line_items: DispatchLineItem[];
   status: DispatchStatus;
   dispatched_at: number;
@@ -200,7 +206,10 @@ export type TripStatus = 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED';
 export interface Trip {
   id: string;
   org_id: string;
-  vehicle_registration_number: string;
+  /** Null only while a hired trip is waiting for its truck. */
+  vehicle_registration_number: string | null;
+  vehicle_source?: VehicleSource;
+  hire_id?: string | null;
   created_at: number;
   status: TripStatus;
   stops: DispatchOrder[];
@@ -272,6 +281,43 @@ export interface OpsReport {
     category_breakdown: Array<{ category: string; units: number }>;
   }>;
   dispatch_volume: Array<{ date: string; count: number }>;
+  /** Own vs hired trucks, vendor spend and margin on hires. Optional so an
+   *  older backend without it still renders. */
+  hired_transport?: HiredTransport;
+}
+
+// Mirrors HiredTransport / VendorSpend / HireMargin in src/logistics/reports/mod.rs.
+export interface VendorSpend {
+  vendor_id: string;
+  vendor_name: string;
+  hires: number;
+  hire_cost: number;
+  paid: number;
+  outstanding: number;
+}
+
+export interface HireMargin {
+  hire_id: string;
+  vendor_name: string;
+  registration_number: string | null;
+  trip_id: string | null;
+  dispatches: number;
+  invoiced_dispatches: number;
+  invoiced: number;
+  hire_cost: number;
+  margin: number;
+}
+
+export interface HiredTransport {
+  own_dispatches: number;
+  hired_dispatches: number;
+  hired_share_percent: number | null;
+  hire_cost_total: number;
+  paid_to_vendors: number;
+  outstanding_to_vendors: number;
+  awaiting_truck: number;
+  vendors: VendorSpend[];
+  hire_margins: HireMargin[];
 }
 
 export interface ApiResponse<T> {
@@ -299,4 +345,80 @@ export interface AssistantAnswer {
 // src/logistics/server/routes.rs.
 export interface AssistantReindexResult {
   chunks_indexed: number;
+}
+
+/** A transporter / broker the org hires vehicles from (docs/vehicle-vendors.md). */
+export interface VehicleVendor {
+  id: string;
+  org_id: string;
+  name: string;
+  contact_person: string | null;
+  phone: string;
+  gstin: string | null;
+  notes: string | null;
+  is_active: boolean;
+}
+
+/** The editable fields of a vendor, as sent on create and update. */
+export interface VendorInput {
+  name: string;
+  contact_person: string | null;
+  phone: string;
+  gstin: string | null;
+  notes: string | null;
+}
+
+// Mirrors VehicleSource in src/logistics/dispatch/dispatch.rs.
+export type VehicleSource = 'OWN' | 'HIRED';
+
+// Mirrors HireStatus / VehicleHire in src/logistics/vendor/hire.rs.
+export type HireStatus = 'REQUESTED' | 'CONFIRMED' | 'RELEASED' | 'CANCELLED';
+
+/** One vendor truck booked for a dispatch (dispatch_id) or a trip (trip_id). */
+export interface VehicleHire {
+  id: string;
+  org_id: string;
+  vendor_id: string;
+  vendor_name: string;
+  dispatch_id: string | null;
+  trip_id: string | null;
+  /** The assigned truck's capacity must be at least this. */
+  required_volume: number;
+  status: HireStatus;
+  registration_number: string | null;
+  capacity: number | null;
+  unit: string | null;
+  driver_name: string | null;
+  driver_phone: string | null;
+  driver_license: string | null;
+  freight_amount: number | null;
+  advance_paid: number;
+  /** advance_paid plus every later vendor payment. */
+  total_paid: number;
+  /** freight_amount - total_paid; null until a rate is assigned. */
+  balance_due: number | null;
+  requested_at: number;
+  confirmed_at: number | null;
+  closed_at: number | null;
+}
+
+/** What the dispatcher enters once the vendor confirms a truck. */
+export interface HireAssignmentInput {
+  registration_number: string;
+  capacity: number;
+  driver_name: string;
+  driver_phone: string;
+  driver_license?: string | null;
+  freight_amount: number;
+  advance_paid: number;
+}
+
+/** A payment to a vendor after the advance. Mirrors VendorPayment in hire.rs. */
+export interface VendorPayment {
+  id: string;
+  hire_id: string;
+  amount: number;
+  paid_on: string;
+  note: string | null;
+  recorded_at: number;
 }
