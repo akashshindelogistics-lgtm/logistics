@@ -4,6 +4,17 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.9.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.8.0...v0.9.0) (2026-09-25)
+
+
+### Features
+
+* **stock:** add categories to stock, carried through dispatch and transfer ([#64](https://github.com/akashshindelogistics-lgtm/logistics/issues/64)) ([75d9ff3](https://github.com/akashshindelogistics-lgtm/logistics/commit/75d9ff3392b45396eab76bd123e08cf679152871))
+* **vendors:** add vehicle vendor directory (phase 1 of hired vehicles) ([568ef23](https://github.com/akashshindelogistics-lgtm/logistics/commit/568ef236aa34a564be04c97e3eb1478d482736a3))
+* **vendors:** dispatch on a truck hired from a vendor (phase 2) ([2b50fd3](https://github.com/akashshindelogistics-lgtm/logistics/commit/2b50fd38d013f227bdb5d097346d036189eb8a39))
+* **vendors:** hire trucks from vehicle vendors when the org has no free vehicle ([fbd4b89](https://github.com/akashshindelogistics-lgtm/logistics/commit/fbd4b89dee262592fbf1237497166d5ad69dd023))
+* **vendors:** vendor payments and hired-transport reporting (phase 3) ([7322cbe](https://github.com/akashshindelogistics-lgtm/logistics/commit/7322cbe146b290686f76f0ecaa75cae96d44b9aa))
+
 ## [0.8.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.7.0...v0.8.0) (2026-09-18)
 
 
