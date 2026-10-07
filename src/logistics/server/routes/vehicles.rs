@@ -18,7 +18,7 @@ pub struct TrackLocationPayload {
 }
 
 /// `true` when a coordinate pair is a real point on Earth.
-fn coordinates_in_range(latitude: f64, longitude: f64) -> bool {
+pub(super) fn coordinates_in_range(latitude: f64, longitude: f64) -> bool {
     (-90.0..=90.0).contains(&latitude) && (-180.0..=180.0).contains(&longitude)
 }
 

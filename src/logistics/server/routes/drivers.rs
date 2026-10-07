@@ -1,9 +1,11 @@
-//! Drivers (`/api/drivers`, `/api/orgs/{id}/drivers`) and assigning one to a
-//! vehicle.
+//! Drivers (`/api/drivers`, `/api/orgs/{id}/drivers`), assigning one to a
+//! vehicle, and the driver's phone: pairing it with a device token and the
+//! location reports it sends (`POST /api/driver/location`).
 
 use crate::logistics::driver::driver::Driver;
-use crate::logistics::vehicle::vehicle::Vehicle;
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use crate::logistics::vehicle::vehicle::{Location, Vehicle};
+use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
+use super::vehicles::coordinates_in_range;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -290,5 +292,282 @@ pub async fn assign_vehicle_driver(
             message: format!("Failed to assign driver: {}", err),
             data: None,
         }),
+    }
+}
+
+// ── Driver phone tracking ─────────────────────────────────────────────────
+
+/// How many fixes one `POST /api/driver/location` call may carry. A phone
+/// that was offline for a while flushes its queue in batches of this size.
+pub(super) const MAX_DRIVER_FIXES_PER_REQUEST: usize = 100;
+/// How far ahead of the server clock a fix's `recorded_at` may be, to absorb
+/// phone clock skew without letting a wrong clock pin the vehicle's location
+/// in the future (which would make every later real fix look "older").
+const MAX_FIX_CLOCK_SKEW_SECS: i64 = 300;
+
+/// One position captured by the driver's phone.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct DriverLocationFix {
+    pub latitude: f64,
+    pub longitude: f64,
+    /// When the phone captured the fix, in unix seconds. Not the time it was
+    /// uploaded: an offline phone sends old fixes late.
+    pub recorded_at: i64,
+    /// Horizontal accuracy in metres, as reported by the OS.
+    #[serde(default)]
+    pub accuracy_m: Option<f64>,
+    /// Ground speed in metres per second.
+    #[serde(default)]
+    pub speed_mps: Option<f64>,
+}
+
+/// Body of `POST /api/driver/location`.
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct DriverLocationPayload {
+    pub fixes: Vec<DriverLocationFix>,
+}
+
+/// Result of a driver location report.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverLocationResult {
+    /// How many fixes in the batch were valid and considered.
+    pub accepted: usize,
+    /// `false` when the whole batch was older than what the vehicle already
+    /// has (for example a late duplicate upload), so nothing moved.
+    pub location_updated: bool,
+    pub vehicle_registration_number: String,
+    /// The vehicle's location after the report.
+    pub location: Option<Location>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverLocationResultResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<DriverLocationResult>,
+}
+
+/// A newly issued driver device token. The plain token is shown exactly once.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverDeviceToken {
+    pub driver_id: Uuid,
+    pub device_token: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverDeviceTokenResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<DriverDeviceToken>,
+}
+fn json_error(status: actix_web::http::StatusCode, message: impl Into<String>) -> HttpResponse {
+    HttpResponse::build(status).json(ApiResponse::<String> {
+        success: false,
+        message: message.into(),
+        data: None,
+    })
+}
+
+/// Check one fix from a driver's phone. Returns the reason it is unusable.
+fn validate_driver_fix(fix: &DriverLocationFix, now: i64) -> Result<(), String> {
+    if !coordinates_in_range(fix.latitude, fix.longitude) {
+        return Err(
+            "latitude must be between -90 and 90 and longitude between -180 and 180".to_string(),
+        );
+    }
+    if fix.recorded_at <= 0 {
+        return Err("recorded_at must be a positive unix timestamp in seconds".to_string());
+    }
+    if fix.recorded_at > now + MAX_FIX_CLOCK_SKEW_SECS {
+        return Err(format!(
+            "recorded_at is more than {} seconds in the future — check the phone's clock",
+            MAX_FIX_CLOCK_SKEW_SECS
+        ));
+    }
+    if fix.accuracy_m.is_some_and(|a| !a.is_finite() || a < 0.0) {
+        return Err("accuracy_m must be a non-negative number".to_string());
+    }
+    if fix.speed_mps.is_some_and(|v| !v.is_finite() || v < 0.0) {
+        return Err("speed_mps must be a non-negative number".to_string());
+    }
+    Ok(())
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/driver/location",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    request_body = DriverLocationPayload,
+    responses(
+        (status = 200, description = "Fixes processed", body = DriverLocationResultResponse),
+        (status = 400, description = "Empty or oversized batch, or an invalid fix", body = EmptyResponse),
+        (status = 401, description = "Missing or unknown device token", body = EmptyResponse),
+        (status = 403, description = "The driver is inactive", body = EmptyResponse),
+        (status = 409, description = "The driver has no assigned vehicle", body = EmptyResponse)
+    )
+)]
+/// Location report from the driver's phone app. Authenticated by the driver's
+/// device token (`Authorization: Bearer <token>`, issued by
+/// `POST /api/drivers/{id}/device-token/rotate`) — not an org login. The
+/// server works out which vehicle the driver is assigned to and moves it to
+/// the newest fix in the batch. Fixes are timestamped by the phone, and the
+/// vehicle's location only ever moves forward, so a late or repeated upload
+/// cannot pull it backwards. The whole batch is rejected if any fix is
+/// invalid, so the app can fix or drop the offending fix and resend rather
+/// than guess which ones landed.
+#[post("/driver/location")]
+pub async fn report_driver_location(
+    req: HttpRequest,
+    payload: web::Json<DriverLocationPayload>,
+) -> impl Responder {
+    use actix_web::http::StatusCode;
+
+    let token = match req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .and_then(|t| Uuid::parse_str(t.trim()).ok())
+    {
+        Some(t) => t,
+        None => {
+            return json_error(
+                StatusCode::UNAUTHORIZED,
+                "Missing or malformed driver device token",
+            )
+        }
+    };
+
+    let driver = match Driver::by_device_token(token) {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            return json_error(StatusCode::UNAUTHORIZED, "Unknown driver device token")
+        }
+        Err(err) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to look up device token: {}", err),
+            )
+        }
+    };
+    if !driver.is_active {
+        return json_error(StatusCode::FORBIDDEN, "This driver is inactive");
+    }
+
+    if payload.fixes.is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "fixes must not be empty");
+    }
+    if payload.fixes.len() > MAX_DRIVER_FIXES_PER_REQUEST {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "at most {} fixes may be sent per request",
+                MAX_DRIVER_FIXES_PER_REQUEST
+            ),
+        );
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    for (i, fix) in payload.fixes.iter().enumerate() {
+        if let Err(reason) = validate_driver_fix(fix, now) {
+            return json_error(StatusCode::BAD_REQUEST, format!("fixes[{}]: {}", i, reason));
+        }
+    }
+
+    let mut vehicle = match Vehicle::by_assigned_driver(driver.id) {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return json_error(
+                StatusCode::CONFLICT,
+                "This driver has no assigned vehicle — ask your dispatcher to assign one",
+            )
+        }
+        Err(err) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find the driver's vehicle: {}", err),
+            )
+        }
+    };
+
+    // Only the newest fix can move the vehicle; older ones in the batch would
+    // be overwritten immediately.
+    let newest = payload
+        .fixes
+        .iter()
+        .max_by_key(|f| f.recorded_at)
+        .expect("batch is non-empty");
+    let updated = match vehicle.record_fix(newest.latitude, newest.longitude, newest.recorded_at) {
+        Ok(u) => u,
+        Err(err) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to record location: {}", err),
+            )
+        }
+    };
+
+    HttpResponse::Ok().json(ApiResponse {
+        success: true,
+        message: if updated {
+            "Location recorded".to_string()
+        } else {
+            "Location not updated: the vehicle already has a newer position".to_string()
+        },
+        data: Some(DriverLocationResult {
+            accepted: payload.fixes.len(),
+            location_updated: updated,
+            vehicle_registration_number: vehicle.registration_number.clone(),
+            location: vehicle.location.clone(),
+        }),
+    })
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/drivers/{id}/device-token/rotate",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Driver UUID")),
+    responses(
+        (status = 200, description = "A fresh device token was issued; it is shown only once", body = DriverDeviceTokenResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Driver not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+/// Issue a new device token for a driver's phone, invalidating the previous
+/// one. Use it to pair a phone for the first time and again if the phone is
+/// lost. The plain token is returned only in this response — the server keeps
+/// just a hash — so hand it to the driver straight away. Requires an Admin or
+/// Dispatcher.
+#[post("/drivers/{id}/device-token/rotate")]
+pub async fn rotate_driver_device_token(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let driver = match load_owned_driver(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match driver.rotate_device_token() {
+        Ok(token) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "A fresh device token was issued".to_string(),
+            data: Some(DriverDeviceToken {
+                driver_id: driver.id,
+                device_token: token,
+            }),
+        }),
+        Err(err) => json_error(
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to rotate device token: {}", err),
+        ),
     }
 }

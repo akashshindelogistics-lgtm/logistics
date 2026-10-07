@@ -1006,7 +1006,22 @@
   out-of-order fixes, optional location history with retention, and a minimal
   React Native driver app. Open decisions (platform, token in header vs URL, IN_TRANSIT
   gate) are listed in the plan.
-** TODO Phase 1: backend - Drivers.device_token + rotate route, POST /api/driver/location (batched, timestamped, out-of-order safe), tests, OpenAPI, README
+** DONE Phase 1: backend - Drivers.device_token + rotate route, POST /api/driver/location (batched, timestamped, out-of-order safe), tests, OpenAPI, README
+   Plan/as-built: [[file:docs/driver-phone-tracking.md]] (section "Phase 1 as built").
+   Driver.rotate_device_token / by_device_token store only a SHA-256 of the
+   token (Drivers.device_token_hash, added to old databases by
+   ensure_device_token_column); the plain token is returned once by
+   POST /api/drivers/{id}/device-token/rotate (Admin/Dispatcher) and is never
+   in any driver response. POST /api/driver/location takes a Bearer device
+   token and a batch of up to 100 {latitude, longitude, recorded_at (unix
+   seconds), accuracy_m?, speed_mps?} fixes, resolves driver -> assigned
+   vehicle, and applies only the newest fix via Vehicle::record_fix, a
+   conditional UPDATE so the location never moves backwards. 401 bad token,
+   403 inactive driver, 409 no vehicle, 400 for any invalid fix (whole batch
+   rejected). Decisions: token in the Authorization header, no IN_TRANSIT
+   gate, latest timestamp wins against hardware trackers. accuracy/speed are
+   validated but not stored until phase 3. 8 model tests + 16 route tests.
+   README route table updated.
 ** TODO Phase 2: dashboard - driver pairing panel (token/QR, regenerate), last-fix source on vehicle detail, unit + Playwright + standalone demo flow
 ** TODO Phase 3: VehicleLocationHistory table with retention, history endpoint, trail on the trip map
 ** TODO Phase 4: minimal React Native driver app (pairing, background reporting, offline queue)

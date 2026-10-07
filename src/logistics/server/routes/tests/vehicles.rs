@@ -2,7 +2,7 @@ use super::*;
 
 /// Register a vehicle under `org` via the API and return its full
 /// response body (so the caller has the server-issued `tracker_key`).
-async fn register_vehicle(
+pub(super) async fn register_vehicle(
     app: &impl actix_web::dev::Service<
         actix_http::Request,
         Response = actix_web::dev::ServiceResponse,

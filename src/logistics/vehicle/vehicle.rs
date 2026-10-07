@@ -125,6 +125,62 @@ impl Vehicle {
         Ok(rows.into_iter().next().map(Self::row_to_vehicle))
     }
 
+    /// The vehicle a driver is currently assigned to, if any. If data
+    /// entry has assigned one driver to several vehicles the alphabetically
+    /// first registration wins, so the answer is at least deterministic.
+    pub fn by_assigned_driver(driver_id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        ensure_tracker_key_column(&mut conn)?;
+
+        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle WHERE assigned_driver_id = :driver_id ORDER BY registration_number LIMIT 1",
+            params! { "driver_id" => driver_id.to_string() },
+            |r| r,
+        )?;
+
+        Ok(rows.into_iter().next().map(Self::row_to_vehicle))
+    }
+
+    /// Record a position that was captured at `recorded_at` (unix seconds)
+    /// rather than "now". Used for phone reports, which may arrive in late
+    /// batches: the stored location only moves forward, so a fix that is not
+    /// strictly newer than the current one is ignored and `Ok(false)` is
+    /// returned. Any stale street address is cleared, since it described the
+    /// previous position.
+    pub fn record_fix(
+        &mut self,
+        latitude: f64,
+        longitude: f64,
+        recorded_at: i64,
+    ) -> Result<bool, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+
+        conn.exec_drop(
+            "UPDATE Vehicle SET latitude = :latitude, longitude = :longitude, last_updated_at = :recorded_at, location_address = NULL
+             WHERE registration_number = :registration_number
+               AND (last_updated_at IS NULL OR last_updated_at < :recorded_at)",
+            params! {
+                "registration_number" => &self.registration_number,
+                "latitude" => latitude,
+                "longitude" => longitude,
+                "recorded_at" => recorded_at,
+            },
+        )?;
+
+        if conn.affected_rows() == 0 {
+            return Ok(false);
+        }
+        self.location = Some(Location {
+            latitude,
+            longitude,
+            timestamp: recorded_at,
+            address: None,
+        });
+        Ok(true)
+    }
+
     /// Issue a fresh tracker key, invalidating the old one. Used when a
     /// device is lost or the key may have leaked.
     pub fn rotate_tracker_key(&mut self) -> Result<Uuid, Box<dyn Error>> {
@@ -428,6 +484,72 @@ mod tests {
             .next()
             .expect("vehicle on org");
         assert_eq!(on_org.tracker_key, key);
+    }
+
+    #[test]
+    fn test_by_assigned_driver_finds_the_drivers_vehicle() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Assigned Org", "3 Depot Rd").expect("org");
+        let driver = crate::logistics::driver::driver::Driver::create(org.id, "D", "LIC", "1")
+            .expect("driver");
+
+        assert!(Vehicle::by_assigned_driver(driver.id).expect("lookup").is_none());
+
+        let mut v = Vehicle::new("MH14 GP 0010", 40, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("add vehicle");
+        v.assign_driver(Some(driver.id)).expect("assign");
+
+        let found = Vehicle::by_assigned_driver(driver.id).expect("lookup").expect("found");
+        assert_eq!(found.registration_number, "MH14 GP 0010");
+    }
+
+    #[test]
+    fn test_record_fix_stores_the_capture_time_not_the_server_time() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Fix Org", "4 Depot Rd").expect("org");
+        let mut v = Vehicle::new("MH14 GP 0011", 40, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("add vehicle");
+
+        assert!(v.record_fix(18.5, 73.8, 1_700_000_000).expect("fix"));
+
+        let stored = Vehicle::list_by_org(org.id).expect("list").remove(0).location.expect("location");
+        assert_eq!(stored.latitude, 18.5);
+        assert_eq!(stored.longitude, 73.8);
+        assert_eq!(stored.timestamp, 1_700_000_000);
+        assert_eq!(stored.address, None);
+    }
+
+    #[test]
+    fn test_record_fix_ignores_a_fix_older_than_the_current_location() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Stale Org", "5 Depot Rd").expect("org");
+        let mut v = Vehicle::new("MH14 GP 0012", 40, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("add vehicle");
+
+        assert!(v.record_fix(10.0, 10.0, 2_000).expect("newer"));
+        // Older, and equal-time, fixes are dropped.
+        assert!(!v.record_fix(99.0, 99.0, 1_000).expect("older"));
+        assert!(!v.record_fix(98.0, 98.0, 2_000).expect("equal"));
+
+        let stored = Vehicle::list_by_org(org.id).expect("list").remove(0).location.expect("location");
+        assert_eq!((stored.latitude, stored.longitude, stored.timestamp), (10.0, 10.0, 2_000));
+        // The in-memory copy was not advanced by the rejected fixes either.
+        assert_eq!(v.location.as_ref().unwrap().timestamp, 2_000);
+    }
+
+    #[test]
+    fn test_record_fix_clears_a_stale_address() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Addr Org", "6 Depot Rd").expect("org");
+        let mut v = Vehicle::new("MH14 GP 0013", 40, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("add vehicle");
+        v.update_location(1.0, 1.0, Some("Old Yard")).expect("manual location");
+
+        let far_future = v.location.as_ref().unwrap().timestamp + 60;
+        assert!(v.record_fix(2.0, 2.0, far_future).expect("fix"));
+
+        let stored = Vehicle::list_by_org(org.id).expect("list").remove(0).location.expect("location");
+        assert_eq!(stored.address, None);
     }
 
     #[test]

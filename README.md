@@ -274,6 +274,8 @@ All routes are served under the `/api` prefix.
 | PUT | `/api/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
 | GET/POST | `/api/drivers`, `/api/orgs/{id}/drivers` | List / add drivers |
 | PUT/DELETE | `/api/drivers/{id}` | Update (incl. active flag) or remove a driver |
+| POST | `/api/drivers/{id}/device-token/rotate` | Pair (or re-pair) a driver's phone: issue a device token, shown once; the previous one stops working (Admin/Dispatcher) |
+| POST | `/api/driver/location` | Driver phone push, authenticated by the device token (`Authorization: Bearer <token>`, not an org login): batched `{fixes: [{latitude, longitude, recorded_at, accuracy_m?, speed_mps?}]}` moves the driver's assigned vehicle to the newest fix; older fixes never move it backwards |
 | GET/POST | `/api/orgs/{id}/vendors` | List / add vehicle vendors (transporters the org hires trucks from) |
 | PUT/DELETE | `/api/vendors/{id}` | Update (incl. active flag) or remove a vehicle vendor (409 once it has hire history) |
 | GET | `/api/orgs/{id}/vehicle-hires` | The org's hired trucks, newest first (optional `?status=`) |

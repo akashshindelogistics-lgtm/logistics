@@ -5,6 +5,10 @@ Until now a vehicle's position could only be set with `PUT
 real fleet fits each truck with a GPS tracker that reports on its own, with no
 human and no org login. This adds that push path.
 
+A driver's phone can report too, through its own per-driver token and a
+batched, timestamped endpoint rather than a vehicle's tracker key — see
+[driver-phone-tracking.md](driver-phone-tracking.md).
+
 ## The tracker key
 
 Every vehicle carries a `tracker_key` — a random UUID generated when the

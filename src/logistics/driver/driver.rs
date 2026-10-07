@@ -2,6 +2,7 @@ use crate::logistics::db::connection::DbConnection;
 use mysql::prelude::*;
 use mysql::*;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::error::Error;
 use uuid::Uuid;
 
@@ -34,10 +35,77 @@ impl Driver {
                 license_number VARCHAR(255) NOT NULL,
                 phone VARCHAR(64) NOT NULL,
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                device_token_hash CHAR(64) DEFAULT NULL,
+                UNIQUE KEY uq_driver_device_token (device_token_hash),
                 CONSTRAINT fk_driver_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
         )?;
         Ok(())
+    }
+
+    /// Add the `device_token_hash` column (and its unique index) to a
+    /// `Drivers` table that predates phone tracking. Cheap to call: it probes
+    /// `information_schema` first, the same way
+    /// `vehicle::ensure_tracker_key_column` does.
+    pub(crate) fn ensure_device_token_column(
+        conn: &mut mysql::PooledConn,
+    ) -> Result<(), Box<dyn Error>> {
+        Self::ensure_table(conn)?;
+        let present: Option<i64> = conn.query_first(
+            "SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'Drivers'
+               AND column_name = 'device_token_hash'",
+        )?;
+        if present.unwrap_or(0) == 0 {
+            conn.query_drop(
+                "ALTER TABLE Drivers
+                 ADD COLUMN device_token_hash CHAR(64) DEFAULT NULL,
+                 ADD UNIQUE KEY uq_driver_device_token (device_token_hash)",
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Only a SHA-256 of a device token is ever stored, so a database dump
+    /// or a `SELECT` cannot be replayed as a credential. Tokens are random
+    /// UUIDs (high entropy), so an unsalted hash is sufficient.
+    fn hash_device_token(token: Uuid) -> String {
+        let digest = Sha256::digest(token.to_string().as_bytes());
+        digest.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
+    /// Issue a fresh device token for this driver's phone, invalidating any
+    /// previous one. The plain token is returned here and **never stored or
+    /// shown again**, so the caller must hand it to the driver straight away.
+    pub fn rotate_device_token(&self) -> Result<Uuid, Box<dyn Error>> {
+        let mut conn = DbConnection::from_env().get_connection()?;
+        Self::ensure_device_token_column(&mut conn)?;
+
+        let token = Uuid::new_v4();
+        conn.exec_drop(
+            "UPDATE Drivers SET device_token_hash = :hash WHERE id = :id",
+            params! {
+                "hash" => Self::hash_device_token(token),
+                "id" => self.id.to_string(),
+            },
+        )?;
+        Ok(token)
+    }
+
+    /// Resolve a device token to its driver, or `None` for a stale or
+    /// fabricated token.
+    pub fn by_device_token(token: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
+        let mut conn = DbConnection::from_env().get_connection()?;
+        Self::ensure_device_token_column(&mut conn)?;
+
+        let row: Option<(String, String, String, String, String, bool)> = conn.exec_first(
+            "SELECT id, org_id, name, license_number, phone, is_active FROM Drivers WHERE device_token_hash = :hash",
+            params! { "hash" => Self::hash_device_token(token) },
+        )?;
+
+        Ok(row.map(|(id, org_id, name, license_number, phone, is_active)| {
+            Self::row_to_driver(id, org_id, name, license_number, phone, is_active)
+        }))
     }
 
     pub fn create(
@@ -249,5 +317,63 @@ mod tests {
         Driver::create(org.id, "Doomed", "LIC", "000").expect("create");
         org.remove_organization().expect("remove org");
         assert!(Driver::list_by_org(org.id).expect("list").is_empty());
+    }
+
+    #[test]
+    fn test_device_token_resolves_to_driver_and_rotation_kills_the_old_one() {
+        let _db = TestDb::create();
+        let org = make_org();
+        let d = Driver::create(org.id, "Phone Driver", "LIC-P", "222").expect("create");
+
+        let first = d.rotate_device_token().expect("issue token");
+        let found = Driver::by_device_token(first).expect("lookup").expect("resolves");
+        assert_eq!(found.id, d.id);
+
+        let second = d.rotate_device_token().expect("rotate");
+        assert_ne!(first, second);
+        assert!(Driver::by_device_token(first).expect("lookup").is_none());
+        assert_eq!(
+            Driver::by_device_token(second).expect("lookup").expect("resolves").id,
+            d.id
+        );
+    }
+
+    #[test]
+    fn test_unknown_device_token_resolves_to_none() {
+        let _db = TestDb::create();
+        assert!(Driver::by_device_token(Uuid::new_v4()).expect("lookup").is_none());
+    }
+
+    #[test]
+    fn test_device_token_is_stored_hashed_not_in_plain_text() {
+        let _db = TestDb::create();
+        let org = make_org();
+        let d = Driver::create(org.id, "Hashed", "LIC-H", "333").expect("create");
+        let token = d.rotate_device_token().expect("issue token");
+
+        let mut conn = DbConnection::from_env().get_connection().expect("conn");
+        let stored: Option<String> = conn
+            .exec_first(
+                "SELECT device_token_hash FROM Drivers WHERE id = :id",
+                params! { "id" => d.id.to_string() },
+            )
+            .expect("select");
+        let stored = stored.expect("row");
+        assert_ne!(stored, token.to_string());
+        assert_eq!(stored.len(), 64);
+    }
+
+    #[test]
+    fn test_each_driver_gets_an_independent_token() {
+        let _db = TestDb::create();
+        let org = make_org();
+        let a = Driver::create(org.id, "A", "LIC-A", "1").expect("a");
+        let b = Driver::create(org.id, "B", "LIC-B", "2").expect("b");
+        let ta = a.rotate_device_token().expect("ta");
+        let tb = b.rotate_device_token().expect("tb");
+        // Rotating B leaves A's token working.
+        b.rotate_device_token().expect("rotate b");
+        assert_eq!(Driver::by_device_token(ta).unwrap().unwrap().id, a.id);
+        assert!(Driver::by_device_token(tb).unwrap().is_none());
     }
 }
