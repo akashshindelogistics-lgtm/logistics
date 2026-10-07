@@ -1,0 +1,104 @@
+import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
+import { Platform } from 'react-native';
+import {
+  LOCATION_DISTANCE_INTERVAL_M,
+  LOCATION_TASK_NAME,
+  LOCATION_TIME_INTERVAL_MS,
+} from './config';
+import { flushQueue } from './flush';
+import { ingestFix } from './ingest';
+
+/**
+ * Registered once, at module scope, on the JS bundle's global scope — it
+ * cannot be defined inside a component or an effect. The OS can launch this
+ * task with no screen mounted at all, so nothing here may depend on React
+ * being rendered. See expo-task-manager's docs (fetched fresh per
+ * `AGENTS.md`, since this is exactly the kind of API that shifts between
+ * Expo SDKs): https://docs.expo.dev/versions/v57.0.0/sdk/task-manager/
+ */
+TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+  if (error) {
+    return;
+  }
+  const locations = (data as { locations?: Location.LocationObject[] } | undefined)?.locations ?? [];
+  for (const loc of locations) {
+    await ingestFix({
+      latitude: loc.coords.latitude,
+      longitude: loc.coords.longitude,
+      recordedAt: Math.floor(loc.timestamp / 1000),
+      accuracyM: loc.coords.accuracy ?? undefined,
+      speedMps: loc.coords.speed !== null && loc.coords.speed !== undefined && loc.coords.speed >= 0
+        ? loc.coords.speed
+        : undefined,
+    });
+  }
+  // Best-effort upload right away. If it fails (offline, server down) the
+  // fix stays queued and the next update — or "Sync now" on the status
+  // screen — retries it.
+  await flushQueue();
+});
+
+/**
+ * Background location — `expo-task-manager`'s `isTaskRegisteredAsync` and
+ * `expo-location`'s `startLocationUpdatesAsync`/`stopLocationUpdatesAsync` —
+ * has no web implementation and throws `UnavailabilityError` if called
+ * there; browsers have no persistent background-execution model to run it
+ * on, so this isn't a gap to work around, only one to fail on clearly. Found
+ * while screenshotting this app's `expo start --web` preview: pairing is
+ * useful to see on web, but a driver's phone is always iOS or Android.
+ */
+const backgroundLocationSupported = Platform.OS !== 'web';
+
+export async function requestLocationPermissions(): Promise<{ granted: boolean; reason?: string }> {
+  if (!backgroundLocationSupported) {
+    return {
+      granted: false,
+      reason: 'Background location reporting needs the iOS or Android app — it is not available in a browser.',
+    };
+  }
+  const foreground = await Location.requestForegroundPermissionsAsync();
+  if (foreground.status !== 'granted') {
+    return { granted: false, reason: 'Location permission was not granted.' };
+  }
+  const background = await Location.requestBackgroundPermissionsAsync();
+  if (background.status !== 'granted') {
+    return {
+      granted: false,
+      reason: 'Background location permission was not granted — reporting would stop as soon as the app leaves the screen.',
+    };
+  }
+  return { granted: true };
+}
+
+export async function isTracking(): Promise<boolean> {
+  if (!backgroundLocationSupported) {
+    return false;
+  }
+  return TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+}
+
+export async function startTracking(): Promise<void> {
+  if (!backgroundLocationSupported) {
+    // status.tsx never reaches this — requestLocationPermissions() already
+    // returned granted: false on web — but guard directly too, so a future
+    // caller gets a clear error instead of expo-location's native one.
+    throw new Error('Background location reporting is not available on web.');
+  }
+  await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+    accuracy: Location.Accuracy.Balanced,
+    timeInterval: LOCATION_TIME_INTERVAL_MS,
+    distanceInterval: LOCATION_DISTANCE_INTERVAL_M,
+    pausesUpdatesAutomatically: false,
+    foregroundService: {
+      notificationTitle: 'Sharing your location',
+      notificationBody: 'Logistics Driver is reporting your position to dispatch.',
+    },
+  });
+}
+
+export async function stopTracking(): Promise<void> {
+  if (await isTracking()) {
+    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+  }
+}

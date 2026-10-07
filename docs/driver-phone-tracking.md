@@ -1,8 +1,12 @@
 # Driver phone location tracking (plan)
 
-Status: **Phase 1 (backend) implemented; phases 2-4 planned.** See
-[Phase 1 as built](#phase-1-as-built) for where the implementation settled the
-open questions below.
+Status: **Phases 1 (backend) and 4 (mobile app skeleton) implemented; phases 2-3
+planned.** See [Phase 1 as built](#phase-1-as-built) and
+[Phase 4 as built](#phase-4-as-built) for where the implementation settled the
+open questions below. Phase 4 was built ahead of phases 2-3 (dashboard pairing
+UI, location history) at the user's request; the device token is currently
+paired by pasting it, since there is no dashboard panel yet to show it as a QR
+code.
 
 [gps-tracking.md](gps-tracking.md) added hardware GPS trackers that push a
 vehicle's position to `POST /api/track/{tracker_key}`. This plan adds a second
@@ -116,6 +120,37 @@ flushes in batches, and a visible "location is being shared" indicator.
    on the trip map.
 4. **Mobile app:** minimal React Native driver app in a separate directory,
    with its own test and release notes.
+
+## Phase 4 as built
+
+`mobile/` — an [Expo](https://expo.dev) app (SDK 57, TypeScript, Expo Router).
+See [mobile/README.md](../mobile/README.md) for the full layout, setup and
+known gaps; the summary here is what it settles from the plan.
+
+- **Pairing:** paste the device token (from
+  `POST /api/drivers/{id}/device-token/rotate`) and the server address; stored
+  via `expo-secure-store`, not plain storage. QR pairing is deferred to phase 2
+  (there is nothing on the dashboard to render a QR code from yet).
+- **Reporting:** `expo-location` + `expo-task-manager` run a background task
+  that keeps posting while the app is backgrounded or the phone is locked, at
+  a 30s / 50m interval. Fixes are validated client-side with the same rules as
+  `validate_driver_fix` (`mobile/src/lib/validation.ts`), so a bad fix — an
+  out-of-range coordinate, a clock far in the future — is dropped before it
+  ever reaches the batch-fails-atomically behaviour on the server.
+- **Offline queue:** fixes persist to `AsyncStorage` and are uploaded in
+  batches of up to 100 (mirroring `MAX_DRIVER_FIXES_PER_REQUEST`). A batch the
+  server rejects for an account reason (401/403/409) is left queued rather
+  than dropped, since retrying costs nothing once a dispatcher fixes the
+  underlying problem.
+- **Status screen:** sharing on/off toggle, queued-fix count, last sync
+  outcome, and the vehicle last reported to (learned from the upload response,
+  since there is no separate "who am I" read endpoint — see the README's
+  known gaps).
+- **Tests:** 53 Jest tests covering the pure queue/validation/API logic, the
+  storage wrappers, and one screen (pairing) with
+  `@testing-library/react-native`; `tsc --noEmit` and `eslint .` both clean.
+  Not yet exercised on a real device or simulator — this environment has no
+  Android SDK and no macOS.
 
 ## Open questions
 
