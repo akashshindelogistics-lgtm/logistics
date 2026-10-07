@@ -13,7 +13,7 @@ and books a "market truck" for the trip. This plan adds that path.
 
 - **Phase 1 (vendors): done.** `src/logistics/vendor/vendor.rs` has the
   `VehicleVendor` model and `VehicleVendors` table. The four routes are in
-  `src/logistics/server/routes.rs` (tag *Vehicle vendors*), and the
+  `src/logistics/server/routes/vendors.rs` (tag *Vehicle vendors*), and the
   `/vendors` page is in `frontend/src/pages/Vendors.tsx`. Deleting a vendor
   is unconditional for now: the "refused while it has an open hire" check
   arrives with `VehicleHires` in phase 2.
