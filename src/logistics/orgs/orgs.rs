@@ -1,7 +1,7 @@
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
 use crate::logistics::dispatch::dispatch::{
-    DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus,
+    DispatchLineItem, DispatchLineItemInput, DispatchOrder, DispatchStatus, VehicleSource,
 };
 use crate::logistics::dispatch::route::{haversine_distance_km, nearest_neighbor_order};
 use crate::logistics::dispatch::trip::Trip;
@@ -9,6 +9,8 @@ use crate::logistics::driver::driver::Driver;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
+use crate::logistics::vendor::hire::VehicleHire;
+use crate::logistics::vendor::vendor::VehicleVendor;
 use mysql::prelude::*;
 use mysql::*;
 use serde::{Deserialize, Serialize};
@@ -203,22 +205,57 @@ impl Organization {
         customer: &Customer,
         line_items: &[DispatchLineItemInput],
     ) -> Result<DispatchOrder, Box<dyn Error>> {
+        self.dispatch_single(customer, line_items, None)
+    }
+
+    /// Dispatch on a truck hired from `vendor_id` instead of an own vehicle.
+    ///
+    /// Stock is validated and drawn down exactly as for an own-fleet dispatch,
+    /// so it is reserved while the dispatcher phones the vendor, but no own
+    /// vehicle is selected. The dispatch is saved as `AWAITING_VEHICLE` with a
+    /// `REQUESTED` [`VehicleHire`]; assigning the vendor's truck
+    /// (`VehicleHire::assign`) moves it to `PENDING`. The vendor must belong
+    /// to this org and be active. See `docs/vehicle-vendors.md`.
+    pub fn dispatch_stock_on_hired_vehicle(
+        &self,
+        customer: &Customer,
+        line_items: &[DispatchLineItemInput],
+        vendor_id: Uuid,
+    ) -> Result<DispatchOrder, Box<dyn Error>> {
+        self.dispatch_single(customer, line_items, Some(vendor_id))
+    }
+
+    fn dispatch_single(
+        &self,
+        customer: &Customer,
+        line_items: &[DispatchLineItemInput],
+        hire_vendor: Option<Uuid>,
+    ) -> Result<DispatchOrder, Box<dyn Error>> {
         let mut conn = DbConnection::from_env().get_connection()?;
         let godowns = Godown::list_by_org(self.id)?;
 
         let mut remaining = Self::stock_snapshot(&godowns);
         let (plans, required_volume) =
             self.plan_stock_draw(&godowns, &mut remaining, line_items)?;
-        let vehicle_reg = self.select_free_vehicle(&mut conn, required_volume, customer)?;
+        let vehicle_reg = match hire_vendor {
+            Some(vendor_id) => {
+                self.check_hire_vendor(vendor_id)?;
+                None
+            }
+            None => Some(self.select_free_vehicle(&mut conn, required_volume, customer)?),
+        };
         let order_line_items = Self::draw_down_plans(&mut conn, plans)?;
 
+        let hire_id = hire_vendor.map(|_| Uuid::new_v4());
         let mut dispatch_order = DispatchOrder {
             id: Uuid::new_v4(),
             org_id: self.id,
             customer_id: customer.id,
             vehicle_registration_number: vehicle_reg,
+            vehicle_source: if hire_vendor.is_some() { VehicleSource::Hired } else { VehicleSource::Own },
+            hire_id,
             line_items: order_line_items,
-            status: DispatchStatus::Pending,
+            status: if hire_vendor.is_some() { DispatchStatus::AwaitingVehicle } else { DispatchStatus::Pending },
             dispatched_at: now_secs(),
             status_history: Vec::new(),
             proof_of_delivery: None,
@@ -226,7 +263,29 @@ impl Organization {
             stop_sequence: None,
         };
         dispatch_order.save()?;
+        if let (Some(hire_id), Some(vendor_id)) = (hire_id, hire_vendor) {
+            VehicleHire::insert_requested(
+                &mut conn,
+                hire_id,
+                self.id,
+                vendor_id,
+                Some(dispatch_order.id),
+                None,
+                required_volume,
+            )?;
+        }
         Ok(dispatch_order)
+    }
+
+    /// A hire must go to one of this org's own, active vendors.
+    fn check_hire_vendor(&self, vendor_id: Uuid) -> Result<(), Box<dyn Error>> {
+        match VehicleVendor::get_by_id(vendor_id)? {
+            Some(v) if v.org_id == self.id && v.is_active => Ok(()),
+            Some(v) if v.org_id == self.id => {
+                Err(format!("Vendor '{}' is inactive; reactivate it to hire from it", v.name).into())
+            }
+            _ => Err("Vendor not found in this organization".into()),
+        }
     }
 
     /// Send one vehicle on a **multi-stop trip**: several customers' orders,
@@ -250,6 +309,28 @@ impl Organization {
         &self,
         stops: &[(&Customer, &[DispatchLineItemInput])],
         optimize_route: bool,
+    ) -> Result<Trip, Box<dyn Error>> {
+        self.dispatch_trip(stops, optimize_route, None)
+    }
+
+    /// A multi-stop trip on one truck hired from `vendor_id`: planned and
+    /// drawn down like [`Self::dispatch_trip_to_customers`], but every stop
+    /// starts `AWAITING_VEHICLE` and a single `REQUESTED` [`VehicleHire`]
+    /// covers the whole trip. See [`Self::dispatch_stock_on_hired_vehicle`].
+    pub fn dispatch_trip_on_hired_vehicle(
+        &self,
+        stops: &[(&Customer, &[DispatchLineItemInput])],
+        optimize_route: bool,
+        vendor_id: Uuid,
+    ) -> Result<Trip, Box<dyn Error>> {
+        self.dispatch_trip(stops, optimize_route, Some(vendor_id))
+    }
+
+    fn dispatch_trip(
+        &self,
+        stops: &[(&Customer, &[DispatchLineItemInput])],
+        optimize_route: bool,
+        hire_vendor: Option<Uuid>,
     ) -> Result<Trip, Box<dyn Error>> {
         if stops.len() < 2 {
             return Err(
@@ -317,19 +398,31 @@ impl Organization {
             stop_plans.push((customer, plans));
         }
 
-        // One vehicle for the whole trip — nearest to the first stop.
-        let vehicle_reg = self.select_free_vehicle(&mut conn, trip_volume, stops[0].0)?;
+        // One vehicle for the whole trip — nearest to the first stop — unless
+        // the trip goes out on a hired truck, which is assigned later.
+        let vehicle_reg = match hire_vendor {
+            Some(vendor_id) => {
+                self.check_hire_vendor(vendor_id)?;
+                None
+            }
+            None => Some(self.select_free_vehicle(&mut conn, trip_volume, stops[0].0)?),
+        };
+        let source = if hire_vendor.is_some() { VehicleSource::Hired } else { VehicleSource::Own };
+        let hire_id = hire_vendor.map(|_| Uuid::new_v4());
 
         let now = now_secs();
         let trip_id = Uuid::new_v4();
+        Trip::ensure_table(&mut conn)?;
         conn.exec_drop(
-            "INSERT INTO Trips (id, org_id, vehicle_registration_number, created_at)
-             VALUES (:id, :org_id, :veh, :created_at)",
+            "INSERT INTO Trips (id, org_id, vehicle_registration_number, created_at, vehicle_source, hire_id)
+             VALUES (:id, :org_id, :veh, :created_at, :source, :hire_id)",
             params! {
                 "id" => trip_id.to_string(),
                 "org_id" => self.id.to_string(),
                 "veh" => &vehicle_reg,
                 "created_at" => now,
+                "source" => source.as_str(),
+                "hire_id" => hire_id.map(|h| h.to_string()),
             },
         )?;
 
@@ -341,8 +434,10 @@ impl Organization {
                 org_id: self.id,
                 customer_id: customer.id,
                 vehicle_registration_number: vehicle_reg.clone(),
+                vehicle_source: source,
+                hire_id,
                 line_items: order_line_items,
-                status: DispatchStatus::Pending,
+                status: if hire_vendor.is_some() { DispatchStatus::AwaitingVehicle } else { DispatchStatus::Pending },
                 dispatched_at: now,
                 status_history: Vec::new(),
                 proof_of_delivery: None,
@@ -353,11 +448,25 @@ impl Organization {
             trip_stops.push(order);
         }
 
+        if let (Some(hire_id), Some(vendor_id)) = (hire_id, hire_vendor) {
+            VehicleHire::insert_requested(
+                &mut conn,
+                hire_id,
+                self.id,
+                vendor_id,
+                None,
+                Some(trip_id),
+                trip_volume,
+            )?;
+        }
+
         let status = Trip::compute_status(&trip_stops);
         Ok(Trip {
             id: trip_id,
             org_id: self.id,
             vehicle_registration_number: vehicle_reg,
+            vehicle_source: source,
+            hire_id,
             created_at: now,
             status,
             stops: trip_stops,
@@ -535,6 +644,7 @@ impl Organization {
                AND NOT EXISTS (
                    SELECT 1 FROM Dispatches disp
                    WHERE disp.vehicle_registration_number = v.registration_number
+                     AND disp.vehicle_source = 'OWN'
                      AND disp.status NOT IN ('DELIVERED', 'RETURNED', 'CANCELLED')
                )",
             params! {
@@ -556,7 +666,9 @@ impl Organization {
                 params! { "org_id" => self.id.to_string() },
             )?;
             return Err(if any_vehicle.is_none() {
-                "No vehicles registered under this organization for dispatch".into()
+                "No vehicles registered under this organization for dispatch; \
+                 hire a truck from a vendor instead"
+                    .into()
             } else if with_active_driver.is_none() {
                 "No vehicle with an active assigned driver is available for dispatch; \
                  assign one via PUT /api/vehicles/{reg}/driver"
@@ -565,7 +677,8 @@ impl Organization {
                 format!(
                     "No vehicle is free and large enough for this shipment \
                      (needs capacity >= {required_volume}); every eligible vehicle is \
-                     either below capacity or already on an active trip"
+                     either below capacity or already on an active trip. \
+                     You can hire a truck from a vendor instead"
                 )
                 .into()
             });
@@ -881,7 +994,7 @@ mod tests {
 
         let dispatch_order = dispatch_res.unwrap();
         // Vehicle 2 (UP16 BZ 2222) in Noida is closest to Delhi customer vs Vehicle 1 in Mumbai
-        assert_eq!(dispatch_order.vehicle_registration_number, "UP16 BZ 2222");
+        assert_eq!(dispatch_order.vehicle_registration_number.as_deref(), Some("UP16 BZ 2222"));
         assert_eq!(dispatch_order.line_items.len(), 1);
         assert_eq!(dispatch_order.line_items[0].stock_description, "High-End Laptops");
         assert_eq!(dispatch_order.total_quantity(), 15);
@@ -1156,7 +1269,7 @@ mod tests {
         let order = org
             .dispatch_stock_to_customer(&customer, &[line("Ceramic Tiles", 10)])
             .expect("dispatch should succeed once an active driver is assigned");
-        assert_eq!(order.vehicle_registration_number, "MH12 ZZ 9999");
+        assert_eq!(order.vehicle_registration_number.as_deref(), Some("MH12 ZZ 9999"));
     }
 
     #[test]
@@ -1196,7 +1309,7 @@ mod tests {
         let order = org
             .dispatch_stock_to_customer(&customer, &[line("Marble Slabs", 5)])
             .expect("should succeed with a big-enough vehicle");
-        assert_eq!(order.vehicle_registration_number, "MH31 BG 0002");
+        assert_eq!(order.vehicle_registration_number.as_deref(), Some("MH31 BG 0002"));
     }
 
     #[test]

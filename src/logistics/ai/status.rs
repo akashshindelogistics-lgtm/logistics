@@ -63,7 +63,7 @@ fn build_prompt(dispatch: &DispatchOrder, customer: &Customer) -> String {
         Delivery address: {customer_addr}\n\
         Customer GPS: {customer_loc}",
         id = &dispatch.id.to_string()[..8],
-        vehicle = dispatch.vehicle_registration_number,
+        vehicle = dispatch.vehicle_label(),
         stock = stock_lines,
         status = dispatch.status,
         when = dispatched_when,
@@ -136,7 +136,9 @@ mod tests {
             id: Uuid::new_v4(),
             org_id: Uuid::new_v4(),
             customer_id: Uuid::new_v4(),
-            vehicle_registration_number: "MH12AB1234".to_string(),
+            vehicle_registration_number: Some("MH12AB1234".to_string()),
+            vehicle_source: Default::default(),
+            hire_id: None,
             line_items: vec![DispatchLineItem {
                 stock_description: "Cement".to_string(),
                 quantity: 10,
@@ -176,7 +178,7 @@ mod tests {
 
         let prompt = build_prompt(&dispatch, &customer);
 
-        assert!(prompt.contains(&dispatch.vehicle_registration_number));
+        assert!(prompt.contains(dispatch.vehicle_registration_number.as_deref().unwrap()));
         assert!(prompt.contains("Cement (10 units)"));
         assert!(prompt.contains("IN_TRANSIT"));
         assert!(prompt.contains("Priya Sharma"));

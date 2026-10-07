@@ -12,9 +12,18 @@ export interface TripStopInput {
  * nearest-neighbour geography (the first stop always stays fixed as the
  * route's starting point).
  */
-export const createTrip = (orgId: string, stops: TripStopInput[], optimizeRoute = false) =>
+export const createTrip = (
+  orgId: string,
+  stops: TripStopInput[],
+  optimizeRoute = false,
+  hireVendorId?: string,
+) =>
   api
-    .post<ApiResponse<Trip>>(`/orgs/${orgId}/trips`, { stops, optimize_route: optimizeRoute })
+    .post<ApiResponse<Trip>>(`/orgs/${orgId}/trips`, {
+      stops,
+      optimize_route: optimizeRoute,
+      ...(hireVendorId ? { vehicle_source: 'HIRED', vendor_id: hireVendorId } : {}),
+    })
     .then(r => r.data);
 
 export const listOrgTrips = (orgId: string) =>

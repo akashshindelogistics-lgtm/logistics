@@ -33,6 +33,7 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
   const vehicleReg = `MH12DM${uid().toUpperCase()}`;
   const driverName = `Ramesh Kulkarni ${uid()}`;
   const custName = `Sunrise Traders ${uid()}`;
+  const vendorName = `Sharma Roadlines ${uid()}`;
 
   const org = await test.step('Register a new organization', async () => {
     const created = await registerOrg(page, orgName);
@@ -177,6 +178,18 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await page.goto('/vehicles');
     const row = page.getByRole('row', { name: new RegExp(vehicleReg) });
     await expect(row.getByText('18.52040')).toBeVisible({ timeout: 8000 });
+  });
+
+  await test.step('Add a vehicle vendor to call when the fleet is fully booked', async () => {
+    await page.getByRole('link', { name: 'Vendors' }).click();
+    await expect(page).toHaveURL(/\/vendors$/);
+    await page.getByRole('button', { name: /add vendor/i }).click();
+    await page.getByLabel('Vendor name').fill(vendorName);
+    await page.getByLabel('Contact person').fill('Anil Sharma');
+    await page.getByLabel('Phone').fill('+91 98200 11111');
+    await page.getByLabel('GSTIN').fill('27AAPFU0939F1ZV');
+    await page.getByRole('button', { name: /^add vendor$/i }).click();
+    await expect(page.getByRole('row', { name: new RegExp(vendorName) })).toBeVisible({ timeout: 8000 });
   });
 
   await test.step('Create a customer with a delivery location', async () => {
@@ -341,6 +354,43 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     // The 20 returned units are back in the godown: 40 + 20 = 60.
     await page.goto(`/orgs/${org.id}`);
     await expect(page.getByTestId('godown-card').filter({ hasText: stockC }).getByText('60')).toBeVisible({ timeout: 8000 });
+  });
+
+  await test.step('Send a shipment on a truck hired from the vendor', async () => {
+    await page.goto(`/orgs/${org.id}`);
+    await page.getByLabel('Vehicle source').selectOption('HIRED');
+    await page.getByLabel('Vendor', { exact: true }).selectOption({ label: `${vendorName} · +91 98200 11111` });
+    await page.getByLabel('Customer').selectOption({ label: custName });
+    await page.getByLabel('Stock Description').fill(stockA);
+    await page.getByLabel('Quantity', { exact: true }).fill('1');
+    await page.getByRole('button', { name: /reserve & request truck/i }).click();
+    // Wait for whichever outcome message the form shows, so a failure reports its text.
+    const outcome = page.getByText(/stock reserved|dispatch failed|pick the vendor/i);
+    await expect(outcome).toBeVisible({ timeout: 10000 });
+    await expect(outcome).toHaveText(/stock reserved/i);
+
+    await page.goto('/dispatches');
+    const row = page.locator('tbody tr').filter({ hasText: 'Awaiting vehicle' }).first();
+    await expect(row.getByText(new RegExp(`Hired · ${vendorName}`))).toBeVisible({ timeout: 8000 });
+    await row.getByRole('button', { name: 'Assign truck' }).click();
+    await page.getByLabel('Truck number').fill(`MH14HR${uid().toUpperCase()}`);
+    await page.getByLabel('Capacity').fill('20');
+    await page.getByLabel('Driver name').fill('Suresh Patil');
+    await page.getByLabel('Driver phone').fill('+91 97000 12345');
+    await page.getByLabel('Hire cost').fill('9000');
+    await page.getByLabel('Advance paid').fill('7000');
+    await page.getByRole('button', { name: /save truck/i }).click();
+    await expect(page.getByText('Awaiting vehicle')).toHaveCount(0, { timeout: 8000 });
+  });
+
+  await test.step('Pay the vendor the balance on the hired truck', async () => {
+    await page.goto('/vendors');
+    const hireRow = page.getByTestId('hire-row').filter({ hasText: vendorName });
+    await hireRow.getByRole('button', { name: /record payment/i }).click();
+    await expect(page.getByLabel('Amount')).toHaveValue('2000');
+    await page.getByLabel('Note').fill('balance on delivery');
+    await page.getByRole('button', { name: /save payment/i }).click();
+    await expect(hireRow.getByText('Paid', { exact: true })).toBeVisible({ timeout: 8000 });
   });
 
   await test.step('Edit the vehicle, driver and godown from their detail pages', async () => {

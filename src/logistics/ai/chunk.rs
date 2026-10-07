@@ -282,7 +282,7 @@ pub fn dispatch_narrative_text(d: &DispatchOrder, customer: &Customer) -> String
         customer.name,
         customer.address,
         items,
-        d.vehicle_registration_number,
+        d.vehicle_label(),
         d.status,
         history,
         pod_part
@@ -624,7 +624,9 @@ mod tests {
             id: Uuid::new_v4(),
             org_id: Uuid::new_v4(),
             customer_id: Uuid::new_v4(),
-            vehicle_registration_number: "MH12AB1234".to_string(),
+            vehicle_registration_number: Some("MH12AB1234".to_string()),
+            vehicle_source: Default::default(),
+            hire_id: None,
             line_items: vec![DispatchLineItem {
                 stock_description: "Cement".to_string(),
                 quantity: 10,

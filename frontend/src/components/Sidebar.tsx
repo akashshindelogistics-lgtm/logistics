@@ -8,6 +8,7 @@ const baseLinks = [
   { to: '/',           label: 'Dashboard',      Icon: IconGrid },
   { to: '/orgs',       label: 'My Organization', Icon: IconBuilding },
   { to: '/vehicles',   label: 'Vehicles',        Icon: IconTruck },
+  { to: '/vendors',    label: 'Vendors',         Icon: IconTruck },
   { to: '/customers',  label: 'Customers',       Icon: IconUsers },
   { to: '/dispatches', label: 'Dispatches',      Icon: IconDispatch },
   { to: '/trips',      label: 'Trips',           Icon: IconDispatch },

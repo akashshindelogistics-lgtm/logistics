@@ -70,4 +70,15 @@ describe('orgs api client', () => {
       ],
     });
   });
+
+  it('dispatchStock asks for a hired vehicle when a vendor is given', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({}));
+    await dispatchStock('o1', 'cust-9', [{ stockDescription: 'Cement', requestedQuantity: 5 }], 'vend-1');
+    expect(api.post).toHaveBeenCalledWith('/orgs/o1/dispatch', {
+      customer_id: 'cust-9',
+      line_items: [{ stock_description: 'Cement', requested_quantity: 5 }],
+      vehicle_source: 'HIRED',
+      vendor_id: 'vend-1',
+    });
+  });
 });
