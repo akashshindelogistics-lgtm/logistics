@@ -6,11 +6,13 @@ import Trips from './Trips';
 import * as tripsApi from '../api/trips';
 import * as customersApi from '../api/customers';
 import * as vehiclesApi from '../api/vehicles';
+import * as vendorsApi from '../api/vendors';
 import type { Trip } from '../types';
 
 vi.mock('../api/trips');
 vi.mock('../api/customers');
 vi.mock('../api/vehicles');
+vi.mock('../api/vendors');
 vi.mock('../api/auth', () => ({ getOrgId: () => 'org1' }));
 vi.mock('../components/LocationMap', () => ({
   default: ({ pins }: { pins: unknown[] }) => <div data-testid="map">{pins.length} pins</div>,
@@ -46,6 +48,7 @@ describe('Trips page', () => {
     vi.resetAllMocks();
     vi.mocked(customersApi.listCustomers).mockResolvedValue(ok(customers) as never);
     vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(ok([]));
+    vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([]));
   });
 
   it('shows an empty state when there are no trips', async () => {
@@ -100,7 +103,7 @@ describe('Trips page', () => {
     expect(tripsApi.createTrip).toHaveBeenCalledWith('org1', [
       { customer_id: 'c1', line_items: [{ stock_description: 'Cement', requested_quantity: 10 }] },
       { customer_id: 'c2', line_items: [{ stock_description: 'Cement', requested_quantity: 5 }] },
-    ], false);
+    ], false, undefined);
     await waitFor(() => expect(screen.getByText('MH12 AB 1234')).toBeInTheDocument());
   });
 
@@ -124,7 +127,7 @@ describe('Trips page', () => {
     expect(tripsApi.createTrip).toHaveBeenCalledWith('org1', [
       { customer_id: 'c1', line_items: [{ stock_description: 'Cement', requested_quantity: 10 }] },
       { customer_id: 'c2', line_items: [{ stock_description: 'Cement', requested_quantity: 5 }] },
-    ], true);
+    ], true, undefined);
   });
 
   it('shows a route map with the vehicle and every located stop when toggled on', async () => {
@@ -164,5 +167,37 @@ describe('Trips page', () => {
     await user.click(screen.getByRole('button', { name: /route map/i }));
     expect(screen.getByText(/no location data yet/i)).toBeInTheDocument();
     expect(screen.queryByTestId('map')).not.toBeInTheDocument();
+  });
+
+  it('plans a trip on a truck hired from a vendor', async () => {
+    const user = userEvent.setup();
+    vi.mocked(vendorsApi.listVendors).mockResolvedValue(ok([
+      { id: 'v1', org_id: 'org1', name: 'Sharma Roadlines', contact_person: null, phone: '1', gstin: null, notes: null, is_active: true },
+    ]));
+    vi.mocked(tripsApi.listOrgTrips).mockResolvedValue(ok([]));
+    vi.mocked(tripsApi.createTrip).mockResolvedValue(ok(trip()));
+    render(<Trips />, { wrapper: MemoryRouter });
+    await screen.findByText(/no trips yet/i);
+
+    await user.click(screen.getByRole('button', { name: /plan a trip/i }));
+    await user.selectOptions(screen.getByLabelText(/stop 1 — customer/i), 'c1');
+    await user.type(screen.getAllByLabelText(/stock item/i)[0], 'Cement');
+    await user.type(screen.getAllByLabelText(/quantity/i)[0], '10');
+    await user.selectOptions(screen.getByLabelText(/stop 2 — customer/i), 'c2');
+    await user.type(screen.getAllByLabelText(/stock item/i)[1], 'Cement');
+    await user.type(screen.getAllByLabelText(/quantity/i)[1], '5');
+    await user.selectOptions(screen.getByLabelText('Vehicle source'), 'v1');
+    await user.click(screen.getByRole('button', { name: /^plan trip$/i }));
+
+    expect(tripsApi.createTrip).toHaveBeenCalledWith('org1', expect.any(Array), false, 'v1');
+  });
+
+  it('shows a hired trip that is still waiting for its truck', async () => {
+    vi.mocked(tripsApi.listOrgTrips).mockResolvedValue(ok([
+      trip({ vehicle_registration_number: null, vehicle_source: 'HIRED', hire_id: 'h1' }),
+    ]));
+    render(<Trips />, { wrapper: MemoryRouter });
+    expect(await screen.findByText('Awaiting hired vehicle')).toBeInTheDocument();
+    expect(screen.getByText('Hired')).toBeInTheDocument();
   });
 });

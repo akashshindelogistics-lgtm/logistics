@@ -60,3 +60,36 @@ export async function clearAuth(page: Page) {
     localStorage.removeItem('logi_org_name');
   });
 }
+
+/**
+ * Over the API: a fleetless org with stock, a customer and a vendor, one
+ * dispatch on a hired truck assigned at 9,000 with a 6,000 advance, and a
+ * 12,500 invoice on it. Returns the vendor's name.
+ */
+export async function seedPaidHire(page: Page, org: TestOrg): Promise<string> {
+  const token = await page.evaluate(() => localStorage.getItem('logi_token'));
+  const headers = { Authorization: `Bearer ${token}` };
+  const post = async (url: string, data: object) => (await page.request.post(url, { data, headers })).json();
+  const put = async (url: string, data: object) => (await page.request.put(url, { data, headers })).json();
+
+  const vendorName = `Sharma Roadlines ${uid()}`;
+  const godown = await post(`/api/orgs/${org.id}/godowns`, { name: 'Central Warehouse', address: 'MIDC' });
+  await post(`/api/godowns/${godown.data.id}/stock`, { description: 'Cement Bags', quantity: 100, volume_in_size: 1 });
+  const customer = await post(`/api/orgs/${org.id}/customers`, { name: `Buyer ${uid()}`, address: 'Baner' });
+  const vendor = await post(`/api/orgs/${org.id}/vendors`, { name: vendorName, phone: '+91 98200 11111' });
+  const dispatch = await post(`/api/orgs/${org.id}/dispatch`, {
+    customer_id: customer.data.id,
+    line_items: [{ stock_description: 'Cement Bags', requested_quantity: 10 }],
+    vehicle_source: 'HIRED',
+    vendor_id: vendor.data.id,
+  });
+  const assigned = await put(`/api/vehicle-hires/${dispatch.data.hire_id}/assign`, {
+    registration_number: 'MH12 HR 7788', capacity: 20, driver_name: 'Suresh Patil',
+    driver_phone: '+91 97000 12345', freight_amount: 9000, advance_paid: 6000,
+  });
+  expect(assigned.success).toBeTruthy();
+  const due = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const invoice = await post(`/api/dispatches/${dispatch.data.id}/invoice`, { amount: 12500, due_on: due });
+  expect(invoice.success).toBeTruthy();
+  return vendorName;
+}

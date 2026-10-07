@@ -188,7 +188,8 @@ tbody tr:hover td { background: var(--row-hover); }
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   padding: 9px 12px;
   border: 1.5px solid var(--border);
@@ -201,7 +202,8 @@ tbody tr:hover td { background: var(--row-hover); }
 }
 
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 3px var(--brand-glow);
 }
@@ -222,8 +224,8 @@ tbody tr:hover td { background: var(--row-hover); }
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
-  color: #fff;
+  background: var(--brand);
+  color: var(--on-brand);
   box-shadow: 0 2px 8px var(--brand-glow);
 }
 
@@ -417,8 +419,8 @@ tbody tr:hover td { background: var(--row-hover); }
 
 /* ── AI button ── */
 .btn-ai {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  color: #fff;
+  background: var(--brand);
+  color: var(--on-brand);
   border: none;
   border-radius: 6px;
   padding: 5px 10px;
@@ -434,8 +436,8 @@ tbody tr:hover td { background: var(--row-hover); }
 
 /* ── AI summary card ── */
 .ai-summary-card {
-  background: color-mix(in srgb, #6366f1 6%, var(--surface));
-  border: 1px solid color-mix(in srgb, #6366f1 20%, var(--border));
+  background: color-mix(in srgb, var(--text-1) 6%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--text-1) 20%, var(--border));
   border-radius: 8px;
   padding: 12px 16px;
   margin-top: 2px;
@@ -460,7 +462,7 @@ tbody tr:hover td { background: var(--row-hover); }
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #8b5cf6;
+  background: var(--text-1);
   display: inline-block;
   animation: ai-pulse 1.2s ease-in-out infinite;
   flex-shrink: 0;

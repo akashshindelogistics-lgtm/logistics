@@ -1,6 +1,6 @@
 /* Global floating "ask your data" assistant — reuses the .btn-ai /
    .ai-summary-card / .ai-summary-text / .ai-summary-loading / .ai-pulse
-   indigo/violet AI visual language from page.css rather than inventing a
+   monochrome AI visual language from page.css rather than inventing a
    new one. */
 
 .assistant-widget {
@@ -19,16 +19,16 @@
   height: 52px;
   border-radius: 50%;
   border: none;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  color: #fff;
+  background: var(--brand);
+  color: var(--on-brand);
   font-size: 20px;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   transition: transform 0.15s, box-shadow 0.15s;
 }
 .assistant-launcher:hover {
   transform: scale(1.05);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 }
 
 .assistant-panel {
@@ -37,7 +37,7 @@
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid color-mix(in srgb, #6366f1 20%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--text-1) 20%, var(--border));
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   overflow: hidden;
@@ -48,8 +48,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  color: #fff;
+  background: var(--brand);
+  color: var(--on-brand);
   font-weight: 600;
   font-size: 13.5px;
 }
@@ -57,7 +57,7 @@
 .assistant-close {
   background: none;
   border: none;
-  color: #fff;
+  color: var(--on-brand);
   cursor: pointer;
   font-size: 14px;
   opacity: 0.85;
@@ -87,8 +87,8 @@
 }
 
 .assistant-suggestion {
-  background: color-mix(in srgb, #6366f1 8%, var(--surface));
-  border: 1px solid color-mix(in srgb, #6366f1 25%, var(--border));
+  background: color-mix(in srgb, var(--text-1) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--text-1) 25%, var(--border));
   color: var(--text-1);
   border-radius: 999px;
   padding: 6px 12px;
@@ -96,7 +96,7 @@
   cursor: pointer;
 }
 .assistant-suggestion:hover {
-  background: color-mix(in srgb, #6366f1 14%, var(--surface));
+  background: color-mix(in srgb, var(--text-1) 14%, var(--surface));
 }
 .assistant-suggestion:disabled {
   cursor: default;

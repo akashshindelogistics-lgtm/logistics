@@ -7,7 +7,7 @@
 /* ── Left panel ── */
 .login-left {
   flex: 1;
-  background: linear-gradient(145deg, #0f172a 0%, #1e1b4b 60%, #312e81 100%);
+  background: #0a0a0a;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -24,12 +24,12 @@
   width: 64px;
   height: 64px;
   border-radius: 18px;
-  background: linear-gradient(135deg, #6366f1, #818cf8);
+  background: #fafafa; color: #0a0a0a;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 20px;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.45);
+  box-shadow: 0 8px 24px rgba(255, 255, 255, 0.12);
 }
 
 .login-brand h1 {
@@ -193,8 +193,8 @@
 .login-btn {
   width: 100%;
   padding: 12px;
-  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
-  color: #fff;
+  background: var(--brand);
+  color: var(--on-brand);
   border: none;
   border-radius: 8px;
   font-size: 14px;
