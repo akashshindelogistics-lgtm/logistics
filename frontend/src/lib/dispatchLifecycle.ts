@@ -1,6 +1,7 @@
 import type { DispatchOrder, DispatchStatus } from '../types';
 
 export const STATUS_TAG_CLASS: Record<DispatchStatus, string> = {
+  AWAITING_VEHICLE: 'tag-amber',
   PENDING: 'tag-amber',
   CONFIRMED: 'tag-blue',
   LOADED: 'tag-blue',
@@ -25,7 +26,12 @@ export interface NextAction {
 // sync if the backend state machine changes; the backend is still the one
 // that enforces this (a stale frontend map only means a wrong/missing
 // button, never an illegal transition actually going through).
+// AWAITING_VEHICLE -> PENDING isn't a status change: it happens when the
+// hired truck is assigned (the Dispatches page's "Assign hired vehicle" form).
 export const NEXT_ACTIONS: Partial<Record<DispatchStatus, NextAction[]>> = {
+  AWAITING_VEHICLE: [
+    { status: 'CANCELLED', label: 'Cancel', variant: 'danger' },
+  ],
   PENDING: [
     { status: 'CONFIRMED', label: 'Confirm', variant: 'primary' },
     { status: 'CANCELLED', label: 'Cancel', variant: 'danger' },
@@ -45,7 +51,7 @@ export const NEXT_ACTIONS: Partial<Record<DispatchStatus, NextAction[]>> = {
 };
 
 export function formatStatus(status: DispatchStatus): string {
-  return status.replace('_', ' ');
+  return status.replaceAll('_', ' ');
 }
 
 // Matches PROMISED_DELIVERY_HOURS in src/logistics/dispatch/dispatch.rs — a

@@ -14,6 +14,7 @@ pub mod stock;
 pub mod upload;
 pub mod user;
 pub mod vehicle;
+pub mod vendor;
 
 #[cfg(test)]
 pub mod test_support;

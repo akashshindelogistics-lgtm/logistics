@@ -235,3 +235,78 @@ fn units_dispatched_recently_ignores_old_dispatches() {
     let r = OpsReport::for_org(fx.org.id).expect("report");
     assert_eq!(r.units_dispatched_recently, 30);
 }
+
+
+#[test]
+fn hired_transport_reports_share_vendor_spend_and_margin() {
+    use crate::logistics::billing::invoice::Invoice;
+    use crate::logistics::vendor::hire::{HireAssignment, VehicleHire};
+    use crate::logistics::vendor::vendor::{VehicleVendor, VendorInput};
+
+    let _db = TestDb::create();
+    let fx = seed("Hired Report Co", 1);
+    let vendor = VehicleVendor::create(
+        fx.org.id,
+        VendorInput { name: "Sharma Roadlines".into(), phone: "1".into(), ..Default::default() },
+    )
+    .expect("vendor");
+
+    // Two own-fleet dispatches, one of them cancelled (doesn't count).
+    let own = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("own");
+    let mut cancelled = own.clone();
+    cancelled.transition_to(DispatchStatus::Cancelled, None, None).expect("cancel");
+    fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("own 2");
+
+    // One hired dispatch with a truck at 9,000 (6,000 advance), invoiced 12,500;
+    // one still waiting for its truck.
+    let hired = fx
+        .org
+        .dispatch_stock_on_hired_vehicle(&fx.customer, &[line(5)], vendor.id)
+        .expect("hired");
+    let mut hire = VehicleHire::get_by_id(hired.hire_id.unwrap()).unwrap().unwrap();
+    hire.assign(HireAssignment {
+        registration_number: "MH12 REP 1".into(),
+        capacity: 10,
+        unit: Unit::MetricTon,
+        driver_name: "D".into(),
+        driver_phone: "1".into(),
+        driver_license: None,
+        freight_amount: 9_000,
+        advance_paid: 6_000,
+    })
+    .expect("assign");
+    Invoice::create(fx.org.id, hired.id, fx.customer.id, 12_500, "2030-01-01").expect("invoice");
+    fx.org
+        .dispatch_stock_on_hired_vehicle(&fx.customer, &[line(1)], vendor.id)
+        .expect("awaiting");
+
+    let h = OpsReport::for_org(fx.org.id).expect("report").hired_transport;
+    assert_eq!(h.own_dispatches, 1);
+    assert_eq!(h.hired_dispatches, 2);
+    assert_eq!(h.hired_share_percent, Some(66.7));
+    assert_eq!(h.awaiting_truck, 1);
+    assert_eq!(h.hire_cost_total, 9_000);
+    assert_eq!(h.paid_to_vendors, 6_000);
+    assert_eq!(h.outstanding_to_vendors, 3_000);
+
+    assert_eq!(h.vendors.len(), 1);
+    assert_eq!(h.vendors[0].vendor_name, "Sharma Roadlines");
+    assert_eq!((h.vendors[0].hires, h.vendors[0].outstanding), (1, 3_000));
+
+    assert_eq!(h.hire_margins.len(), 1, "the awaiting hire has no cost yet");
+    let m = &h.hire_margins[0];
+    assert_eq!(m.registration_number.as_deref(), Some("MH12 REP 1"));
+    assert_eq!((m.dispatches, m.invoiced_dispatches), (1, 1));
+    assert_eq!((m.invoiced, m.hire_cost, m.margin), (12_500, 9_000, 3_500));
+}
+
+#[test]
+fn hired_transport_is_empty_without_hires() {
+    let _db = TestDb::create();
+    let fx = seed("Own Only Co", 1);
+    fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("own");
+    let h = OpsReport::for_org(fx.org.id).expect("report").hired_transport;
+    assert_eq!((h.own_dispatches, h.hired_dispatches), (1, 0));
+    assert_eq!(h.hired_share_percent, Some(0.0));
+    assert!(h.vendors.is_empty() && h.hire_margins.is_empty());
+}

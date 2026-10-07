@@ -104,4 +104,42 @@ describe('Reports page', () => {
 
     expect(await screen.findByText(/ensure anthropic_api_key is set on the server/i)).toBeInTheDocument();
   });
+
+  it('says so when nothing has gone out on hired trucks', async () => {
+    vi.mocked(reportsApi.getOpsReport).mockResolvedValue(ok(report({
+      hired_transport: {
+        own_dispatches: 3, hired_dispatches: 0, hired_share_percent: 0, hire_cost_total: 0,
+        paid_to_vendors: 0, outstanding_to_vendors: 0, awaiting_truck: 0, vendors: [], hire_margins: [],
+      },
+    })));
+    render(<Reports />);
+    expect(await screen.findByText(/no dispatches have gone out on hired trucks/i)).toBeInTheDocument();
+  });
+
+  it('shows hired share, vendor spend and margin per hire', async () => {
+    vi.mocked(reportsApi.getOpsReport).mockResolvedValue(ok(report({
+      hired_transport: {
+        own_dispatches: 1, hired_dispatches: 2, hired_share_percent: 66.7, hire_cost_total: 9000,
+        paid_to_vendors: 6000, outstanding_to_vendors: 3000, awaiting_truck: 1,
+        vendors: [{ vendor_id: 'v1', vendor_name: 'Sharma Roadlines', hires: 1, hire_cost: 9000, paid: 6000, outstanding: 3000 }],
+        hire_margins: [
+          { hire_id: 'h1', vendor_name: 'Sharma Roadlines', registration_number: 'MH12 HR 1', trip_id: null,
+            dispatches: 1, invoiced_dispatches: 1, invoiced: 12500, hire_cost: 9000, margin: 3500 },
+          { hire_id: 'h2', vendor_name: 'Sharma Roadlines', registration_number: 'MH12 HR 2', trip_id: 't1',
+            dispatches: 2, invoiced_dispatches: 1, invoiced: 4000, hire_cost: 7000, margin: -3000 },
+        ],
+      },
+    })));
+    render(<Reports />);
+
+    const section = await screen.findByTestId('hired-transport');
+    expect(section).toHaveTextContent('2 of 3 dispatches on hired trucks (66.7%)');
+    expect(section).toHaveTextContent('1 awaiting a truck');
+    expect(within(section).getByTestId('owed-to-vendors')).toHaveTextContent('3,000');
+    const rows = within(section).getAllByTestId('hire-margin-row');
+    expect(rows[0]).toHaveTextContent('3,500');
+    expect(rows[1]).toHaveTextContent('Trip');
+    expect(rows[1]).toHaveTextContent('(1/2 invoiced)');
+    expect(rows[1]).toHaveTextContent('-3,000');
+  });
 });
