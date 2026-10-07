@@ -4,6 +4,13 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.10.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.9.0...v0.10.0) (2026-10-07)
+
+
+### Features
+
+* **mobile:** Expo driver location app (phase 4) ([2369a71](https://github.com/akashshindelogistics-lgtm/logistics/commit/2369a71c110b574eefe015c9194a1ae745d3569b))
+
 ## [0.9.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.8.0...v0.9.0) (2026-10-07)
 
 
