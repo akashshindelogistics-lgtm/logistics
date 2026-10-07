@@ -36,6 +36,16 @@ operations, live location maps, and AI-generated dispatch summaries.
   organization and assign one to a vehicle from the dashboard. A vehicle
   needs an **active** assigned driver, spare capacity, and no trip already
   in progress before it can be selected for a dispatch.
+- **Vehicle vendors and hired trucks** — keep a directory of the transporters
+  and brokers an organization phones to hire a truck when it has none of its
+  own free (name, contact, phone, GSTIN, notes, active flag). A dispatch or
+  multi-stop trip can go out on a hired truck: the stock is reserved and the
+  dispatch waits as `AWAITING_VEHICLE` until the dispatcher enters the truck,
+  driver and agreed rate the vendor confirms; from then on it runs like any
+  other dispatch. Payments to the vendor (advance, then the balance) are
+  tracked per hire, and the Reports page shows hired share, spend and what's
+  owed per vendor, and the margin each hire made. See
+  [`docs/vehicle-vendors.md`](docs/vehicle-vendors.md).
 - **Stock** — add, update, and remove stock items held in an organization's
   godowns, and transfer a stock item between two godowns with a recorded
   audit trail of every move. Each stock item carries a free-text, org-defined
@@ -48,7 +58,8 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Dispatches** — create dispatch orders that move one or more stock line
   items from an organization to a customer, and advance each one through a
   lifecycle (`PENDING → CONFIRMED → LOADED → IN_TRANSIT → DELIVERED`/
-  `RETURNED`/`CANCELLED`) with a full timestamped status history. Marking one
+  `RETURNED`/`CANCELLED`, starting at `AWAITING_VEHICLE` on a hired truck)
+  with a full timestamped status history. Marking one
   `DELIVERED` requires proof of delivery (receiver name plus a
   signature/photo, uploaded and stored by the backend — see
   [`docs/file-uploads.md`](docs/file-uploads.md)); marking one `RETURNED`
@@ -221,6 +232,12 @@ npm run test:e2e:demo:reports        # operations reporting
 npm run test:e2e:demo:roles          # role-scoped team members
 npm run test:e2e:demo:notifications  # dispatch notifications
 npm run test:e2e:demo:trips          # multi-stop trips
+npm run test:e2e:demo:assistant      # "ask your data" assistant
+npm run test:e2e:demo:uploads        # proof-of-delivery file uploads
+npm run test:e2e:demo:stock-categories # stock categories
+npm run test:e2e:demo:vendors        # vehicle vendors
+npm run test:e2e:demo:hired-vehicles # dispatching on a hired truck
+npm run test:e2e:demo:vendor-payments # paying vendors + hired-transport report
 ```
 
 ## API overview
@@ -257,6 +274,11 @@ All routes are served under the `/api` prefix.
 | PUT | `/api/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
 | GET/POST | `/api/drivers`, `/api/orgs/{id}/drivers` | List / add drivers |
 | PUT/DELETE | `/api/drivers/{id}` | Update (incl. active flag) or remove a driver |
+| GET/POST | `/api/orgs/{id}/vendors` | List / add vehicle vendors (transporters the org hires trucks from) |
+| PUT/DELETE | `/api/vendors/{id}` | Update (incl. active flag) or remove a vehicle vendor (409 once it has hire history) |
+| GET | `/api/orgs/{id}/vehicle-hires` | The org's hired trucks, newest first (optional `?status=`) |
+| PUT | `/api/vehicle-hires/{id}/assign` | Enter the vendor's truck, driver and rate; the waiting dispatches move to `PENDING` |
+| POST/GET | `/api/vehicle-hires/{id}/payments` | Pay a vendor against a hire (no more than the balance owed) / list the payments |
 | GET/POST | `/api/vehicles/{reg}/documents` | List / record a vehicle's compliance paperwork (insurance, RC, permit, PUC, fitness) |
 | PUT/DELETE | `/api/vehicle-documents/{id}` | Renew (update) or delete a compliance document |
 | GET | `/api/orgs/{id}/vehicle-documents` | Whole-fleet compliance list, soonest expiry first |
@@ -266,8 +288,8 @@ All routes are served under the `/api` prefix.
 | GET | `/api/orgs/{id}/vehicle-maintenance` | Whole-fleet maintenance list, soonest date-based due date first |
 | GET/POST | `/api/customers`, `/api/orgs/{id}/customers` | List the org's customers / add one (optionally with an initial `latitude`/`longitude`) |
 | PUT/DELETE | `/api/customers/{id}/location`, `/api/customers/{id}` | Update a customer's location / delete the customer |
-| POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to one of its customers |
-| POST/GET | `/api/orgs/{id}/trips` | Plan a multi-stop trip (one vehicle, several customers) / list the org's trips |
+| POST | `/api/orgs/{id}/dispatch` | Dispatch stock from an org to one of its customers (`vehicle_source: HIRED` + `vendor_id` to hire the truck) |
+| POST/GET | `/api/orgs/{id}/trips` | Plan a multi-stop trip (one vehicle, several customers; can also be hired) / list the org's trips |
 | GET | `/api/trips/{id}` | One multi-stop trip and its ordered stops |
 | GET | `/api/dispatches` | List dispatch orders |
 | PUT | `/api/dispatches/{id}/status` | Advance a dispatch's lifecycle status |

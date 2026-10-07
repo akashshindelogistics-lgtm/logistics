@@ -233,6 +233,7 @@ mod tests {
             units_dispatched_recently: 340,
             godown_inventory: Vec::new(),
             dispatch_volume: Vec::new(),
+            hired_transport: Default::default(),
         }
     }
 

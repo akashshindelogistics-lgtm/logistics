@@ -54,15 +54,52 @@ fn ensure_dispatches_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn E
             id VARCHAR(36) PRIMARY KEY,
             org_id VARCHAR(36) NOT NULL,
             customer_id VARCHAR(36) NOT NULL,
-            vehicle_registration_number VARCHAR(255) NOT NULL,
+            vehicle_registration_number VARCHAR(255) DEFAULT NULL,
             status VARCHAR(50) NOT NULL,
             dispatched_at BIGINT NOT NULL,
             trip_id VARCHAR(36) DEFAULT NULL,
-            stop_sequence BIGINT DEFAULT NULL
+            stop_sequence BIGINT DEFAULT NULL,
+            vehicle_source VARCHAR(10) NOT NULL DEFAULT 'OWN',
+            hire_id VARCHAR(36) DEFAULT NULL
         )",
         (),
     )?;
     ensure_trip_columns(conn)?;
+    ensure_hire_columns(conn)?;
+    Ok(())
+}
+
+/// Bring a `Dispatches` table from before hired vehicles up to date: add
+/// `vehicle_source` / `hire_id`, and make `vehicle_registration_number`
+/// nullable (a hired dispatch has no truck until the vendor's is assigned).
+/// Fresh databases get all of this in `CREATE TABLE`. See
+/// `docs/vehicle-vendors.md`.
+pub(crate) fn ensure_hire_columns(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    for (col, ddl) in [
+        ("vehicle_source", "VARCHAR(10) NOT NULL DEFAULT 'OWN'"),
+        ("hire_id", "VARCHAR(36) DEFAULT NULL"),
+    ] {
+        let present: Option<i64> = conn.exec_first(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'Dispatches'
+               AND column_name = :col",
+            params! { "col" => col },
+        )?;
+        if present.is_none() {
+            conn.query_drop(format!("ALTER TABLE Dispatches ADD COLUMN {col} {ddl}"))?;
+        }
+    }
+    let reg_not_null: Option<i64> = conn.exec_first(
+        "SELECT 1 FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'Dispatches'
+           AND column_name = 'vehicle_registration_number' AND is_nullable = 'NO'",
+        (),
+    )?;
+    if reg_not_null.is_some() {
+        conn.query_drop(
+            "ALTER TABLE Dispatches MODIFY vehicle_registration_number VARCHAR(255) DEFAULT NULL",
+        )?;
+    }
     Ok(())
 }
 
@@ -169,6 +206,11 @@ pub fn ensure_tables(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>>
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DispatchStatus {
+    /// A dispatch on a **hired** vehicle: stock is reserved and a vendor has
+    /// been asked for a truck, but no truck is assigned yet. Moves to
+    /// `PENDING` only through `VehicleHire::assign` (never through
+    /// [`DispatchOrder::transition_to`]), or to `CANCELLED`.
+    AwaitingVehicle,
     /// Order recorded, stock reserved and a vehicle selected — nothing has
     /// physically moved yet.
     Pending,
@@ -192,6 +234,7 @@ pub enum DispatchStatus {
 impl DispatchStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::AwaitingVehicle => "AWAITING_VEHICLE",
             Self::Pending => "PENDING",
             Self::Confirmed => "CONFIRMED",
             Self::Loaded => "LOADED",
@@ -210,15 +253,17 @@ impl DispatchStatus {
     /// Whether moving from `self` directly to `next` is a legal transition.
     ///
     /// ```text
-    /// PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED
-    ///    |           |          |            \-----> RETURNED
-    ///     \-----------\----------\-> CANCELLED
+    /// AWAITING_VEHICLE ··> PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED
+    ///        |               |           |          |            \-----> RETURNED
+    ///         \---------------\-----------\----------\-> CANCELLED
     /// ```
     ///
     /// `RETURNED` is reachable only from `IN_TRANSIT` (a delivery attempt
     /// that didn't land); `CANCELLED` is reachable from any pre-transit
     /// state but not once the vehicle is already out. No transition is
-    /// legal out of a terminal status.
+    /// legal out of a terminal status. `AWAITING_VEHICLE -> PENDING` (dotted)
+    /// is deliberately *not* a legal transition here: it happens only when a
+    /// hired truck is assigned, via `VehicleHire::assign`.
     pub fn can_transition_to(&self, next: DispatchStatus) -> bool {
         use DispatchStatus::*;
         matches!(
@@ -228,6 +273,7 @@ impl DispatchStatus {
                 | (Loaded, InTransit)
                 | (InTransit, Delivered)
                 | (InTransit, Returned)
+                | (AwaitingVehicle, Cancelled)
                 | (Pending, Cancelled)
                 | (Confirmed, Cancelled)
                 | (Loaded, Cancelled)
@@ -246,6 +292,7 @@ impl FromStr for DispatchStatus {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "AWAITING_VEHICLE" => Ok(Self::AwaitingVehicle),
             "PENDING" => Ok(Self::Pending),
             "CONFIRMED" => Ok(Self::Confirmed),
             "LOADED" => Ok(Self::Loaded),
@@ -255,6 +302,30 @@ impl FromStr for DispatchStatus {
             "CANCELLED" => Ok(Self::Cancelled),
             other => Err(format!("Unknown dispatch status: {other}")),
         }
+    }
+}
+
+/// Whose truck carries a dispatch: one of the org's own `Vehicle`s, or one
+/// hired from a vendor for this dispatch (see `crate::logistics::vendor::hire`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum VehicleSource {
+    #[default]
+    Own,
+    Hired,
+}
+
+impl VehicleSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Own => "OWN",
+            Self::Hired => "HIRED",
+        }
+    }
+
+    /// Unknown input reads as `Own`, the historical behaviour.
+    pub fn from_db(s: &str) -> Self {
+        if s == "HIRED" { Self::Hired } else { Self::Own }
     }
 }
 
@@ -389,7 +460,16 @@ pub struct DispatchOrder {
     pub id: Uuid,
     pub org_id: Uuid,
     pub customer_id: Uuid,
-    pub vehicle_registration_number: String,
+    /// The truck carrying this dispatch. `None` only while a hired dispatch
+    /// is `AWAITING_VEHICLE`; once the vendor's truck is assigned it holds
+    /// that truck's number.
+    pub vehicle_registration_number: Option<String>,
+    /// Whether the truck is one of the org's own or hired from a vendor.
+    #[serde(default)]
+    pub vehicle_source: VehicleSource,
+    /// The `VehicleHire` behind a hired dispatch; `None` for an own-fleet one.
+    #[serde(default)]
+    pub hire_id: Option<Uuid>,
     /// Every stock line this shipment carries. Always at least one.
     pub line_items: Vec<DispatchLineItem>,
     pub status: DispatchStatus,
@@ -430,6 +510,14 @@ impl DispatchOrder {
         self.line_items.iter().map(|li| li.quantity).sum()
     }
 
+    /// The truck number for summaries and prompts, or a placeholder while a
+    /// hired dispatch is still waiting for its truck.
+    pub fn vehicle_label(&self) -> String {
+        self.vehicle_registration_number
+            .clone()
+            .unwrap_or_else(|| "(awaiting hired vehicle)".to_string())
+    }
+
     /// Whether this dispatch has overrun [`PROMISED_DELIVERY_HOURS`] since it
     /// was created and is still `IN_TRANSIT` — i.e. still on the road, later
     /// than it should be. A dispatch that has already reached a terminal
@@ -462,8 +550,8 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         conn.exec_drop(
-            "INSERT INTO Dispatches (id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence)
-             VALUES (:id, :org_id, :customer_id, :vehicle_registration_number, :status, :dispatched_at, :trip_id, :stop_sequence)",
+            "INSERT INTO Dispatches (id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence, vehicle_source, hire_id)
+             VALUES (:id, :org_id, :customer_id, :vehicle_registration_number, :status, :dispatched_at, :trip_id, :stop_sequence, :vehicle_source, :hire_id)",
             params! {
                 "id" => self.id.to_string(),
                 "org_id" => self.org_id.to_string(),
@@ -473,6 +561,8 @@ impl DispatchOrder {
                 "dispatched_at" => self.dispatched_at,
                 "trip_id" => self.trip_id.map(|t| t.to_string()),
                 "stop_sequence" => self.stop_sequence,
+                "vehicle_source" => self.vehicle_source.as_str(),
+                "hire_id" => self.hire_id.map(|h| h.to_string()),
             },
         )?;
 
@@ -554,9 +644,15 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         // For a return, work out the receiving godown up front so an
-        // unresolvable one fails before any state change.
+        // unresolvable one fails before any state change. Cancelling a hired
+        // dispatch that never got its truck also puts the stock back: it was
+        // drawn down to reserve it while the dispatcher phoned the vendor.
         let credit_godown = if next == DispatchStatus::Returned {
             Some(self.resolve_return_godown(&mut conn, return_to_godown_id)?)
+        } else if next == DispatchStatus::Cancelled
+            && self.status == DispatchStatus::AwaitingVehicle
+        {
+            Some(self.resolve_return_godown(&mut conn, None)?)
         } else {
             None
         };
@@ -608,6 +704,12 @@ impl DispatchOrder {
             status: next,
             changed_at,
         });
+
+        if next.is_terminal()
+            && let Some(hire_id) = self.hire_id
+        {
+            crate::logistics::vendor::hire::VehicleHire::close_if_finished(&mut conn, hire_id)?;
+        }
 
         crate::logistics::ai::chunk::reindex_dispatch_best_effort(self);
 
@@ -724,7 +826,7 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         let row: Option<DispatchRow> = conn.exec_first(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence FROM Dispatches WHERE id = :id",
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence, vehicle_source, hire_id FROM Dispatches WHERE id = :id",
             params! { "id" => id.to_string() },
         )?;
 
@@ -743,7 +845,7 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         let rows: Vec<DispatchRow> = conn.exec(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence FROM Dispatches",
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence, vehicle_source, hire_id FROM Dispatches",
             (),
         )?;
 
@@ -760,7 +862,7 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         let rows: Vec<DispatchRow> = conn.exec(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence, vehicle_source, hire_id
              FROM Dispatches WHERE status = 'IN_TRANSIT'",
             (),
         )?;
@@ -774,7 +876,7 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         let rows: Vec<DispatchRow> = conn.exec(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence FROM Dispatches WHERE org_id = :org_id",
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence, vehicle_source, hire_id FROM Dispatches WHERE org_id = :org_id",
             params! { "org_id" => org_id.to_string() },
         )?;
 
@@ -788,7 +890,7 @@ impl DispatchOrder {
         ensure_tables(&mut conn)?;
 
         let rows: Vec<DispatchRow> = conn.exec(
-            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence, vehicle_source, hire_id
              FROM Dispatches WHERE trip_id = :trip_id ORDER BY stop_sequence ASC",
             params! { "trip_id" => trip_id.to_string() },
         )?;
@@ -802,12 +904,14 @@ impl DispatchOrder {
         status_history: Vec<DispatchStatusEvent>,
         proof_of_delivery: Option<ProofOfDelivery>,
     ) -> Self {
-        let (id, org_id, customer_id, vehicle_reg, status, dispatched_at, trip_id, stop_sequence) = row;
+        let (id, org_id, customer_id, vehicle_reg, status, dispatched_at, trip_id, stop_sequence, source, hire_id) = row;
         DispatchOrder {
             id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
             org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
             customer_id: Uuid::parse_str(&customer_id).unwrap_or_else(|_| Uuid::new_v4()),
             vehicle_registration_number: vehicle_reg,
+            vehicle_source: VehicleSource::from_db(&source),
+            hire_id: hire_id.and_then(|h| Uuid::parse_str(&h).ok()),
             line_items,
             status: status.parse().unwrap_or(DispatchStatus::Pending),
             dispatched_at,
@@ -839,16 +943,19 @@ impl DispatchOrder {
 }
 
 /// One raw `Dispatches` row: `(id, org_id, customer_id,
-/// vehicle_registration_number, status, dispatched_at)`.
+/// vehicle_registration_number, status, dispatched_at, trip_id,
+/// stop_sequence, vehicle_source, hire_id)`.
 type DispatchRow = (
     String,
     String,
     String,
-    String,
+    Option<String>,
     String,
     i64,
     Option<String>,
     Option<i64>,
+    String,
+    Option<String>,
 );
 
 #[cfg(test)]
@@ -893,7 +1000,9 @@ mod tests {
             id: Uuid::new_v4(),
             org_id: org.id,
             customer_id: Uuid::new_v4(),
-            vehicle_registration_number: "RET-VH-1".to_string(),
+            vehicle_registration_number: Some("RET-VH-1".to_string()),
+            vehicle_source: Default::default(),
+            hire_id: None,
             line_items: vec![line("Cement", 30), line("Sand", 12)],
             status: InTransit,
             dispatched_at: 1_700_000_000,
@@ -911,7 +1020,9 @@ mod tests {
             id: Uuid::new_v4(),
             org_id: Uuid::new_v4(),
             customer_id: Uuid::new_v4(),
-            vehicle_registration_number: "TEST-001".to_string(),
+            vehicle_registration_number: Some("TEST-001".to_string()),
+            vehicle_source: Default::default(),
+            hire_id: None,
             line_items: vec![line("Cement", 10)],
             status,
             dispatched_at: 1_700_000_000,
@@ -1182,7 +1293,9 @@ mod tests {
             id: Uuid::new_v4(),
             org_id: org.id,
             customer_id: Uuid::new_v4(),
-            vehicle_registration_number: "RET-VH-2".to_string(),
+            vehicle_registration_number: Some("RET-VH-2".to_string()),
+            vehicle_source: Default::default(),
+            hire_id: None,
             line_items: vec![DispatchLineItem {
                 stock_description: "Sand".to_string(),
                 quantity: 12,
@@ -1240,7 +1353,9 @@ mod tests {
             id: Uuid::new_v4(),
             org_id: org.id,
             customer_id: customer.id,
-            vehicle_registration_number: "MH12AB1234".to_string(),
+            vehicle_registration_number: Some("MH12AB1234".to_string()),
+            vehicle_source: Default::default(),
+            hire_id: None,
             line_items: vec![line("Cement", 10)],
             status: Pending,
             dispatched_at: 1_700_000_000,
@@ -1375,4 +1490,38 @@ mod tests {
         assert!("DISPATCHED".parse::<DispatchStatus>().is_err());
         assert!("bogus".parse::<DispatchStatus>().is_err());
     }
+
+    #[test]
+    fn test_ensure_hire_columns_upgrades_a_pre_vendor_dispatches_table() {
+        let _db = TestDb::create();
+        let mut conn = DbConnection::from_env().get_connection().unwrap();
+        // Turn Dispatches back into its shape from before hired vehicles.
+        ensure_tables(&mut conn).unwrap();
+        conn.query_drop(
+            "ALTER TABLE Dispatches DROP COLUMN vehicle_source, DROP COLUMN hire_id,
+             MODIFY vehicle_registration_number VARCHAR(255) NOT NULL",
+        )
+        .unwrap();
+        conn.query_drop(
+            "INSERT INTO Dispatches VALUES ('old-1', 'o', 'c', 'MH01 OLD 1', 'PENDING', 1, NULL, NULL)",
+        )
+        .unwrap();
+
+        ensure_tables(&mut conn).expect("upgrade");
+        ensure_tables(&mut conn).expect("second run is a no-op");
+
+        let (reg, source, nullable): (Option<String>, String, String) = conn
+            .query_first(
+                "SELECT d.vehicle_registration_number, d.vehicle_source, c.is_nullable
+                 FROM Dispatches d, information_schema.columns c
+                 WHERE d.id = 'old-1' AND c.table_schema = DATABASE()
+                   AND c.table_name = 'Dispatches' AND c.column_name = 'vehicle_registration_number'",
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(reg.as_deref(), Some("MH01 OLD 1"));
+        assert_eq!(source, "OWN", "existing rows read as own-fleet");
+        assert_eq!(nullable, "YES");
+    }
+
 }

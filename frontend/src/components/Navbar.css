@@ -4,8 +4,8 @@
   gap: 2rem;
   padding: 0 2rem;
   height: 56px;
-  background: #1e293b;
-  color: #f8fafc;
+  background: #0a0a0a;
+  color: #fafafa;
   position: sticky;
   top: 0;
   z-index: 1000;
@@ -14,7 +14,7 @@
 .navbar-brand {
   font-weight: 700;
   font-size: 1.1rem;
-  color: #38bdf8;
+  color: #ffffff;
   white-space: nowrap;
 }
 
@@ -30,18 +30,18 @@
   display: block;
   padding: 0.4rem 0.9rem;
   border-radius: 6px;
-  color: #cbd5e1;
+  color: #d4d4d4;
   text-decoration: none;
   font-size: 0.9rem;
   transition: background 0.15s;
 }
 
 .navbar-links a:hover {
-  background: #334155;
-  color: #f8fafc;
+  background: #262626;
+  color: #fafafa;
 }
 
 .navbar-links a.active {
-  background: #0ea5e9;
-  color: #fff;
+  background: #fafafa;
+  color: #0a0a0a;
 }

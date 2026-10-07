@@ -1,7 +1,7 @@
 .sidebar {
   width: var(--sidebar-w);
   min-height: 100vh;
-  background: #0f172a;
+  background: #0a0a0a;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -24,27 +24,27 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--brand) 0%, #818cf8 100%);
+  background: #fafafa;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: #0a0a0a;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(99,102,241,.4);
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
 }
 
 .sidebar-logo-name {
   display: block;
   font-weight: 700;
   font-size: 15px;
-  color: #f8fafc;
+  color: #fafafa;
   letter-spacing: -.3px;
 }
 
 .sidebar-logo-sub {
   display: block;
   font-size: 11px;
-  color: #64748b;
+  color: #737373;
   margin-top: 1px;
 }
 
@@ -59,7 +59,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .08em;
-  color: #334155;
+  color: #525252;
   padding: 0 8px;
   margin-bottom: 6px;
 }
@@ -70,7 +70,7 @@
   gap: 10px;
   padding: 9px 10px;
   border-radius: 8px;
-  color: #94a3b8;
+  color: #a3a3a3;
   font-size: 13.5px;
   font-weight: 500;
   margin-bottom: 2px;
@@ -79,16 +79,16 @@
 
 .sidebar-link:hover {
   background: rgba(255,255,255,.05);
-  color: #e2e8f0;
+  color: #e5e5e5;
 }
 
 .sidebar-link.active {
-  background: rgba(99,102,241,.18);
-  color: #a5b4fc;
+  background: rgba(255,255,255,.12);
+  color: #ffffff;
 }
 
 .sidebar-link.active svg {
-  color: #818cf8;
+  color: #ffffff;
 }
 
 /* Org badge */
@@ -107,8 +107,8 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #6366f1, #818cf8);
-  color: #fff;
+  background: #fafafa;
+  color: #0a0a0a;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -126,7 +126,7 @@
 .sidebar-org-name {
   font-size: 12.5px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #e5e5e5;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -134,7 +134,7 @@
 
 .sidebar-org-id {
   font-size: 10.5px;
-  color: #475569;
+  color: #737373;
   font-family: ui-monospace, monospace;
 }
 
@@ -148,7 +148,7 @@
   background: rgba(255,255,255,.04);
   border: 1px solid rgba(255,255,255,.07);
   border-radius: 10px;
-  color: #cbd5e1;
+  color: #d4d4d4;
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
@@ -157,7 +157,7 @@
 
 .sidebar-theme-toggle:hover {
   background: rgba(255,255,255,.08);
-  color: #f8fafc;
+  color: #fafafa;
 }
 
 /* Footer */
@@ -168,15 +168,15 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #475569;
+  color: #737373;
 }
 
 .sidebar-footer-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 6px var(--green);
+  background: #fafafa;
+  box-shadow: 0 0 6px rgba(255,255,255,.6);
   flex-shrink: 0;
 }
 
@@ -186,7 +186,7 @@
   gap: 8px;
   background: none;
   border: none;
-  color: #64748b;
+  color: #737373;
   font-size: 13px;
   cursor: pointer;
   padding: 6px 4px;
@@ -196,6 +196,6 @@
 }
 
 .sidebar-logout-btn:hover {
-  color: #f87171;
-  background: rgba(248,113,113,.08);
+  color: #ffffff;
+  background: rgba(255,255,255,.08);
 }
