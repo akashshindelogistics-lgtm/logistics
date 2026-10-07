@@ -342,7 +342,7 @@ export interface AssistantAnswer {
 }
 
 // Result of a full reindex backfill. Mirrors AssistantReindexResult in
-// src/logistics/server/routes.rs.
+// src/logistics/server/routes/ai.rs.
 export interface AssistantReindexResult {
   chunks_indexed: number;
 }
