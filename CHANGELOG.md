@@ -4,6 +4,41 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.9.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.8.0...v0.9.0) (2026-10-07)
+
+
+### Features
+
+* **driver:** phone location reporting backend (phase 1) ([1b7b727](https://github.com/akashshindelogistics-lgtm/logistics/commit/1b7b7276664fb620a49ced582a236e79534c1bc6))
+* **driver:** phone location reporting backend (phase 1) ([9db5f72](https://github.com/akashshindelogistics-lgtm/logistics/commit/9db5f72a01743b9c8d4bdc2b68119d83edecc44a))
+* **stock:** add categories to stock, carried through dispatch and transfer ([#64](https://github.com/akashshindelogistics-lgtm/logistics/issues/64)) ([75d9ff3](https://github.com/akashshindelogistics-lgtm/logistics/commit/75d9ff3392b45396eab76bd123e08cf679152871))
+* **ui:** switch to a black-and-white monochrome theme ([542b15c](https://github.com/akashshindelogistics-lgtm/logistics/commit/542b15c8ee17ed7ff80523172c3b9038d1b33d82))
+* **ui:** switch to a black-and-white monochrome theme ([9f357e5](https://github.com/akashshindelogistics-lgtm/logistics/commit/9f357e516744bb24aa5a1864a24af84524abc15f))
+* **vendors:** add vehicle vendor directory (phase 1 of hired vehicles) ([568ef23](https://github.com/akashshindelogistics-lgtm/logistics/commit/568ef236aa34a564be04c97e3eb1478d482736a3))
+* **vendors:** dispatch on a truck hired from a vendor (phase 2) ([2b50fd3](https://github.com/akashshindelogistics-lgtm/logistics/commit/2b50fd38d013f227bdb5d097346d036189eb8a39))
+* **vendors:** hire trucks from vehicle vendors when the org has no free vehicle ([fbd4b89](https://github.com/akashshindelogistics-lgtm/logistics/commit/fbd4b89dee262592fbf1237497166d5ad69dd023))
+* **vendors:** vendor payments and hired-transport reporting (phase 3) ([7322cbe](https://github.com/akashshindelogistics-lgtm/logistics/commit/7322cbe146b290686f76f0ecaa75cae96d44b9aa))
+
+
+### Bug Fixes
+
+* **vendors:** return same-second vendor payments in insertion order ([5289336](https://github.com/akashshindelogistics-lgtm/logistics/commit/52893367cef7d11d3f37cc22db5cab4f1507c104))
+* **vendors:** return same-second vendor payments in insertion order ([ae0571e](https://github.com/akashshindelogistics-lgtm/logistics/commit/ae0571ec840920af2256ff4aca7a3368541c2e4e))
+
+
+### Refactoring
+
+* **server:** split routes.rs into per-domain modules ([91983c2](https://github.com/akashshindelogistics-lgtm/logistics/commit/91983c27579243ced8e447538fe0566ed840a675))
+* **server:** split routes.rs into per-domain modules ([c3bcdab](https://github.com/akashshindelogistics-lgtm/logistics/commit/c3bcdab2f8d92f2d117747b4536d4f57221f7225))
+
+
+### Documentation
+
+* plan driver phone location tracking ([10918bf](https://github.com/akashshindelogistics-lgtm/logistics/commit/10918bfbec2969deea545c71da134adbd9f7b946))
+* plan driver phone location tracking ([ac36583](https://github.com/akashshindelogistics-lgtm/logistics/commit/ac365838401a2cb03b58866aeb9c7e317d284612))
+* plan new-organisation onboarding flow ([f4dc65b](https://github.com/akashshindelogistics-lgtm/logistics/commit/f4dc65b8d93eef5cad7693d155b4a17fb2d11419))
+* plan new-organisation onboarding flow ([cd46d09](https://github.com/akashshindelogistics-lgtm/logistics/commit/cd46d09fb09a9ab675e74376e55af5ae06bda8c0))
+
 ## [0.8.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.7.0...v0.8.0) (2026-09-18)
 
 
