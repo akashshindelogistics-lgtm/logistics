@@ -321,6 +321,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     conn.query_drop(
         "CREATE TABLE IF NOT EXISTS VendorPayments (
             id VARCHAR(36) PRIMARY KEY,
+            seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE,
             org_id VARCHAR(36) NOT NULL,
             hire_id VARCHAR(36) NOT NULL,
             amount BIGINT NOT NULL,

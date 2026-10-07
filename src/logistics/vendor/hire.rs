@@ -208,6 +208,7 @@ impl VehicleHire {
         conn.query_drop(
             "CREATE TABLE IF NOT EXISTS VendorPayments (
                 id VARCHAR(36) PRIMARY KEY,
+                seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE,
                 org_id VARCHAR(36) NOT NULL,
                 hire_id VARCHAR(36) NOT NULL,
                 amount BIGINT NOT NULL,
@@ -217,6 +218,23 @@ impl VehicleHire {
                 CONSTRAINT fk_vendor_payment_hire FOREIGN KEY (hire_id) REFERENCES VehicleHires(id) ON DELETE CASCADE
             )",
         )?;
+        // `seq` (an insertion-order tiebreaker — `recorded_at` is whole
+        // seconds, so two payments in the same second would otherwise come
+        // back in random UUID order) was added after the table first shipped;
+        // back-fill it onto a database that predates it. Back-filled rows are
+        // numbered in primary-key order, which is why `payments()` still sorts
+        // by `recorded_at` first and only breaks ties on `seq`.
+        let has_seq: Option<i64> = conn.exec_first(
+            "SELECT 1 FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'VendorPayments'
+               AND column_name = 'seq'",
+            (),
+        )?;
+        if has_seq.is_none() {
+            conn.query_drop(
+                "ALTER TABLE VendorPayments ADD COLUMN seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE",
+            )?;
+        }
         Ok(())
     }
 
@@ -521,7 +539,7 @@ impl VehicleHire {
         Self::ensure_table(&mut conn)?;
         let rows: Vec<(String, i64, String, Option<String>, i64)> = conn.exec(
             "SELECT id, amount, paid_on, note, recorded_at FROM VendorPayments
-             WHERE hire_id = :hire_id ORDER BY recorded_at ASC, id ASC",
+             WHERE hire_id = :hire_id ORDER BY recorded_at ASC, seq ASC",
             params! { "hire_id" => self.id.to_string() },
         )?;
         Ok(rows
