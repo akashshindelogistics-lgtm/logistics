@@ -4,7 +4,7 @@ import { listOrgs } from '../api/orgs';
 import { listVehicles } from '../api/vehicles';
 import { listCustomers } from '../api/customers';
 import { listDispatches } from '../api/dispatches';
-import { IconBuilding, IconTruck, IconUsers, IconDispatch } from '../components/Icons';
+import Icon3D, { type Icon3DName } from '../components/Icon3D';
 import type { DispatchOrder } from '../types';
 import './page.css';
 import './Dashboard.css';
@@ -29,11 +29,11 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const cards = [
-    { label: 'Organizations', value: counts.orgs, to: '/orgs', Icon: IconBuilding, cls: 'card-blue' },
-    { label: 'Fleet Vehicles', value: counts.vehicles, to: '/vehicles', Icon: IconTruck, cls: 'card-green' },
-    { label: 'Customers', value: counts.customers, to: '/customers', Icon: IconUsers, cls: 'card-amber' },
-    { label: 'Dispatches', value: counts.dispatches, to: '/dispatches', Icon: IconDispatch, cls: 'card-purple' },
+  const cards: { label: string; value: number; to: string; icon: Icon3DName; cls: string }[] = [
+    { label: 'Organizations', value: counts.orgs, to: '/orgs', icon: 'building', cls: 'card-blue' },
+    { label: 'Fleet Vehicles', value: counts.vehicles, to: '/vehicles', icon: 'truck', cls: 'card-green' },
+    { label: 'Customers', value: counts.customers, to: '/customers', icon: 'store', cls: 'card-amber' },
+    { label: 'Dispatches', value: counts.dispatches, to: '/dispatches', icon: 'package', cls: 'card-purple' },
   ];
 
   return (
@@ -43,14 +43,19 @@ export default function Dashboard() {
           <h1 className="dash-hero-title">Good morning 👋</h1>
           <p className="dash-hero-sub">Here's what's happening across your logistics network today.</p>
         </div>
+        <div className="dash-hero-art" aria-hidden="true">
+          <Icon3D name="map" size={64} className="dash-hero-art-back" />
+          <Icon3D name="lorry" size={88} className="dash-hero-art-main" float />
+          <Icon3D name="package" size={52} className="dash-hero-art-front" />
+        </div>
       </div>
 
       <div className="stat-grid">
-        {cards.map(({ label, value, to, Icon, cls }) => (
+        {cards.map(({ label, value, to, icon, cls }) => (
           <Link key={to} to={to} className={`stat-card ${cls}`}>
             <div className="stat-card-top">
-              <div className="stat-icon">
-                <Icon size={20} />
+              <div className="stat-icon stat-icon-3d">
+                <Icon3D name={icon} size={36} float />
               </div>
             </div>
             <div>
@@ -75,7 +80,7 @@ export default function Dashboard() {
           </div>
         ) : recent.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconDispatch size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="outbox" size={48} /></div>
             <h3>No dispatches yet</h3>
             <p>Dispatch orders will appear here once you send stock to customers.</p>
           </div>

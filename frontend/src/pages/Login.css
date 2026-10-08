@@ -32,6 +32,14 @@
   box-shadow: 0 8px 24px rgba(255, 255, 255, 0.12);
 }
 
+/* The 3D truck sits on a soft glow instead of the white tile */
+.login-brand-icon.login-brand-icon-3d {
+  width: 88px;
+  height: 88px;
+  background: radial-gradient(circle at 50% 55%, rgba(255, 255, 255, 0.16), transparent 70%);
+  box-shadow: none;
+}
+
 .login-brand h1 {
   font-size: 32px;
   font-weight: 800;

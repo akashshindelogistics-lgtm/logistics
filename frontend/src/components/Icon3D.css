@@ -1,0 +1,24 @@
+.icon-3d {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+  filter: drop-shadow(0 4px 6px rgba(15, 23, 42, 0.18));
+}
+
+.icon-3d-float {
+  transition: transform 0.25s ease;
+}
+
+a:hover .icon-3d-float,
+.icon-3d-float:hover {
+  transform: translateY(-3px) rotate(-4deg) scale(1.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-3d-float,
+  a:hover .icon-3d-float,
+  .icon-3d-float:hover {
+    transition: none;
+    transform: none;
+  }
+}

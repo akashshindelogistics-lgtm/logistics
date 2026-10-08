@@ -1,0 +1,31 @@
+/* Image markers (MapPin.iconUrl): the 3D icon stands on a soft ground shadow. */
+.map-pin-3d {
+  background: none;
+  border: none;
+}
+
+.map-pin-3d img {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 3px rgba(15, 23, 42, 0.35));
+  transition: transform 0.15s ease;
+  transform-origin: 50% 87%;
+}
+
+.map-pin-3d::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 38px;
+  width: 26px;
+  height: 7px;
+  margin-left: -13px;
+  border-radius: 50%;
+  background: radial-gradient(rgba(15, 23, 42, 0.35), transparent 70%);
+  z-index: -1;
+}
+
+.map-pin-3d:hover img {
+  transform: scale(1.15);
+}

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listVehicles, deleteVehicle } from '../api/vehicles';
-import { IconTruck, IconPin } from '../components/Icons';
+import { IconPin } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import type { Vehicle } from '../types';
+import { vehicleVisual } from '../lib/vehicleVisuals';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import './page.css';
 
@@ -21,7 +23,9 @@ export default function Vehicles() {
 
   const pins: MapPin[] = vehicles.filter(v => v.location).map(v => ({
     lat: v.location!.latitude, lng: v.location!.longitude,
-    label: v.registration_number, detail: `${v.capacity} ${v.unit}`,
+    label: v.registration_number,
+    detail: `${vehicleVisual(v.vehicle_type).label} · ${v.capacity} ${v.unit}`,
+    iconUrl: vehicleVisual(v.vehicle_type).icon,
   }));
 
   const withLocation = vehicles.filter(v => v.location).length;
@@ -65,7 +69,7 @@ export default function Vehicles() {
           </div>
         ) : vehicles.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconTruck size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="truck" size={48} /></div>
             <h3>No vehicles registered</h3>
             <p>Add vehicles from an organization's detail page.</p>
           </div>
@@ -73,21 +77,20 @@ export default function Vehicles() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Registration</th><th>Capacity</th><th>Latitude</th><th>Longitude</th><th>Last Updated</th><th></th></tr>
+                <tr><th>Registration</th><th>Type</th><th>Capacity</th><th>Latitude</th><th>Longitude</th><th>Last Updated</th><th></th></tr>
               </thead>
               <tbody>
                 {vehicles.map(v => (
                   <tr key={v.registration_number}>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--green-bg)', color: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <IconTruck size={15} />
-                        </div>
+                        <img className="vehicle-type-icon" src={vehicleVisual(v.vehicle_type).icon} alt="" width={40} height={40} />
                         <Link to={`/vehicles/${encodeURIComponent(v.registration_number)}`} className="entity-name" style={{ textDecoration: 'none', color: 'var(--blue)' }}>
                           {v.registration_number}
                         </Link>
                       </div>
                     </td>
+                    <td title={vehicleVisual(v.vehicle_type).description}>{vehicleVisual(v.vehicle_type).label}</td>
                     <td><span className="badge tag-blue">{v.capacity} {v.unit}</span></td>
                     <td className="coord-cell">{v.location ? v.location.latitude.toFixed(5) : <span className="muted">—</span>}</td>
                     <td className="coord-cell">{v.location ? v.location.longitude.toFixed(5) : <span className="muted">—</span>}</td>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getGodown, updateGodown } from '../api/godowns';
 import { IconBuilding, IconChevron, IconCheck } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import type { Godown } from '../types';
 import './page.css';
 
@@ -61,7 +62,7 @@ export default function GodownDetail() {
     return (
       <div className="page">
         <div className="empty-state">
-          <div className="empty-state-icon"><IconBuilding size={28} /></div>
+          <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="factory" size={48} /></div>
           <h3>Godown not found</h3>
           <p>This godown may have been deleted, or belongs to another organization.</p>
           <Link to="/orgs" className="btn btn-primary">Back to Organizations</Link>

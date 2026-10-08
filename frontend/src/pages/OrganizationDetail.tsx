@@ -30,6 +30,8 @@ import type {
   VehicleType,
 } from '../types';
 import { VEHICLE_TYPES } from '../types';
+import { ICONS_3D } from '../components/Icon3D';
+import { vehicleVisual } from '../lib/vehicleVisuals';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck, IconUsers } from '../components/Icons';
 import './page.css';
@@ -486,14 +488,14 @@ export default function OrganizationDetail() {
 
   const mapPins: MapPin[] = [];
   if (org.location)
-    mapPins.push({ lat: org.location.latitude, lng: org.location.longitude, label: org.name, detail: org.address });
+    mapPins.push({ lat: org.location.latitude, lng: org.location.longitude, label: org.name, detail: org.address, iconUrl: ICONS_3D.building });
   org.vehicles.forEach(v => {
     if (v.location)
-      mapPins.push({ lat: v.location.latitude, lng: v.location.longitude, label: v.registration_number, detail: `${v.capacity} ${v.unit}` });
+      mapPins.push({ lat: v.location.latitude, lng: v.location.longitude, label: v.registration_number, detail: `${v.capacity} ${v.unit}`, iconUrl: vehicleVisual(v.vehicle_type).icon });
   });
   org.godowns.forEach(g => {
     if (g.location)
-      mapPins.push({ lat: g.location.latitude, lng: g.location.longitude, label: g.name, detail: g.address });
+      mapPins.push({ lat: g.location.latitude, lng: g.location.longitude, label: g.name, detail: g.address, iconUrl: ICONS_3D.factory });
   });
 
   return (
@@ -567,9 +569,7 @@ export default function OrganizationDetail() {
                     <tr key={v.registration_number}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--green-bg)', color: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <IconTruck size={13} />
-                          </div>
+                          <img className="vehicle-type-icon" src={vehicleVisual(v.vehicle_type).icon} alt="" width={36} height={36} title={vehicleVisual(v.vehicle_type).label} />
                           <span className="entity-name">{v.registration_number}</span>
                         </div>
                       </td>

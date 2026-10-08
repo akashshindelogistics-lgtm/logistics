@@ -3,7 +3,8 @@ import {
   listVendors, createVendor, updateVendor, deleteVendor, listVehicleHires, recordVendorPayment, listVendorPayments,
 } from '../api/vendors';
 import { getOrgId, getRole } from '../api/auth';
-import { IconTruck, IconPlus, IconX, IconTrash } from '../components/Icons';
+import { IconPlus, IconX, IconTrash } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import type { HireStatus, VehicleHire, VehicleVendor, VendorInput, VendorPayment } from '../types';
 import './page.css';
 
@@ -238,7 +239,7 @@ export default function Vendors() {
           <div style={{ padding: 20 }}><div className="skeleton" style={{ height: 20 }} /></div>
         ) : vendors.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconTruck size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="lorry" size={48} /></div>
             <h3>No vendors yet</h3>
             <p>Add the transporters you call for trucks, so a dispatch can go out on a hired vehicle.</p>
           </div>
@@ -300,7 +301,7 @@ export default function Vendors() {
         </div>
         {hires.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconTruck size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="lorry" size={48} /></div>
             <h3>No hires yet</h3>
             <p>Choose "Hire from vendor" when dispatching, and each truck you hire is tracked here with what you owe.</p>
           </div>

@@ -131,8 +131,10 @@ a { text-decoration: none; color: inherit; }
 button { font-family: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 
-/* Third-party colour sources (map tiles and markers, emoji icons) are
-   desaturated so nothing breaks the monochrome theme. */
+/* Third-party colour sources (map tiles, default markers) are desaturated so
+   nothing breaks the monochrome theme. The 3D icons (Icon3D, vehicle renders,
+   and map markers drawn from them) are the deliberate exception: they are the
+   one place colour is meant to show. */
 .leaflet-tile-pane,
-.leaflet-marker-pane,
-.feat-icon { filter: grayscale(1); }
+.leaflet-marker-pane .leaflet-marker-icon:not(.map-pin-3d),
+.leaflet-shadow-pane { filter: grayscale(1); }

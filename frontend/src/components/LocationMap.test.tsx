@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import LocationMap, { type MapPin } from './LocationMap';
+import LocationMap, { imagePinIcon, type MapPin } from './LocationMap';
 
 // react-leaflet needs a real DOM/canvas; stub it down to something inspectable.
 vi.mock('react-leaflet', () => ({
@@ -10,8 +10,8 @@ vi.mock('react-leaflet', () => ({
     </div>
   ),
   TileLayer: () => <div data-testid="tile-layer" />,
-  Marker: ({ position, children }: { position: [number, number]; children: React.ReactNode }) => (
-    <div data-testid="marker" data-position={position.join(',')}>
+  Marker: ({ position, icon, children }: { position: [number, number]; icon?: { options: { className?: string } }; children: React.ReactNode }) => (
+    <div data-testid="marker" data-position={position.join(',')} data-icon-class={icon?.options.className ?? 'default'}>
       {children}
     </div>
   ),
@@ -47,5 +47,19 @@ describe('LocationMap', () => {
     expect(screen.getByText('Mumbai Depot')).toBeInTheDocument();
     expect(screen.getByText('12 MT')).toBeInTheDocument();
     expect(screen.getByText('Pune')).toBeInTheDocument();
+  });
+
+  it('draws a pin with iconUrl as an image marker and keeps the default pin otherwise', () => {
+    render(<LocationMap pins={[pin({ iconUrl: '/truck.png' }), pin({ label: 'Plain' })]} />);
+    const [withIcon, plain] = screen.getAllByTestId('marker');
+    expect(withIcon).toHaveAttribute('data-icon-class', 'map-pin-3d');
+    expect(plain).toHaveAttribute('data-icon-class', 'default');
+  });
+
+  it('imagePinIcon wraps the image and reuses one icon per URL', () => {
+    const icon = imagePinIcon('/tanker.png');
+    expect((icon.options.html as HTMLImageElement).getAttribute('src')).toBe('/tanker.png');
+    expect(icon.options.iconAnchor).toEqual([23, 40]);
+    expect(imagePinIcon('/tanker.png')).toBe(icon);
   });
 });
