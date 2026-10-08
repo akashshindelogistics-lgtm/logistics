@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release: HTTPS only. The device token is a secret and must never cross
+     the network in clear text. The debug build replaces this file with one
+     that also allows http:// to the emulator's host and localhost. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

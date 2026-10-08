@@ -107,7 +107,7 @@ comment naming the Rust constant each one mirrors, as `config.ts` does now.
 | Settings / status | Jetpack DataStore | Small key-value state the UI observes as a `Flow` |
 | Token at rest | AES-GCM key in Android Keystore, ciphertext in DataStore | `EncryptedSharedPreferences` (security-crypto) is deprecated |
 | DI | Manual (one `AppContainer`) | Too small for Hilt to pay for itself |
-| SDK levels | `compileSdk` / `targetSdk` 36, `minSdk` 26 (Android 8.0) | Google Play requires target 36 for new apps and updates from 31 Aug 2026; 26 covers practically every phone in use |
+| SDK levels | `targetSdk` 36, `minSdk` 26 (Android 8.0); `compileSdk` 37 (latest installed, as of phase 2) | Google Play requires target 36 for new apps and updates from 31 Aug 2026; 26 covers practically every phone in use |
 | Build | Gradle Kotlin DSL, version catalog `gradle/libs.versions.toml`, single `:app` module | Versions in one place; exact versions are pinned when the skeleton is created in phase 2 |
 | Package id | `com.logistics.driver` (same as the Expo app) | The Expo app was never published, so nothing is lost by reusing it |
 | Location in repo | `android/` at the repo root, next to `frontend/` and `mobile/` | `mobile/` is deleted in phase 6 |

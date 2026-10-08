@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A location pin, centred in the 108dp adaptive-icon canvas (the inner
+     66dp is the safe zone that every launcher mask keeps visible). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#111111"
+        android:pathData="M54,30C44.6,30 37,37.6 37,47C37,59.8 54,78 54,78C54,78 71,59.8 71,47C71,37.6 63.4,30 54,30ZM54,53.5C50.4,53.5 47.5,50.6 47.5,47C47.5,43.4 50.4,40.5 54,40.5C57.6,40.5 60.5,43.4 60.5,47C60.5,50.6 57.6,53.5 54,53.5Z" />
+</vector>

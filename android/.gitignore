@@ -1,0 +1,13 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+# Release signing material never goes in git (see docs/android-driver-app.md).
+*.jks
+*.keystore
+keystore.properties

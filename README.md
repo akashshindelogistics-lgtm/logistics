@@ -140,7 +140,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 │   │   ├── components/  # Shared UI (navbar, sidebar, map, icons)
 │   │   └── pages/        # Dashboard, orgs, vehicles, customers, dispatches, auth
 │   └── tests/           # Playwright end-to-end tests
-└── mobile/              # Expo driver app — see mobile/README.md
+├── android/             # Native Kotlin driver app (replacing mobile/) — see android/README.md
+│   └── app/src/main/java/com/logistics/driver/  # domain, data, net, ui
+└── mobile/              # Expo driver app, to be retired — see mobile/README.md
     └── src/
         ├── app/          # Screens (Expo Router): pairing, status
         └── lib/          # Offline queue, API client, background location task
