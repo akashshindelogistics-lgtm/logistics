@@ -1077,12 +1077,14 @@
    over from the Expo app in a mapping table. Also covers OEM battery
    killers, debug-only cleartext to 10.0.2.2, the testing plan and the
    one-time Android Studio/SDK/emulator setup (Studio is downloaded but not
-   yet extracted; KVM is available). Open questions: sideload vs Play
-   testing, hosted HTTPS backend, a GET /api/driver/me endpoint.
+   yet extracted; KVM is available). Decided afterwards: drivers install a
+   signed APK directly (no Play Store), and the backend gains
+   GET /api/driver/me for the pairing and status screens. Still open: the
+   hosted HTTPS backend a real phone needs.
 ** TODO Phase 2: project skeleton under android/ - Gradle (Kotlin DSL), pairing screen (token + server URL, stored encrypted), status screen (sharing toggle, queued count, last sync, unpair); ./gradlew assembleDebug builds and the app runs on an emulator
 ** TODO Phase 3: background reporting - foreground service with a persistent notification, a fix every 30s/50m, validation, Room queue, batched upload, 401/403/409 keep the queue, "tap to resume" notification after reboot, battery-optimisation guidance
 ** TODO Phase 4: tests - JVM unit tests (validation, queue, batching, API client against MockWebServer), a Compose UI test for pairing, an end-to-end run on the emulator against the local backend (10.0.2.2:8080) that moves a vehicle on the dashboard map, plus a recorded demo
-** TODO Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideload APK or Play internal testing), CI job that builds the APK
+** TODO Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideloading the signed APK, "Install unknown apps", Play Protect warning), versionCode bump per release, keystore backed up outside git, CI job that builds the APK
 ** TODO Phase 6: retire mobile/ once the native app is verified on a real phone - delete the Expo app, update README, docs/driver-phone-tracking.md and the driver tracking Phase 4 note
 * TODO [#B] New-organisation onboarding flow - guided setup so a new org can reach its first dispatch, instead of landing on empty pages
   Plan written: [[file:docs/onboarding.md]]

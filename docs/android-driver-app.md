@@ -222,12 +222,13 @@ rules are unit-tested as plain Kotlin, the same split `mobile/src/lib/` uses.
 ## Development setup on this machine
 
 Android Studio is downloaded (`~/Downloads/android-studio-rabbit1-linux.tar.gz`)
-but not yet installed. One-time setup:
+and extracted to `~/Downloads/android-studio` (build 262.9437, bundled JDK 25
+in `jbr/`). One-time setup still to do:
 
-1. `tar -xzf ~/Downloads/android-studio-rabbit1-linux.tar.gz -C ~` and run
-   `~/android-studio/bin/studio.sh`. On this i3/X desktop, run it with
-   `XDG_SESSION_TYPE=x11 DISPLAY=:0` if it doesn't open.
+1. Run `~/Downloads/android-studio/bin/studio.sh`. On this i3/X desktop, run it
+   with `XDG_SESSION_TYPE=x11 DISPLAY=:0` if it doesn't open.
 2. In the setup wizard, accept the default SDK location (`~/Android/Sdk`).
+   The wizard hasn't been run yet, so no SDK is installed.
    Then in SDK Manager install:
    - Android SDK Platform 36;
    - Build-Tools;
@@ -243,7 +244,7 @@ but not yet installed. One-time setup:
 
    ```sh
    export ANDROID_HOME=$HOME/Android/Sdk
-   export JAVA_HOME=$HOME/android-studio/jbr   # JDK bundled with Studio
+   export JAVA_HOME=$HOME/Downloads/android-studio/jbr   # JDK bundled with Studio
    export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
    ```
 
@@ -278,20 +279,38 @@ but not yet installed. One-time setup:
    - update README, [driver-phone-tracking.md](driver-phone-tracking.md) and
      the driver tracking phase 4 note in `todo.org`.
 
+## Decisions
+
+- **Distribution: signed APK installed directly (sideloaded).** There's no
+  Play Store listing and no Play developer account. What follows from that:
+  - **Signing key:** the release keystore must never be lost. Android
+    installs an update over the old app only if it's signed with the same
+    key; with a new key every driver would have to uninstall first, losing
+    the pairing and any queued fixes. Keep the keystore and its passwords
+    outside git, with a backup.
+  - **Updates are manual:** a driver installs a newer APK over the old one.
+    `versionCode` must go up on every release, and the status screen shows
+    the app version so the office can tell who is out of date.
+  - **The install guide** covers allowing "Install unknown apps" for the
+    browser or file manager used, and what to do if Play Protect warns about
+    an app from outside the Play Store.
+  - Since Play policy no longer applies, the "no `ACCESS_BACKGROUND_LOCATION`"
+    decision above rests on keeping driver setup simple, not on Play review.
+- **`GET /api/driver/me` is added to the backend.** It's authenticated by the
+  device token, like `POST /api/driver/location`, and returns the driver's
+  name and their assigned vehicle (or none). The app uses it:
+  - on the pairing screen, to check the token and server address before
+    saving them, then show "Paired as <name>";
+  - on the status screen, to show the driver and vehicle before the first
+    upload, and to show "No vehicle assigned" up front instead of only after
+    a `409`.
+
 ## Open questions
 
-- **Distribution:** sideload a signed APK (no review, fastest for one fleet),
-  or Google Play internal or closed testing (auto-updates, but needs a Play
-  developer account)? The plan assumes sideloading first.
 - **Hosted backend:** a real phone needs a public HTTPS server address. This
   waits on the "deploy frontend and backend on hosted platform" item in
   `todo.org`. Until then, real-phone testing runs over USB with
   `adb reverse tcp:8080 tcp:8080` (the phone then uses
   `http://localhost:8080`, allowed in debug builds).
-- **Who-am-I endpoint:** the status screen learns the vehicle only after the
-  first upload. A `GET /api/driver/me` authenticated by the device token
-  would show the driver's name and vehicle straight after pairing. It's a
-  small backend addition, worth doing with phase 2 or the dashboard pairing
-  panel.
 - **Shift hours:** should sharing switch itself off after a set time (for
   example 14 h) in case the driver forgets? Not in v1.
