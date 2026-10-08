@@ -1062,9 +1062,25 @@
   location-type foreground service, Room for the offline queue, WorkManager
   (network constraint) to flush it, encrypted storage for the token,
   OkHttp/Retrofit.
-** TODO Phase 1: plan doc (docs/android-driver-app.md) - stack, min SDK, permission flow (fine -> background location, notifications), battery-optimisation guidance for drivers, what happens to mobile/
+** DONE Phase 1: plan doc (docs/android-driver-app.md) - stack, min SDK, permission flow (fine -> background location, notifications), battery-optimisation guidance for drivers, what happens to mobile/
+   Plan written: [[file:docs/android-driver-app.md]]. Kotlin + Compose,
+   FusedLocationProviderClient in a location-type foreground service, Room
+   queue, WorkManager retries, OkHttp, token encrypted with an Android
+   Keystore key in DataStore (EncryptedSharedPreferences is deprecated),
+   compileSdk/targetSdk 36 (Play requirement from 31 Aug 2026), minSdk 26,
+   package com.logistics.driver, project under android/. Decision: no
+   ACCESS_BACKGROUND_LOCATION in v1 - the driver starts sharing from the
+   screen, so "while in use" location is enough and Play's background
+   location review is avoided; after a reboot the app posts a "tap to
+   resume" notification instead of restarting silently. Behaviour (30s/50m,
+   batches of 100, queue cap 2000, keep the queue on 401/403/409) is carried
+   over from the Expo app in a mapping table. Also covers OEM battery
+   killers, debug-only cleartext to 10.0.2.2, the testing plan and the
+   one-time Android Studio/SDK/emulator setup (Studio is downloaded but not
+   yet extracted; KVM is available). Open questions: sideload vs Play
+   testing, hosted HTTPS backend, a GET /api/driver/me endpoint.
 ** TODO Phase 2: project skeleton under android/ - Gradle (Kotlin DSL), pairing screen (token + server URL, stored encrypted), status screen (sharing toggle, queued count, last sync, unpair); ./gradlew assembleDebug builds and the app runs on an emulator
-** TODO Phase 3: background reporting - foreground service with a persistent notification, a fix every 30s/50m, validation, Room queue, batched upload, 401/403/409 keep the queue, resumes after reboot and app updates
+** TODO Phase 3: background reporting - foreground service with a persistent notification, a fix every 30s/50m, validation, Room queue, batched upload, 401/403/409 keep the queue, "tap to resume" notification after reboot, battery-optimisation guidance
 ** TODO Phase 4: tests - JVM unit tests (validation, queue, batching, API client against MockWebServer), a Compose UI test for pairing, an end-to-end run on the emulator against the local backend (10.0.2.2:8080) that moves a vehicle on the dashboard map, plus a recorded demo
 ** TODO Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideload APK or Play internal testing), CI job that builds the APK
 ** TODO Phase 6: retire mobile/ once the native app is verified on a real phone - delete the Expo app, update README, docs/driver-phone-tracking.md and the driver tracking Phase 4 note

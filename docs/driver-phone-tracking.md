@@ -123,6 +123,10 @@ flushes in batches, and a visible "location is being shared" indicator.
 
 ## Phase 4 as built
 
+> **Being replaced** by a native Kotlin Android app. See
+> [android-driver-app.md](android-driver-app.md). `mobile/` is deleted once
+> that app has been verified on a real phone.
+
 `mobile/` — an [Expo](https://expo.dev) app (SDK 57, TypeScript, Expo Router).
 See [mobile/README.md](../mobile/README.md) for the full layout, setup and
 known gaps; the summary here is what it settles from the plan.
