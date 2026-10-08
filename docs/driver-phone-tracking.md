@@ -172,6 +172,7 @@ The backend is done. It follows the design above except where noted; the
 | --- | --- | --- |
 | `POST /api/drivers/{id}/device-token/rotate` | org bearer, Admin or Dispatcher, driver in the caller's org | Issue or replace the driver's device token. The plain token is in this response only. `403` for another org's driver or the wrong role, `404` if unknown. |
 | `POST /api/driver/location` | `Authorization: Bearer <device token>` | Report a batch of fixes. See below. |
+| `GET /api/driver/me` | `Authorization: Bearer <device token>` | Who the phone is paired as. See below. Added for the native Android app ([android-driver-app.md](android-driver-app.md)). |
 
 **`POST /api/driver/location`**
 
@@ -196,6 +197,21 @@ The backend is done. It follows the design above except where noted; the
   device token); `403` driver inactive; `409` driver has no assigned vehicle.
 - `accuracy_m` and `speed_mps` are validated but **not stored yet**; they are
   for the history table in phase 3.
+
+**`GET /api/driver/me`**
+
+- Same device-token check as `POST /api/driver/location`, shared through
+  `driver_from_device_token`: `401` for a missing, malformed, unknown or
+  rotated-out token, or an org JWT.
+- Returns `{ driver_id, name, org_id, org_name, is_active, vehicle }`, where
+  `vehicle` is `{ registration_number, location }` or `null` when none is
+  assigned. `location` is the vehicle's last known position from any source.
+- An inactive or unassigned driver still gets `200`, unlike the location
+  endpoint's `403` / `409`. The app uses this call to check a token while
+  pairing, and it should be able to pair and then say "inactive" or "no
+  vehicle assigned" rather than fail.
+- The org name comes from `Organization::name_by_id`, a single-column query,
+  because `get_by_id` also loads every vehicle and godown.
 
 **Decisions taken**
 
@@ -222,10 +238,15 @@ The backend is done. It follows the design above except where noted; the
   hash, not in plain text; tokens are per driver; `by_assigned_driver`;
   `record_fix` stores capture time, ignores older and equal-time fixes, and
   clears a stale address.
-- Routes (`routes.rs`): a phone moves its assigned vehicle with only the token;
+- Routes (`routes/tests/drivers.rs`): a phone moves its assigned vehicle with only the token;
   a batch applies only the newest fix; a late upload cannot move the vehicle
   backwards; missing, unknown, malformed and org-JWT tokens are `401`; rotation
   kills the old token; inactive driver `403`; no vehicle `409`; each
   validation rule `400`; one bad fix rejects the whole batch; a driver never
   moves another org's vehicle; rotate from another org `403`, unknown driver
   `404`, wrong role `403`; driver responses never contain the token.
+- `GET /api/driver/me`: returns driver, org and assigned vehicle (with its
+  position after a report); `200` with `vehicle: null` when unassigned and
+  with `is_active: false` when inactive; missing, malformed, unknown, org-JWT
+  and rotated-out tokens are `401`; the response never contains the device
+  token or the vehicle's tracker key. Model: `Organization::name_by_id`.

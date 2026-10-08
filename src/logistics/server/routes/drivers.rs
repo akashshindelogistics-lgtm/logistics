@@ -3,6 +3,7 @@
 //! location reports it sends (`POST /api/driver/location`).
 
 use crate::logistics::driver::driver::Driver;
+use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::vehicle::vehicle::{Location, Vehicle};
 use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
 use super::vehicles::coordinates_in_range;
@@ -360,12 +361,70 @@ pub struct DriverDeviceTokenResponse {
     pub message: String,
     pub data: Option<DriverDeviceToken>,
 }
+
+/// The vehicle a driver's location reports move.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverMeVehicle {
+    pub registration_number: String,
+    /// The vehicle's last known position, from any source (this phone, a
+    /// hardware tracker or a manual update).
+    pub location: Option<Location>,
+}
+
+/// The paired driver, as seen from their own phone.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverMe {
+    pub driver_id: Uuid,
+    pub name: String,
+    pub org_id: Uuid,
+    pub org_name: String,
+    /// `false` means location reports are refused (`403`) until a dispatcher
+    /// marks the driver active again.
+    pub is_active: bool,
+    /// `None` means no vehicle is assigned, so location reports are refused
+    /// (`409`) until a dispatcher assigns one.
+    pub vehicle: Option<DriverMeVehicle>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DriverMeResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<DriverMe>,
+}
+
 fn json_error(status: actix_web::http::StatusCode, message: impl Into<String>) -> HttpResponse {
     HttpResponse::build(status).json(ApiResponse::<String> {
         success: false,
         message: message.into(),
         data: None,
     })
+}
+
+/// Resolve the driver from a device token in `Authorization: Bearer <token>`.
+/// `401` for a missing, malformed or unknown token; an org JWT is not a
+/// device token.
+fn driver_from_device_token(req: &HttpRequest) -> Result<Driver, HttpResponse> {
+    use actix_web::http::StatusCode;
+
+    let token = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .and_then(|t| Uuid::parse_str(t.trim()).ok())
+        .ok_or_else(|| {
+            json_error(StatusCode::UNAUTHORIZED, "Missing or malformed driver device token")
+        })?;
+
+    match Driver::by_device_token(token) {
+        Ok(Some(d)) => Ok(d),
+        Ok(None) => Err(json_error(StatusCode::UNAUTHORIZED, "Unknown driver device token")),
+        Err(err) => Err(json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to look up device token: {}", err),
+        )),
+    }
 }
 
 /// Check one fix from a driver's phone. Returns the reason it is unusable.
@@ -423,33 +482,9 @@ pub async fn report_driver_location(
 ) -> impl Responder {
     use actix_web::http::StatusCode;
 
-    let token = match req
-        .headers()
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .and_then(|t| Uuid::parse_str(t.trim()).ok())
-    {
-        Some(t) => t,
-        None => {
-            return json_error(
-                StatusCode::UNAUTHORIZED,
-                "Missing or malformed driver device token",
-            )
-        }
-    };
-
-    let driver = match Driver::by_device_token(token) {
-        Ok(Some(d)) => d,
-        Ok(None) => {
-            return json_error(StatusCode::UNAUTHORIZED, "Unknown driver device token")
-        }
-        Err(err) => {
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to look up device token: {}", err),
-            )
-        }
+    let driver = match driver_from_device_token(&req) {
+        Ok(d) => d,
+        Err(resp) => return resp,
     };
     if !driver.is_active {
         return json_error(StatusCode::FORBIDDEN, "This driver is inactive");
@@ -522,6 +557,72 @@ pub async fn report_driver_location(
             location_updated: updated,
             vehicle_registration_number: vehicle.registration_number.clone(),
             location: vehicle.location.clone(),
+        }),
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/driver/me",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "The driver the device token belongs to, their organization and assigned vehicle", body = DriverMeResponse),
+        (status = 401, description = "Missing or unknown device token", body = EmptyResponse)
+    )
+)]
+/// Who the driver's phone is paired as. Authenticated by the driver's device
+/// token, like `POST /api/driver/location`. The phone app calls it when pairing
+/// (to check the token and server address before saving them) and on its
+/// status screen, so the driver sees their name and vehicle before the first
+/// location upload. An inactive driver or one with no vehicle still gets a
+/// `200` (`is_active: false` / `vehicle: null`), so the app can say why
+/// location reports would be refused instead of failing to pair.
+#[get("/driver/me")]
+pub async fn driver_me(req: HttpRequest) -> impl Responder {
+    use actix_web::http::StatusCode;
+
+    let driver = match driver_from_device_token(&req) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+
+    let org_name = match Organization::name_by_id(driver.org_id) {
+        Ok(Some(name)) => name,
+        Ok(None) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "The driver's organization no longer exists")
+        }
+        Err(err) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to load the organization: {}", err),
+            )
+        }
+    };
+
+    let vehicle = match Vehicle::by_assigned_driver(driver.id) {
+        Ok(v) => v.map(|v| DriverMeVehicle {
+            registration_number: v.registration_number,
+            location: v.location,
+        }),
+        Err(err) => {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find the driver's vehicle: {}", err),
+            )
+        }
+    };
+
+    HttpResponse::Ok().json(ApiResponse {
+        success: true,
+        message: "Driver found".to_string(),
+        data: Some(DriverMe {
+            driver_id: driver.id,
+            name: driver.name,
+            org_id: driver.org_id,
+            org_name,
+            is_active: driver.is_active,
+            vehicle,
         }),
     })
 }
