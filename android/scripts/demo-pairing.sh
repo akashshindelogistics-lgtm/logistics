@@ -77,7 +77,14 @@ if ! "$ADB" devices | grep -q 'device$'; then
     [ -n "$AVD" ] || { echo "No emulator found; create one in Android Studio's Device Manager, or set AVD=<name>"; exit 1; }
     # 4 cores rather than the AVD's default: plenty for the app, and leaves the
     # host room for the backend.
-    DISPLAY=${DISPLAY:-:0} XDG_SESSION_TYPE=x11 "$EMULATOR" -avd "$AVD" -cores 4 -no-snapshot-save -no-boot-anim >"$OUT/emulator.log" 2>&1 &
+    EMU_CMD=("$EMULATOR" -avd "$AVD" -cores 4 -no-snapshot-save -no-boot-anim)
+    # In its own systemd scope where available: when memory runs short,
+    # systemd-oomd kills a whole scope, and it should be the emulator's, not
+    # the terminal (and everything else) that launched this script.
+    if command -v systemd-run >/dev/null && systemd-run --user --scope true >/dev/null 2>&1; then
+        EMU_CMD=(systemd-run --user --scope --quiet --unit="logistics-demo-emulator-$$" "${EMU_CMD[@]}")
+    fi
+    DISPLAY=${DISPLAY:-:0} XDG_SESSION_TYPE=x11 "${EMU_CMD[@]}" >"$OUT/emulator.log" 2>&1 &
     EMULATOR_PID=$!
     # Wait for boot, but give up if the emulator process exits (bad AVD name,
     # no KVM, ...) instead of hanging in `adb wait-for-device`.
@@ -101,9 +108,15 @@ tap_tag() {
 import re, sys
 xml = sys.stdin.read()
 m = re.search(r'resource-id=\"$1\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"', xml)
-if not m: sys.exit('no element tagged $1 on screen')
+if not m:
+    tags = sorted(set(re.findall(r'resource-id=\"([a-z][a-z-]*)\"', xml)))
+    sys.exit('no element tagged $1 on screen; tags present: ' + (', '.join(tags) or 'none'))
 x1, y1, x2, y2 = map(int, m.groups())
-print((x1 + x2) // 2, (y1 + y2) // 2)")
+print((x1 + x2) // 2, (y1 + y2) // 2)") || {
+        "$ADB" exec-out screencap -p >"$OUT/failed-$1.png" 2>/dev/null || true
+        echo "Screenshot of the screen at that moment: $OUT/failed-$1.png"
+        return 1
+    }
     "$ADB" shell input tap $center
 }
 # Wait (up to $2 s) until text $1 is on screen.
@@ -131,7 +144,9 @@ tap_tag device-token
 sleep 1
 "$ADB" shell input text "$TOKEN"
 sleep "$PAUSE"
-"$ADB" shell input keyevent 111   # hide the keyboard
+# Enter triggers the field's "Done" IME action, which closes the keyboard.
+# (Escape would act as Back and close the app.)
+"$ADB" shell input keyevent 66
 sleep 1
 
 step "Pairing (checks the token with GET /api/driver/me)"
