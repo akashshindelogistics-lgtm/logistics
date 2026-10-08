@@ -756,6 +756,18 @@ impl Organization {
         Ok(orgs)
     }
 
+    /// Just the organization's name, for callers that don't need the vehicles
+    /// and godowns `get_by_id` loads (e.g. `GET /api/driver/me`, which a
+    /// driver's phone calls on every status refresh).
+    pub fn name_by_id(id: Uuid) -> Result<Option<String>, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        Ok(conn.exec_first(
+            "SELECT name FROM Orgs WHERE id = :id",
+            params! { "id" => id.to_string() },
+        )?)
+    }
+
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
@@ -877,6 +889,19 @@ mod tests {
         assert_eq!(db_id, org.id.to_string());
         assert_eq!(db_name, test_name);
         assert_eq!(db_address, test_address);
+    }
+
+    #[test]
+    fn test_name_by_id_returns_the_name_or_none() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Name Lookup Org", "1 Lookup Road")
+            .expect("Failed to create organization");
+
+        assert_eq!(
+            Organization::name_by_id(org.id).unwrap(),
+            Some("Name Lookup Org".to_string())
+        );
+        assert_eq!(Organization::name_by_id(Uuid::new_v4()).unwrap(), None);
     }
 
     #[test]

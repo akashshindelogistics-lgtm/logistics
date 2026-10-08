@@ -128,6 +128,7 @@ impl Modify for SecurityAddon {
         track_vehicle_location,
         rotate_vehicle_tracker_key,
         report_driver_location,
+        driver_me,
         rotate_driver_device_token,
         delete_vehicle,
         list_drivers,
@@ -226,6 +227,7 @@ impl Modify for SecurityAddon {
             DriverResponse, DriverListResponse,
             DriverLocationFix, DriverLocationPayload, DriverLocationResult, DriverLocationResultResponse,
             DriverDeviceToken, DriverDeviceTokenResponse,
+            DriverMe, DriverMeVehicle, DriverMeResponse,
             VendorResponse, VendorListResponse, VehicleHireResponse, VehicleHireListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
@@ -285,6 +287,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(track_vehicle_location)
             .service(rotate_vehicle_tracker_key)
             .service(report_driver_location)
+            .service(driver_me)
             .service(rotate_driver_device_token)
             .service(delete_vehicle)
             .service(list_drivers)

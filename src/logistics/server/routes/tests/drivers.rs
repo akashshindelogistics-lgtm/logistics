@@ -525,3 +525,149 @@ async fn test_driver_responses_never_contain_the_device_token() {
     assert!(!text.contains(&token.to_string()));
     assert!(!text.contains("device_token"));
 }
+
+// ── GET /api/driver/me ──────────────────────────────────────────────────────
+
+async fn get_driver_me(
+    app: &impl actix_web::dev::Service<
+        actix_http::Request,
+        Response = actix_web::dev::ServiceResponse,
+        Error = actix_web::Error,
+    >,
+    token: Option<&str>,
+) -> actix_web::dev::ServiceResponse {
+    let mut req = test::TestRequest::get().uri("/api/driver/me");
+    if let Some(t) = token {
+        req = req.insert_header(("Authorization", format!("Bearer {}", t)));
+    }
+    test::call_service(app, req.to_request()).await
+}
+
+#[actix_web::test]
+async fn test_driver_me_returns_the_driver_org_and_assigned_vehicle() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Me Org").await;
+    let (driver_id, token) = pair_driver_phone(&app, org.id, &auth, Some("ME-VH-1")).await;
+
+    let resp = get_driver_me(&app, Some(&token.to_string())).await;
+    assert_eq!(resp.status().as_u16(), 200);
+    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp).await.data.unwrap();
+    assert_eq!(me.driver_id, driver_id);
+    assert_eq!(me.name, "Phone Driver");
+    assert_eq!(me.org_id, org.id);
+    assert_eq!(me.org_name, "Me Org");
+    assert!(me.is_active);
+    let vehicle = me.vehicle.expect("an assigned vehicle");
+    assert_eq!(vehicle.registration_number, "ME-VH-1");
+    assert!(vehicle.location.is_none());
+
+    // After a report, the vehicle's position comes back too.
+    let t = unix_now() - 10;
+    assert_eq!(post_driver_fixes(&app, Some(&token.to_string()), vec![fix(18.5204, 73.8567, t)]).await.status().as_u16(), 200);
+    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(get_driver_me(&app, Some(&token.to_string())).await)
+        .await
+        .data
+        .unwrap();
+    let location = me.vehicle.unwrap().location.expect("a location after reporting");
+    assert_eq!(location.latitude, 18.5204);
+    assert_eq!(location.longitude, 73.8567);
+    assert_eq!(location.timestamp, t);
+}
+
+#[actix_web::test]
+async fn test_driver_me_with_no_assigned_vehicle_is_200_with_no_vehicle() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Me No Vehicle Org").await;
+    let (_d, token) = pair_driver_phone(&app, org.id, &auth, None).await;
+
+    let resp = get_driver_me(&app, Some(&token.to_string())).await;
+    assert_eq!(resp.status().as_u16(), 200);
+    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp).await.data.unwrap();
+    assert!(me.vehicle.is_none());
+}
+
+#[actix_web::test]
+async fn test_driver_me_for_an_inactive_driver_is_200_and_says_so() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Me Inactive Org").await;
+    let (driver_id, token) = pair_driver_phone(&app, org.id, &auth, Some("ME-VH-2")).await;
+
+    let req = test::TestRequest::put()
+        .uri(&format!("/api/drivers/{}", driver_id))
+        .insert_header(("Authorization", auth))
+        .set_json(&UpdateDriverPayload {
+            name: "Phone Driver".to_string(),
+            license_number: "DL-PH-1".to_string(),
+            phone: "+91 90000 00001".to_string(),
+            is_active: false,
+        })
+        .to_request();
+    assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+
+    let resp = get_driver_me(&app, Some(&token.to_string())).await;
+    assert_eq!(resp.status().as_u16(), 200);
+    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp).await.data.unwrap();
+    assert!(!me.is_active);
+}
+
+#[actix_web::test]
+async fn test_driver_me_without_a_valid_device_token_is_401() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Me Bad Token Org").await;
+    pair_driver_phone(&app, org.id, &auth, Some("ME-VH-3")).await;
+
+    assert_eq!(get_driver_me(&app, None).await.status().as_u16(), 401);
+    assert_eq!(get_driver_me(&app, Some("not-a-uuid")).await.status().as_u16(), 401);
+    assert_eq!(get_driver_me(&app, Some(&Uuid::new_v4().to_string())).await.status().as_u16(), 401);
+}
+
+#[actix_web::test]
+async fn test_driver_me_rejects_an_org_bearer_token() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Me Org Token Org").await;
+    pair_driver_phone(&app, org.id, &auth, Some("ME-VH-4")).await;
+
+    // An org JWT is not a device token.
+    let jwt = auth.trim_start_matches("Bearer ").to_string();
+    assert_eq!(get_driver_me(&app, Some(&jwt)).await.status().as_u16(), 401);
+}
+
+#[actix_web::test]
+async fn test_driver_me_stops_working_for_a_rotated_token() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Me Rotate Org").await;
+    let (driver_id, old_token) = pair_driver_phone(&app, org.id, &auth, Some("ME-VH-5")).await;
+
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/drivers/{}/device-token/rotate", driver_id))
+        .insert_header(("Authorization", auth))
+        .to_request();
+    let new_token = test::read_body_json::<ApiResponse<DriverDeviceToken>, _>(test::call_service(&app, req).await)
+        .await
+        .data
+        .unwrap()
+        .device_token;
+
+    assert_eq!(get_driver_me(&app, Some(&old_token.to_string())).await.status().as_u16(), 401);
+    assert_eq!(get_driver_me(&app, Some(&new_token.to_string())).await.status().as_u16(), 200);
+}
+
+#[actix_web::test]
+async fn test_driver_me_never_returns_secrets() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Me Secrets Org").await;
+    let (_d, token) = pair_driver_phone(&app, org.id, &auth, Some("ME-VH-6")).await;
+
+    let bytes = test::read_body(get_driver_me(&app, Some(&token.to_string())).await).await;
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(!text.contains(&token.to_string()));
+    assert!(!text.contains("device_token"));
+    assert!(!text.contains("tracker_key"));
+}
