@@ -223,12 +223,13 @@ rules are unit-tested as plain Kotlin, the same split `mobile/src/lib/` uses.
 
 Android Studio is downloaded (`~/Downloads/android-studio-rabbit1-linux.tar.gz`)
 and extracted to `~/Downloads/android-studio` (build 262.9437, bundled JDK 25
-in `jbr/`). One-time setup still to do:
+in `jbr/`). Steps 1-3 are done as of phase 2: the SDK at `~/Android/Sdk` has
+platforms 36 and 37, build-tools 36.0.0, and a `Medium_Phone` emulator
+(API 37, Google APIs with Play Store, x86_64).
 
 1. Run `~/Downloads/android-studio/bin/studio.sh`. On this i3/X desktop, run it
    with `XDG_SESSION_TYPE=x11 DISPLAY=:0` if it doesn't open.
 2. In the setup wizard, accept the default SDK location (`~/Android/Sdk`).
-   The wizard hasn't been run yet, so no SDK is installed.
    Then in SDK Manager install:
    - Android SDK Platform 36;
    - Build-Tools;
@@ -278,6 +279,60 @@ in `jbr/`). One-time setup still to do:
    - delete the Expo app;
    - update README, [driver-phone-tracking.md](driver-phone-tracking.md) and
      the driver tracking phase 4 note in `todo.org`.
+
+## Phase 2 as built
+
+`android/`; see [android/README.md](../android/README.md) for building,
+testing and the demo.
+
+- **Toolchain:** AGP 9.4.1 and Gradle 9.6.0, the versions this Android Studio
+  release generates (already cached here). AGP 9 compiles Kotlin itself, so
+  there's no `kotlin-android` plugin. Kotlin 2.4.20 drives the Compose
+  compiler and serialization plugins. Library versions are the latest stable
+  as of 8 Oct 2026, pinned in `gradle/libs.versions.toml`. `compileSdk` is 37
+  (installed) and `targetSdk` stays 36. Lint flags 36 as old; revisit after
+  testing the phase 3 location service on the API 37 emulator.
+- **No navigation library:** the pairing state decides the screen. No pairing
+  shows Pairing, a pairing shows Status, and unpairing returns to Pairing.
+- **Pairing:**
+  - The server address is normalised: trimmed, scheme lower-cased, trailing
+    `/` dropped. It must be `https://`, except debug builds also accept
+    `http://`, which their network security config only allows for
+    10.0.2.2, localhost and 127.0.0.1.
+  - The token must be a UUID; a pasted `Bearer ` prefix is tolerated.
+  - Then `GET /api/driver/me` is called, and the pairing is saved only if it
+    succeeds. A typo shows "This device token wasn't recognised" or "Can't
+    reach the server" on the spot.
+- **Storage:** the server address and the token, encrypted with an AES-GCM
+  Android Keystore key, live in Preferences DataStore. A token that no longer
+  decrypts counts as unpaired.
+- **Status screen:**
+  - from `/api/driver/me`: name, org, Active/Inactive, vehicle (or "None
+    assigned" with a hint) and the time of its last position;
+  - Refresh, Unpair (with a confirmation dialog), server address and app
+    version;
+  - "Queued fixes 0" and "Last sync: Not yet" as placeholders for phase 3;
+  - the "Share my location" switch only records the choice for now. It's
+    disabled for an inactive driver or one with no vehicle.
+- **Release-safety settings:** no OkHttp logging (the Authorization header
+  carries the token), `allowBackup="false"` plus data-extraction rules that
+  exclude everything, and the `INTERNET` permission only (location
+  permissions come with phase 3).
+- **UI tags:** test tags are exposed as resource ids (`testTagsAsResourceId`),
+  so UI Automator and the adb-driven demo can find fields.
+- **Tests:** 19 JVM unit tests:
+  - server-address and token parsing;
+  - `OkHttpDriverApi` against MockWebServer (request path and header,
+    parsing including unknown fields, inactive/no-vehicle, 401 with the
+    server's message, non-JSON 502, no server at all);
+  - `describeApiError`;
+  - `PairingRepository` (saves only on success);
+  - `PairViewModel` (field errors never call the server, normalised values
+    saved, server rejection shown and not saved, editing clears the error).
+
+  Lint is clean apart from the `targetSdk` and newer-Gradle notices.
+  Instrumented and Compose UI tests are phase 4.
+- **Demo:** `android/scripts/demo-pairing.sh` (see the README).
 
 ## Decisions
 

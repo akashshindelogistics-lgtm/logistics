@@ -1081,7 +1081,21 @@
    signed APK directly (no Play Store), and the backend gains
    GET /api/driver/me for the pairing and status screens (PR #78). Still open: the
    hosted HTTPS backend a real phone needs.
-** TODO Phase 2: project skeleton under android/ - Gradle (Kotlin DSL), pairing screen (token + server URL, stored encrypted), status screen (sharing toggle, queued count, last sync, unpair); ./gradlew assembleDebug builds and the app runs on an emulator
+** DONE Phase 2: project skeleton under android/ - Gradle (Kotlin DSL), pairing screen (token + server URL, stored encrypted), status screen (sharing toggle, queued count, last sync, unpair); ./gradlew assembleDebug builds and the app runs on an emulator
+   As built: [[file:docs/android-driver-app.md]] ("Phase 2 as built") and
+   [[file:android/README.md]]. AGP 9.4.1 / Gradle 9.6.0 (what this Studio
+   generates), Kotlin 2.4.20, Compose BOM 2026.09.00, compileSdk 37,
+   targetSdk 36, minSdk 26, single :app module, no navigation library or
+   DI framework. Pairing validates the address (https only; debug also
+   http to 10.0.2.2/localhost) and the token (UUID), then saves only after
+   GET /api/driver/me accepts it. Token encrypted with an Android Keystore
+   AES-GCM key in DataStore. Status screen shows name, org, active state,
+   vehicle and last position from /api/driver/me, with refresh, unpair
+   (confirmed) and app version; the sharing switch is a stub until phase 3.
+   19 JVM unit tests (parsing, OkHttp client vs MockWebServer, error
+   messages, repository, pair view model), lint clean.
+   `android/scripts/demo-pairing.sh` seeds a driver on the local backend,
+   pairs on the emulator over adb and records the run.
 ** TODO Phase 3: background reporting - foreground service with a persistent notification, a fix every 30s/50m, validation, Room queue, batched upload, 401/403/409 keep the queue, "tap to resume" notification after reboot, battery-optimisation guidance
 ** TODO Phase 4: tests - JVM unit tests (validation, queue, batching, API client against MockWebServer), a Compose UI test for pairing, an end-to-end run on the emulator against the local backend (10.0.2.2:8080) that moves a vehicle on the dashboard map, plus a recorded demo
 ** TODO Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideloading the signed APK, "Install unknown apps", Play Protect warning), versionCode bump per release, keystore backed up outside git, CI job that builds the APK
