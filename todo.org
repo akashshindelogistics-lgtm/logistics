@@ -1079,7 +1079,7 @@
    one-time Android Studio/SDK/emulator setup (Studio is downloaded but not
    yet extracted; KVM is available). Decided afterwards: drivers install a
    signed APK directly (no Play Store), and the backend gains
-   GET /api/driver/me for the pairing and status screens. Still open: the
+   GET /api/driver/me for the pairing and status screens (PR #78). Still open: the
    hosted HTTPS backend a real phone needs.
 ** TODO Phase 2: project skeleton under android/ - Gradle (Kotlin DSL), pairing screen (token + server URL, stored encrypted), status screen (sharing toggle, queued count, last sync, unpair); ./gradlew assembleDebug builds and the app runs on an emulator
 ** TODO Phase 3: background reporting - foreground service with a persistent notification, a fix every 30s/50m, validation, Room queue, batched upload, 401/403/409 keep the queue, "tap to resume" notification after reboot, battery-optimisation guidance
