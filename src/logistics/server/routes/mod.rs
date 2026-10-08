@@ -33,7 +33,7 @@ use crate::logistics::vendor::hire::{HireStatus, VehicleHire, VendorPayment};
 use crate::logistics::vendor::vendor::VehicleVendor;
 use crate::logistics::vehicle::document::{ComplianceDocType, ComplianceStatus, VehicleDocument};
 use crate::logistics::vehicle::maintenance::{MaintenanceStatus, VehicleMaintenance};
-use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
+use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle, VehicleType};
 use actix_web::web;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
@@ -210,7 +210,7 @@ impl Modify for SecurityAddon {
             VehicleDocumentPayload, VehicleMaintenancePayload, RecordMileagePayload,
             TransferStockPayload,
             UpdateDispatchStatusPayload, ProofOfDeliveryPayload, InvoicePayload,
-            Organization, Vehicle, Unit, Location, Stock, Godown, StockTransfer, Customer, Driver,
+            Organization, Vehicle, Unit, VehicleType, Location, Stock, Godown, StockTransfer, Customer, Driver,
             VehicleDocument, ComplianceDocType, ComplianceStatus,
             VehicleMaintenance, MaintenanceStatus, VehicleMaintenanceResponse, VehicleMaintenanceListResponse,
             DispatchOrder, DispatchLineItem, DispatchStatus, DispatchStatusEvent, ProofOfDelivery,

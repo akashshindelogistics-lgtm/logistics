@@ -3,8 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import { listVehicles, updateVehicle, rotateTrackerKey } from '../api/vehicles';
 import { listDrivers } from '../api/drivers';
 import { IconTruck, IconChevron, IconCheck } from '../components/Icons';
-import type { Driver, Unit, Vehicle } from '../types';
-import { UNITS } from '../types';
+import type { Driver, Unit, Vehicle, VehicleType } from '../types';
+import { UNITS, VEHICLE_TYPES } from '../types';
 import './page.css';
 
 export default function VehicleDetail() {
@@ -16,6 +16,7 @@ export default function VehicleDetail() {
   const [loading, setLoading] = useState(true);
   const [capacity, setCapacity] = useState('');
   const [unit, setUnit] = useState<Unit>('MetricTon');
+  const [vehicleType, setVehicleType] = useState<VehicleType>('Truck');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [rotating, setRotating] = useState(false);
@@ -30,6 +31,7 @@ export default function VehicleDetail() {
         if (v) {
           setCapacity(String(v.capacity));
           setUnit(v.unit);
+          setVehicleType(v.vehicle_type ?? 'Truck');
         }
       })
       .finally(() => setLoading(false));
@@ -40,7 +42,7 @@ export default function VehicleDetail() {
     setSaving(true);
     setMsg(null);
     try {
-      const res = await updateVehicle(reg, Number(capacity), unit);
+      const res = await updateVehicle(reg, Number(capacity), unit, vehicleType);
       setVehicle(res.data ?? vehicle);
       setMsg({ text: 'Vehicle updated.', ok: true });
     } catch (err) {
@@ -126,6 +128,12 @@ export default function VehicleDetail() {
             <label htmlFor="v-unit">Unit</label>
             <select id="v-unit" value={unit} onChange={e => setUnit(e.target.value as Unit)}>
               {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="v-type">Type</label>
+            <select id="v-type" value={vehicleType} onChange={e => setVehicleType(e.target.value as VehicleType)}>
+              {VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>

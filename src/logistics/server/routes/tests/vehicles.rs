@@ -19,6 +19,7 @@ pub(super) async fn register_vehicle(
             registration_number: reg.to_string(),
             capacity: 50,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     let resp = test::call_service(app, req).await;
@@ -58,6 +59,7 @@ async fn test_list_vehicles_scoped_to_authenticated_org() {
         registration_number: "SCOPE-VH-001".to_string(),
         capacity: 20,
         unit: "MetricTon".to_string(),
+        vehicle_type: None,
     };
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vehicles", org.id))
@@ -103,6 +105,7 @@ async fn test_add_vehicle_to_nonexistent_org_returns_error() {
         registration_number: "ZZ01 XX 0001".to_string(),
         capacity: 10,
         unit: "MetricTon".to_string(),
+        vehicle_type: None,
     };
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vehicles", org_id))
@@ -184,6 +187,7 @@ async fn test_edit_vehicle_updates_capacity_and_unit() {
             registration_number: "EDIT-VH-1".to_string(),
             capacity: 10,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
@@ -191,7 +195,7 @@ async fn test_edit_vehicle_updates_capacity_and_unit() {
     let req = test::TestRequest::put()
         .uri("/api/vehicles/EDIT-VH-1")
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&UpdateVehiclePayload { capacity: 42, unit: "Box".to_string() })
+        .set_json(&UpdateVehiclePayload { capacity: 42, unit: "Box".to_string(), vehicle_type: None })
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
@@ -221,7 +225,7 @@ async fn test_edit_vehicle_unknown_reg_returns_404() {
     let req = test::TestRequest::put()
         .uri("/api/vehicles/NO-SUCH-VH")
         .insert_header(("Authorization", auth))
-        .set_json(&UpdateVehiclePayload { capacity: 5, unit: "MetricTon".to_string() })
+        .set_json(&UpdateVehiclePayload { capacity: 5, unit: "MetricTon".to_string(), vehicle_type: None })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
 }
@@ -240,6 +244,7 @@ async fn test_edit_vehicle_from_another_org_returns_403() {
             registration_number: "OWNED-VH-1".to_string(),
             capacity: 10,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
@@ -247,7 +252,7 @@ async fn test_edit_vehicle_from_another_org_returns_403() {
     let req = test::TestRequest::put()
         .uri("/api/vehicles/OWNED-VH-1")
         .insert_header(("Authorization", other_auth))
-        .set_json(&UpdateVehiclePayload { capacity: 999, unit: "MetricTon".to_string() })
+        .set_json(&UpdateVehiclePayload { capacity: 999, unit: "MetricTon".to_string(), vehicle_type: None })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
 }
@@ -365,6 +370,7 @@ async fn test_add_vehicle_returns_403_for_different_org() {
         registration_number: "HACK-VH-001".to_string(),
         capacity: 10,
         unit: "MetricTon".to_string(),
+        vehicle_type: None,
     };
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vehicles", target_org_id))
@@ -375,4 +381,74 @@ async fn test_add_vehicle_returns_403_for_different_org() {
     assert_eq!(resp.status().as_u16(), 403);
     let body: ApiResponse<String> = test::read_body_json(resp).await;
     assert!(!body.success);
+}
+
+#[actix_web::test]
+async fn test_add_vehicle_with_type_and_change_it_on_edit() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Typed Vehicle Org").await;
+
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/orgs/{}/vehicles", org.id))
+        .insert_header(("Authorization", auth.clone()))
+        .set_json(&CreateVehiclePayload {
+            registration_number: "TYPE-VH-1".to_string(),
+            capacity: 10,
+            unit: "MetricTon".to_string(),
+            vehicle_type: Some("Tipper".to_string()),
+        })
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status().as_u16(), 201);
+    let created: ApiResponse<Vehicle> = test::read_body_json(resp).await;
+    assert_eq!(created.data.unwrap().vehicle_type, VehicleType::Tipper);
+
+    // Omitting vehicle_type on edit keeps the stored type.
+    let req = test::TestRequest::put()
+        .uri("/api/vehicles/TYPE-VH-1")
+        .insert_header(("Authorization", auth.clone()))
+        .set_json(&UpdateVehiclePayload { capacity: 11, unit: "MetricTon".to_string(), vehicle_type: None })
+        .to_request();
+    let body: ApiResponse<Vehicle> = test::read_body_json(test::call_service(&app, req).await).await;
+    assert_eq!(body.data.unwrap().vehicle_type, VehicleType::Tipper);
+
+    let req = test::TestRequest::put()
+        .uri("/api/vehicles/TYPE-VH-1")
+        .insert_header(("Authorization", auth.clone()))
+        .set_json(&UpdateVehiclePayload {
+            capacity: 11,
+            unit: "MetricTon".to_string(),
+            vehicle_type: Some("Tanker".to_string()),
+        })
+        .to_request();
+    let body: ApiResponse<Vehicle> = test::read_body_json(test::call_service(&app, req).await).await;
+    assert_eq!(body.data.unwrap().vehicle_type, VehicleType::Tanker);
+
+    let req = test::TestRequest::get()
+        .uri("/api/vehicles")
+        .insert_header(("Authorization", auth))
+        .to_request();
+    let body: ApiResponse<Vec<Vehicle>> =
+        test::read_body_json(test::call_service(&app, req).await).await;
+    let stored = body.data.unwrap().into_iter().find(|v| v.registration_number == "TYPE-VH-1").unwrap();
+    assert_eq!(stored.vehicle_type, VehicleType::Tanker);
+}
+
+#[actix_web::test]
+async fn test_add_vehicle_without_type_defaults_to_truck() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Untyped Vehicle Org").await;
+
+    // Raw JSON with no vehicle_type field, as older clients send.
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/orgs/{}/vehicles", org.id))
+        .insert_header(("Authorization", auth))
+        .set_json(serde_json::json!({ "registration_number": "TYPE-VH-2", "capacity": 5, "unit": "Kg" }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status().as_u16(), 201);
+    let body: ApiResponse<Vehicle> = test::read_body_json(resp).await;
+    assert_eq!(body.data.unwrap().vehicle_type, VehicleType::Truck);
 }

@@ -23,7 +23,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 
 - **Organizations** — create and manage organizations, each with its own
   location, vehicles, stock, and customers.
-- **Vehicles** — register vehicles per organization and track their live
+- **Vehicles** — register vehicles per organization with a body type (truck,
+  tipper, trailer, tempo, pickup or tanker — shown as a 3D model and icon in
+  the dashboard) and track their live
   location, updated by hand or pushed automatically by a GPS tracker fitted
   to the vehicle (each vehicle carries its own tracker key). Record each
   vehicle's compliance paperwork (insurance, RC, permit, PUC and fitness
@@ -269,9 +271,9 @@ All routes are served under the `/api` prefix.
 | POST/PUT/DELETE | `/api/godowns/{gid}/stock`, `/api/godowns/{gid}/stock/{desc}` | Add, update, or remove a godown's stock |
 | POST | `/api/godowns/{gid}/transfer` | Move a stock item from this godown to another godown of the same org |
 | GET | `/api/orgs/{id}/stock-transfers` | Godown-to-godown transfer history (audit trail) |
-| POST | `/api/orgs/{id}/vehicles` | Add a vehicle to an organization |
+| POST | `/api/orgs/{id}/vehicles` | Add a vehicle to an organization (optional `vehicle_type`, default `Truck`) |
 | GET/DELETE | `/api/vehicles`, `/api/vehicles/{reg}` | List vehicles / remove one |
-| PUT | `/api/vehicles/{reg}` | Update a vehicle's capacity and unit |
+| PUT | `/api/vehicles/{reg}` | Update a vehicle's capacity, unit and (optionally) `vehicle_type` |
 | PUT | `/api/vehicles/{reg}/location` | Update a vehicle's location (org login) |
 | POST | `/api/track/{tracker_key}` | GPS device push: record `{latitude, longitude}` for the vehicle that key belongs to — no login |
 | POST | `/api/vehicles/{reg}/tracker-key/rotate` | Issue a fresh tracker key, invalidating the old one |

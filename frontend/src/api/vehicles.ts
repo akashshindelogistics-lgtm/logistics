@@ -1,20 +1,31 @@
 import api from './client';
-import type { ApiResponse, ComplianceDocType, Unit, Vehicle, VehicleDocument, VehicleMaintenance } from '../types';
+import type { ApiResponse, ComplianceDocType, Unit, Vehicle, VehicleDocument, VehicleMaintenance, VehicleType } from '../types';
 
 export const listVehicles = () =>
   api.get<ApiResponse<Vehicle[]>>('/vehicles').then(r => r.data);
 
-export const updateVehicle = (reg: string, capacity: number, unit: Unit) =>
+/** Omitting `vehicleType` leaves the vehicle's current type unchanged. */
+export const updateVehicle = (reg: string, capacity: number, unit: Unit, vehicleType?: VehicleType) =>
   api
-    .put<ApiResponse<Vehicle>>(`/vehicles/${encodeURIComponent(reg)}`, { capacity, unit })
+    .put<ApiResponse<Vehicle>>(`/vehicles/${encodeURIComponent(reg)}`, {
+      capacity,
+      unit,
+      ...(vehicleType ? { vehicle_type: vehicleType } : {}),
+    })
     .then(r => r.data);
 
-export const addVehicle = (orgId: string, registrationNumber: string, capacity: number) =>
+export const addVehicle = (
+  orgId: string,
+  registrationNumber: string,
+  capacity: number,
+  vehicleType: VehicleType = 'Truck',
+) =>
   api
     .post<ApiResponse<Vehicle>>(`/orgs/${orgId}/vehicles`, {
       registration_number: registrationNumber,
       capacity,
       unit: 'MetricTon',
+      vehicle_type: vehicleType,
     })
     .then(r => r.data);
 

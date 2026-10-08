@@ -9,6 +9,10 @@ export interface Location {
 export type Unit = 'MetricTon' | 'Kg' | 'Litre' | 'Box' | 'Pallet' | 'Piece';
 export const UNITS: Unit[] = ['MetricTon', 'Kg', 'Litre', 'Box', 'Pallet', 'Piece'];
 
+// Mirrors VehicleType in src/logistics/vehicle/vehicle.rs.
+export type VehicleType = 'Truck' | 'Tipper' | 'Trailer' | 'Tempo' | 'Pickup' | 'Tanker';
+export const VEHICLE_TYPES: VehicleType[] = ['Truck', 'Tipper', 'Trailer', 'Tempo', 'Pickup', 'Tanker'];
+
 export interface Vehicle {
   registration_number: string;
   capacity: number;
@@ -22,6 +26,8 @@ export interface Vehicle {
    * many partial test fixtures don't all have to spell it out.
    */
   tracker_key?: string;
+  /** Body style; picks the icon and 3D model. Older rows come back as Truck. */
+  vehicle_type?: VehicleType;
 }
 
 export interface Driver {

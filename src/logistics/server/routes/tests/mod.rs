@@ -89,6 +89,7 @@ async fn setup_dispatch(
             registration_number: "DISP-VH-001".to_string(),
             capacity: 100_000,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     test::call_service(app, req).await;
@@ -338,6 +339,7 @@ async fn add_vehicle_via_api(
             registration_number: reg.to_string(),
             capacity: 20,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     assert_eq!(test::call_service(app, req).await.status().as_u16(), 201);

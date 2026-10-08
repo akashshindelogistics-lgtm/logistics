@@ -43,9 +43,11 @@ describe('VehicleDetail page', () => {
     await user.clear(capacity);
     await user.type(capacity, '25');
     await user.selectOptions(screen.getByLabelText(/unit/i), 'Box');
+    expect(screen.getByLabelText(/^type$/i)).toHaveValue('Truck');
+    await user.selectOptions(screen.getByLabelText(/^type$/i), 'Pickup');
     await user.click(screen.getByRole('button', { name: /^save$/i }));
 
-    expect(vehiclesApi.updateVehicle).toHaveBeenCalledWith('MH01AB1234', 25, 'Box');
+    expect(vehiclesApi.updateVehicle).toHaveBeenCalledWith('MH01AB1234', 25, 'Box', 'Pickup');
     await waitFor(() => expect(screen.getByText(/vehicle updated/i)).toBeInTheDocument());
   });
 

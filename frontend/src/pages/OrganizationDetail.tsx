@@ -27,7 +27,9 @@ import type {
   VehicleDocument,
   VehicleMaintenance,
   VehicleVendor,
+  VehicleType,
 } from '../types';
+import { VEHICLE_TYPES } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck, IconUsers } from '../components/Icons';
 import './page.css';
@@ -106,6 +108,7 @@ export default function OrganizationDetail() {
 
   const [vReg, setVReg] = useState('');
   const [vCap, setVCap] = useState('');
+  const [vType, setVType] = useState<VehicleType>('Truck');
   const [vSubmitting, setVSubmitting] = useState(false);
 
   const [drvName, setDrvName] = useState('');
@@ -180,7 +183,7 @@ export default function OrganizationDetail() {
   const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
     setVSubmitting(true);
-    try { await addVehicle(id!, vReg, Number(vCap)); setVReg(''); setVCap(''); load(); }
+    try { await addVehicle(id!, vReg, Number(vCap), vType); setVReg(''); setVCap(''); setVType('Truck'); load(); }
     finally { setVSubmitting(false); }
   };
 
@@ -614,6 +617,12 @@ export default function OrganizationDetail() {
               <div className="field" style={{ flex: '0 0 140px', marginBottom: 0 }}>
                 <label htmlFor="v-cap">Capacity (MT)</label>
                 <input id="v-cap" type="number" placeholder="e.g. 10" value={vCap} onChange={e => setVCap(e.target.value)} required />
+              </div>
+              <div className="field" style={{ flex: '0 0 140px', marginBottom: 0 }}>
+                <label htmlFor="v-type">Type</label>
+                <select id="v-type" value={vType} onChange={e => setVType(e.target.value as VehicleType)}>
+                  {VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
               </div>
               <button className="btn btn-primary" type="submit" disabled={vSubmitting} style={{ alignSelf: 'flex-end' }}>
                 <IconPlus size={14} />{vSubmitting ? 'Adding…' : 'Add Vehicle'}

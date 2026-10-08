@@ -114,6 +114,7 @@ async fn test_assign_vehicle_driver_rejects_foreign_driver() {
             registration_number: "A-VH-1".to_string(),
             capacity: 10,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);

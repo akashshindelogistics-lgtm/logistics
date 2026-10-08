@@ -92,6 +92,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             last_updated_at BIGINT DEFAULT NULL,
             location_address VARCHAR(255) DEFAULT NULL,
             tracker_key VARCHAR(36) DEFAULT NULL,
+            vehicle_type VARCHAR(20) NOT NULL DEFAULT 'Truck',
             CONSTRAINT fk_vehicle_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
         )",
     )
