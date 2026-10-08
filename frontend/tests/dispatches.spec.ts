@@ -203,7 +203,7 @@ test.describe('Dispatches', () => {
     const org = await registerOrg(page, `Dispatch Table ${uid()}`);
     const custName = `Table Customer ${uid()}`;
     const stockDesc = `Grain ${uid()}`;
-    const reg = `MH09TT${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `MH09TT${uid().toUpperCase().slice(-4)}`;
 
     // Add vehicle
     await page.goto(`/orgs/${org.id}`);
@@ -241,7 +241,7 @@ test.describe('Dispatches', () => {
     const custName = `Multi Customer ${uid()}`;
     const itemA = `Bricks ${uid()}`;
     const itemB = `Tiles ${uid()}`;
-    const reg = `MH19ML${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `MH19ML${uid().toUpperCase().slice(-4)}`;
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Registration Number').fill(reg);

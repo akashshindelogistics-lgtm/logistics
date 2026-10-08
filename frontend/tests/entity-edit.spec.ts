@@ -12,7 +12,7 @@ async function api(page: Page, method: 'post' | 'put', path: string, data: unkno
 test.describe('Editing entity details', () => {
   test('edit a vehicle from its detail page', async ({ page }) => {
     const org = await registerOrg(page, `Edit Vehicle ${uid()}`);
-    const reg = `MH20EE${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `MH20EE${uid().toUpperCase().slice(-4)}`;
     await api(page, 'post', `/api/orgs/${org.id}/vehicles`, { registration_number: reg, capacity: 10, unit: 'MetricTon' });
 
     await page.goto('/vehicles');
@@ -70,7 +70,7 @@ test.describe('Editing entity details', () => {
 
   test('a vehicle detail page 404s for another org', async ({ page }) => {
     const orgA = await registerOrg(page, `VD Owner ${uid()}`);
-    const reg = `MH21FF${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `MH21FF${uid().toUpperCase().slice(-4)}`;
     await api(page, 'post', `/api/orgs/${orgA.id}/vehicles`, { registration_number: reg, capacity: 5, unit: 'MetricTon' });
 
     await registerOrg(page, `VD Other ${uid()}`);

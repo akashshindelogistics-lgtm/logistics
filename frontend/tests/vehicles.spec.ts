@@ -15,7 +15,7 @@ test.describe('Vehicles', () => {
 
   test('add a vehicle and see it in org detail and vehicles list', async ({ page }) => {
     const org = await registerOrg(page, `Vehicle Add ${uid()}`);
-    const regNumber = `MH12AB${uid().toUpperCase().slice(0, 4)}`;
+    const regNumber = `MH12AB${uid().toUpperCase().slice(-4)}`;
 
     await page.goto(`/orgs/${org.id}`);
 
@@ -41,7 +41,7 @@ test.describe('Vehicles', () => {
     const statsLocator = page.locator('.section-card-header .badge').first();
 
     // Add vehicle
-    const reg = `TN01XY${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `TN01XY${uid().toUpperCase().slice(-4)}`;
     await page.getByLabel('Registration Number').fill(reg);
     await page.getByLabel('Capacity (MT)').fill('5');
     await page.getByRole('button', { name: /add vehicle/i }).click();
@@ -56,7 +56,7 @@ test.describe('Vehicles', () => {
 
   test('vehicle shows "Not tracked" location before any update', async ({ page }) => {
     const org = await registerOrg(page, `Vehicle Location ${uid()}`);
-    const reg = `KA05ZZ${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `KA05ZZ${uid().toUpperCase().slice(-4)}`;
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Registration Number').fill(reg);
@@ -69,7 +69,7 @@ test.describe('Vehicles', () => {
 
   test('delete a vehicle removes it from the list', async ({ page }) => {
     const org = await registerOrg(page, `Vehicle Delete ${uid()}`);
-    const reg = `DL01AA${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `DL01AA${uid().toUpperCase().slice(-4)}`;
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Registration Number').fill(reg);
@@ -90,7 +90,7 @@ test.describe('Vehicles', () => {
 
   test('a GPS tracker pushes the vehicle location using only its key', async ({ page }) => {
     const org = await registerOrg(page, `Vehicle Track ${uid()}`);
-    const reg = `MH20GP${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `MH20GP${uid().toUpperCase().slice(-4)}`;
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Registration Number').fill(reg);
@@ -120,7 +120,7 @@ test.describe('Vehicles', () => {
 
   test('regenerating the tracker key invalidates the old one', async ({ page }) => {
     const org = await registerOrg(page, `Vehicle Rotate ${uid()}`);
-    const reg = `MH21GP${uid().toUpperCase().slice(0, 4)}`;
+    const reg = `MH21GP${uid().toUpperCase().slice(-4)}`;
 
     await page.goto(`/orgs/${org.id}`);
     await page.getByLabel('Registration Number').fill(reg);
