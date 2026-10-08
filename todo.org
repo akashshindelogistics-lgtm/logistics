@@ -1161,7 +1161,7 @@
    `npm run test:e2e:demo:vendor-payments`. README, pages.yml and
    docs/vehicle-vendors.md updated.
 ** TODO Phase 4: Optional - vendor rate cards, per-hire GPS tracker key, delay alert for dispatches stuck awaiting a vehicle
-* TODO 3D icons and vehicle models in the UI - replace the flat hand-drawn SVGs in components/Icons.tsx with 3D-style icons, and show a per-type 3D vehicle model, so the dashboard looks more polished
+* DONE 3D icons and vehicle models in the UI - replace the flat hand-drawn SVGs in components/Icons.tsx with 3D-style icons, and show a per-type 3D vehicle model, so the dashboard looks more polished
   Libraries / assets:
   - Microsoft Fluent Emoji 3D (MIT) - clay-style 3D PNG/SVG: delivery truck, articulated lorry, pickup, auto-rickshaw, tractor, package, factory, fuel pump, map pin
   - 3dicons.co (CC0) - matching general UI icons (chart, calendar, wallet, bell, shield)
@@ -1170,9 +1170,34 @@
   - lucide-react to replace the remaining flat icons in Icons.tsx (Truck, Container, Forklift, Warehouse, Fuel)
   - optional: @lottiefiles/dotlottie-react for animated loading/empty/success states
   Start with Phases 1-3 (cheap, big visual win); keep live 3D canvases to VehicleDetail only, never in lists/tables.
-** TODO Phase 1: add vehicle_type to Vehicle (Truck, Tipper, Trailer, Tempo, Pickup, Tanker) - migration in ensure_table, API, create/edit form, README API docs
-** TODO Phase 2: 3D icon set - curated Fluent/3dicons PNGs in frontend/src/assets/3d/, an <Icon3D name=... /> component, used on dashboard stat cards, page headers, empty states and the login hero
-** TODO Phase 3: per-type vehicle visuals - map vehicle_type -> 3D icon + .glb model (lib/vehicleVisuals.ts), show the type icon on vehicle list rows/cards
-** TODO Phase 4: interactive 3D model on VehicleDetail - rotating .glb tinted by status (on trip/idle/maintenance), React.lazy-loaded so three.js (~150 KB gz) stays off other pages, static poster fallback while loading or without WebGL
-** TODO Phase 5: Leaflet map markers as type-specific 3D icon divIcons, rotated to GPS heading when available
-** TODO Phase 6: unit tests for the type -> asset mapping and fallback, Playwright tests forcing the poster image (avoid flaky headless WebGL), standalone headed demo flow (test:e2e:demo:vehicle-visuals)
+  Shipped with Fluent Emoji 3D + Kenney Car Kit + @react-three/fiber (no drei, no lucide/3dicons/Lottie: not needed).
+** DONE Phase 1: add vehicle_type to Vehicle (Truck, Tipper, Trailer, Tempo, Pickup, Tanker) - migration in ensure_table, API, create/edit form, README API docs
+   VehicleType enum (lenient from_str, unknown -> Truck) in vehicle.rs; Vehicle.vehicle_type column
+   VARCHAR(20) NOT NULL DEFAULT 'Truck', added to older tables by ensure_vehicle_type_column (called from
+   ensure_tracker_key_column so every existing migration path picks it up). Optional vehicle_type on
+   POST /api/orgs/{id}/vehicles and PUT /api/vehicles/{reg} (omitted on edit keeps the type); row mapping
+   shared through Vehicle::row_to_vehicle. Assistant vehicle chunk text names the type. Type select on the
+   add-vehicle form and the vehicle detail page. 8 new Rust tests, Vitest updates, README rows.
+** DONE Phase 2: 3D icon set - curated Fluent/3dicons PNGs in frontend/src/assets/3d/, an <Icon3D name=... /> component, used on dashboard stat cards, page headers, empty states and the login hero
+   17 Fluent Emoji 3D icons (MIT, licence alongside) downscaled to 160px; components/Icon3D.tsx. Used on the
+   dashboard stat cards + hero cluster, the login brand + feature list, and empty states on every page except
+   OrganizationDetail (left alone to avoid clashing with the org-page split). Sidebar keeps flat icons.
+** DONE Phase 3: per-type vehicle visuals - map vehicle_type -> 3D icon + .glb model (lib/vehicleVisuals.ts), show the type icon on vehicle list rows/cards
+   Kenney Car Kit (CC0) models in public/models/vehicles: Truck=delivery, Tipper=garbage-truck minus its arm,
+   Trailer=delivery-flat, Tempo=van, Pickup=truck, Tanker=delivery-flat + a procedural tank. Each type's icon is a
+   still render of its model (npm run render:vehicle-icons: Vite + headless Chromium, auto-cropped to 192px).
+   Fleet tables on /vehicles (new Type column) and the org page show the icon.
+** DONE Phase 4: interactive 3D model on VehicleDetail - rotating .glb tinted by status (on trip/idle/maintenance), React.lazy-loaded so three.js (~150 KB gz) stays off other pages, static poster fallback while loading or without WebGL
+   components/vehicle3d/VehicleScene (r3f + three's GLTFLoader/OrbitControls) on a turntable with a status
+   ring: Available green, On a trip amber, In transit blue with spinning wheels, Service overdue red (from
+   dispatches + maintenance, lib/vehicleVisuals.vehicleActivity). Previews the type picked in the form before
+   saving. Lazy chunk is ~260 KB gz (r3f pulls all of three), main bundle unchanged. Poster fallback without
+   WebGL, on error, or with localStorage logitrack:disable-3d=1 (lib/webgl.ts).
+** DONE Phase 5: Leaflet map markers as type-specific 3D icon divIcons, rotated to GPS heading when available
+   MapPin.iconUrl -> cached image DivIcon (LocationMap.imagePinIcon). Vehicles by type on /vehicles, the org
+   page and trips; customers/trip stops as a store, godowns as a factory, the org office as a building. 3D
+   markers are exempt from the monochrome grayscale filter. Not rotated: Location has no heading field yet.
+** DONE Phase 6: unit tests for the type -> asset mapping and fallback, Playwright tests forcing the poster image (avoid flaky headless WebGL), standalone headed demo flow (test:e2e:demo:vehicle-visuals)
+   Vitest: vehicleVisuals, webgl, Icon3D, VehicleShowcase, LocationMap image pins, Vehicles/VehicleDetail pages.
+   tests/vehicle-visuals.spec.ts (poster mode), a Tipper + 3D check in e2e-full-flow, and the narrated
+   tests/vehicle-visuals.demo.ts (npm run test:e2e:demo:vehicle-visuals) with real WebGL.

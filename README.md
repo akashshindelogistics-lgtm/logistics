@@ -244,7 +244,15 @@ npm run test:e2e:demo:stock-categories # stock categories
 npm run test:e2e:demo:vendors        # vehicle vendors
 npm run test:e2e:demo:hired-vehicles # dispatching on a hired truck
 npm run test:e2e:demo:vendor-payments # paying vendors + hired-transport report
+npm run test:e2e:demo:vehicle-visuals # 3D icons, vehicle types and the 3D vehicle view
 ```
+
+The vehicle-type icons are still renders of the 3D models in
+`frontend/public/models/vehicles` (Kenney Car Kit, CC0). After changing a model
+or the scene lighting, regenerate them with `npm run render:vehicle-icons`. The
+other 3D icons are Microsoft Fluent Emoji (MIT). Set
+`localStorage['logitrack:disable-3d'] = '1'` to show still renders instead of the
+live WebGL view.
 
 ## API overview
 
