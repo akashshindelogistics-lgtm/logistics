@@ -224,7 +224,7 @@ rules are unit-tested as plain Kotlin, the same split `mobile/src/lib/` uses.
 Android Studio is downloaded (`~/Downloads/android-studio-rabbit1-linux.tar.gz`)
 and extracted to `~/Downloads/android-studio` (build 262.9437, bundled JDK 25
 in `jbr/`). Steps 1-3 are done as of phase 2: the SDK at `~/Android/Sdk` has
-platforms 36 and 37, build-tools 36.0.0, and a `Medium_Phone` emulator
+platforms 36 and 37, build-tools 36.0.0, and a `Medium_Phone_API_37.0` emulator
 (API 37, Google APIs with Play Store, x86_64).
 
 1. Run `~/Downloads/android-studio/bin/studio.sh`. On this i3/X desktop, run it

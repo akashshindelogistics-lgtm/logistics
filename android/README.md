@@ -29,7 +29,7 @@ One-time, on this machine (details in the plan doc):
 
 - Android Studio extracted to `~/Downloads/android-studio`; its bundled JDK is `jbr/`.
 - SDK at `~/Android/Sdk` with platforms 36 and 37 and build-tools 36, plus the
-  `Medium_Phone` emulator (API 37, with Google Play services).
+  `Medium_Phone_API_37.0` emulator (API 37, with Google Play services).
 
 For command-line builds:
 

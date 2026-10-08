@@ -9,7 +9,7 @@
 # The run is recorded to android/build/demo/pairing-demo.mp4.
 #
 # Usage (from the repo root):  android/scripts/demo-pairing.sh
-# Env overrides: AVD (default Medium_Phone), API (default http://127.0.0.1:8080),
+# Env overrides: AVD (default: first from `emulator -list-avds`), API (default http://127.0.0.1:8080),
 # ANDROID_HOME (default ~/Android/Sdk), JAVA_HOME (default Studio's bundled JDK).
 set -euo pipefail
 
@@ -19,7 +19,9 @@ export ANDROID_HOME=$SDK
 export JAVA_HOME=${JAVA_HOME:-$HOME/Downloads/android-studio/jbr}
 ADB="$SDK/platform-tools/adb"
 EMULATOR="$SDK/emulator/emulator"
-AVD=${AVD:-Medium_Phone}
+# Default: the first emulator Android Studio created (names come from the
+# .ini file, e.g. Medium_Phone_API_37.0, not the .avd folder).
+AVD=${AVD:-$("$EMULATOR" -list-avds 2>/dev/null | head -n 1)}
 API=${API:-http://127.0.0.1:8080}
 OUT="$ROOT/android/build/demo"
 PKG=com.logistics.driver
@@ -65,13 +67,25 @@ echo "Device token: $TOKEN"
 
 # ── 3. Build, emulator, install ──────────────────────────────────────────────
 step "Building the debug APK"
-"$ROOT/android/gradlew" -p "$ROOT/android" assembleDebug --console=plain -q
+# No Gradle or Kotlin daemon left running afterwards: on a 16 GB machine the
+# emulator needs that memory, and starving it makes its watchdog kill it.
+"$ROOT/android/gradlew" -p "$ROOT/android" assembleDebug --console=plain -q \
+    --no-daemon -Pkotlin.compiler.execution.strategy=in-process
 
-step "Emulator ($AVD)"
+step "Emulator (${AVD:-none found})"
 if ! "$ADB" devices | grep -q 'device$'; then
-    DISPLAY=${DISPLAY:-:0} XDG_SESSION_TYPE=x11 "$EMULATOR" -avd "$AVD" -no-snapshot-save -no-boot-anim >"$OUT/emulator.log" 2>&1 &
+    [ -n "$AVD" ] || { echo "No emulator found; create one in Android Studio's Device Manager, or set AVD=<name>"; exit 1; }
+    # 4 cores rather than the AVD's default: plenty for the app, and leaves the
+    # host room for the backend.
+    DISPLAY=${DISPLAY:-:0} XDG_SESSION_TYPE=x11 "$EMULATOR" -avd "$AVD" -cores 4 -no-snapshot-save -no-boot-anim >"$OUT/emulator.log" 2>&1 &
+    EMULATOR_PID=$!
+    # Wait for boot, but give up if the emulator process exits (bad AVD name,
+    # no KVM, ...) instead of hanging in `adb wait-for-device`.
+    until [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do
+        kill -0 "$EMULATOR_PID" 2>/dev/null || { echo "The emulator exited:"; tail -5 "$OUT/emulator.log"; exit 1; }
+        sleep 2
+    done
 fi
-"$ADB" wait-for-device
 until [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 2; done
 "$ADB" shell input keyevent 82 >/dev/null 2>&1 || true   # wake / dismiss lock screen
 
