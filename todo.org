@@ -1161,3 +1161,18 @@
    `npm run test:e2e:demo:vendor-payments`. README, pages.yml and
    docs/vehicle-vendors.md updated.
 ** TODO Phase 4: Optional - vendor rate cards, per-hire GPS tracker key, delay alert for dispatches stuck awaiting a vehicle
+* TODO 3D icons and vehicle models in the UI - replace the flat hand-drawn SVGs in components/Icons.tsx with 3D-style icons, and show a per-type 3D vehicle model, so the dashboard looks more polished
+  Libraries / assets:
+  - Microsoft Fluent Emoji 3D (MIT) - clay-style 3D PNG/SVG: delivery truck, articulated lorry, pickup, auto-rickshaw, tractor, package, factory, fuel pump, map pin
+  - 3dicons.co (CC0) - matching general UI icons (chart, calendar, wallet, bell, shield)
+  - @react-three/fiber + @react-three/drei (+ gltfjsx) for interactive .glb vehicle models; simpler alternative: Google's <model-viewer> web component
+  - Kenney Car Kit / Quaternius / Poly Pizza (CC0) - low-poly truck, van, pickup, trailer .glb models
+  - lucide-react to replace the remaining flat icons in Icons.tsx (Truck, Container, Forklift, Warehouse, Fuel)
+  - optional: @lottiefiles/dotlottie-react for animated loading/empty/success states
+  Start with Phases 1-3 (cheap, big visual win); keep live 3D canvases to VehicleDetail only, never in lists/tables.
+** TODO Phase 1: add vehicle_type to Vehicle (Truck, Tipper, Trailer, Tempo, Pickup, Tanker) - migration in ensure_table, API, create/edit form, README API docs
+** TODO Phase 2: 3D icon set - curated Fluent/3dicons PNGs in frontend/src/assets/3d/, an <Icon3D name=... /> component, used on dashboard stat cards, page headers, empty states and the login hero
+** TODO Phase 3: per-type vehicle visuals - map vehicle_type -> 3D icon + .glb model (lib/vehicleVisuals.ts), show the type icon on vehicle list rows/cards
+** TODO Phase 4: interactive 3D model on VehicleDetail - rotating .glb tinted by status (on trip/idle/maintenance), React.lazy-loaded so three.js (~150 KB gz) stays off other pages, static poster fallback while loading or without WebGL
+** TODO Phase 5: Leaflet map markers as type-specific 3D icon divIcons, rotated to GPS heading when available
+** TODO Phase 6: unit tests for the type -> asset mapping and fallback, Playwright tests forcing the poster image (avoid flaky headless WebGL), standalone headed demo flow (test:e2e:demo:vehicle-visuals)
