@@ -1044,6 +1044,30 @@
    Android SDK or macOS in this environment) — see mobile/README.md's
    "Known gaps" for that and for QR pairing / a "who am I" read endpoint,
    both deferred to phase 2.
+* TODO [#B] Native Android driver app (Kotlin) to replace the React Native/Expo app in mobile/ - same job: pair with a device token, report location in the background, queue fixes offline
+  Why: the Expo app (Phase 4 above) has never run on a real phone and has
+  no signed build, and background location is the whole point of the app. A
+  native app gives direct control over the foreground service, permissions
+  and the battery-optimisation / background-kill behaviour common on the
+  Android phones drivers use (Xiaomi, Vivo, Oppo, Realme). Android Studio is
+  now installed locally, so it can be built and run on an emulator or a USB
+  device here. Android only; no iOS.
+  Backend is unchanged: POST /api/driver/location with the driver's device
+  token (Authorization: Bearer), batches of up to 100 fixes, client-side
+  validation mirroring validate_driver_fix - see
+  [[file:docs/driver-phone-tracking.md]]. Pairing is a typed token for now;
+  switch to scanning the QR from the dashboard pairing panel once driver
+  tracking Phase 2 lands.
+  Suggested stack: Kotlin, Jetpack Compose, FusedLocationProviderClient in a
+  location-type foreground service, Room for the offline queue, WorkManager
+  (network constraint) to flush it, encrypted storage for the token,
+  OkHttp/Retrofit.
+** TODO Phase 1: plan doc (docs/android-driver-app.md) - stack, min SDK, permission flow (fine -> background location, notifications), battery-optimisation guidance for drivers, what happens to mobile/
+** TODO Phase 2: project skeleton under android/ - Gradle (Kotlin DSL), pairing screen (token + server URL, stored encrypted), status screen (sharing toggle, queued count, last sync, unpair); ./gradlew assembleDebug builds and the app runs on an emulator
+** TODO Phase 3: background reporting - foreground service with a persistent notification, a fix every 30s/50m, validation, Room queue, batched upload, 401/403/409 keep the queue, resumes after reboot and app updates
+** TODO Phase 4: tests - JVM unit tests (validation, queue, batching, API client against MockWebServer), a Compose UI test for pairing, an end-to-end run on the emulator against the local backend (10.0.2.2:8080) that moves a vehicle on the dashboard map, plus a recorded demo
+** TODO Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideload APK or Play internal testing), CI job that builds the APK
+** TODO Phase 6: retire mobile/ once the native app is verified on a real phone - delete the Expo app, update README, docs/driver-phone-tracking.md and the driver tracking Phase 4 note
 * TODO [#B] New-organisation onboarding flow - guided setup so a new org can reach its first dispatch, instead of landing on empty pages
   Plan written: [[file:docs/onboarding.md]]
   Defaults chosen: public self-serve signup that creates the org plus its first
