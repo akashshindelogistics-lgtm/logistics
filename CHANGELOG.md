@@ -4,6 +4,34 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.11.1](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.11.0...v0.11.1) (2026-10-10)
+
+
+### Documentation
+
+* **onboarding:** add E2E test org manifest as a rehearsal before Mau… ([dfc558f](https://github.com/akashshindelogistics-lgtm/logistics/commit/dfc558f28919004b4404a330052d18bae4c220f4))
+
+## [0.11.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.10.0...v0.11.0) (2026-10-10)
+
+
+### Features
+
+* 3D icons, vehicle types and 3D vehicle models ([1a02107](https://github.com/akashshindelogistics-lgtm/logistics/commit/1a0210797b0b0b05181f361198e2e5697115bbea))
+* **driver:** GET /api/driver/me for the driver's phone ([5908aa1](https://github.com/akashshindelogistics-lgtm/logistics/commit/5908aa16b56c63473e5c34d0e08cfa52a6b5daa3))
+* **driver:** GET /api/driver/me for the driver's phone ([c7c8c6e](https://github.com/akashshindelogistics-lgtm/logistics/commit/c7c8c6e691a05b6c51ae3cc1d81dfc1c6c910fc8))
+* **ui:** 3D icons, per-type vehicle renders, 3D vehicle view and 3D map markers ([e49f5c7](https://github.com/akashshindelogistics-lgtm/logistics/commit/e49f5c7076963eefb36999ce1a9f845e38251aa8))
+* **vehicles:** add vehicle_type (Truck/Tipper/Trailer/Tempo/Pickup/Tanker) ([ab70774](https://github.com/akashshindelogistics-lgtm/logistics/commit/ab7077484c78ff51e55da23f662e38c84df1775f))
+
+
+### Documentation
+
+* plan the native Android driver app (phase 1) ([6c079c9](https://github.com/akashshindelogistics-lgtm/logistics/commit/6c079c93199c8b01106edb98e7632f66cb0c4d52))
+* plan the native Android driver app (phase 1) ([00047fb](https://github.com/akashshindelogistics-lgtm/logistics/commit/00047fbb4b8870354c16f0d9949245e611a25299))
+* **todo:** plan 3D icons and vehicle models for the UI ([41c4263](https://github.com/akashshindelogistics-lgtm/logistics/commit/41c426317b9d4421e688171c6bc46c2877738f88))
+* **todo:** plan a native Android driver app to replace the Expo one ([fc5f219](https://github.com/akashshindelogistics-lgtm/logistics/commit/fc5f219763146655f5eb2f43dce06bdceed01746))
+* **todo:** plan a native Android driver app to replace the Expo one ([b2e4e0e](https://github.com/akashshindelogistics-lgtm/logistics/commit/b2e4e0e3626559faeca4421f708a6c5cb549f3e5))
+* **todo:** plan motion in the UI ([fab1ebc](https://github.com/akashshindelogistics-lgtm/logistics/commit/fab1ebc75d462fdc3234a7e7cb86eabeb8bc88f1))
+
 ## [0.10.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.9.0...v0.10.0) (2026-10-07)
 
 
