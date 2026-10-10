@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { prefersReducedMotion, useCountUp, useLivePolling, useReducedMotion } from './motion';
+import { animateList, prefersReducedMotion, useCountUp, useLivePolling, useReducedMotion } from './motion';
 
 const realMatchMedia = window.matchMedia;
 const withMotion = (reduce: boolean) => {
@@ -54,6 +54,14 @@ describe('motion helpers', () => {
     unmount();
     act(() => { vi.advanceTimersByTime(5000); });
     expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it('animateList sets a container up once, however often React calls the ref', () => {
+    const el = document.createElement('tbody');
+    animateList(el);
+    animateList(el);
+    animateList(null);
+    expect(el.dataset.listAnimated).toBe('1');
   });
 
   it('useLivePolling skips refreshes while the tab is hidden', () => {

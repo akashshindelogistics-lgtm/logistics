@@ -51,6 +51,38 @@ test('motion in the UI', async ({ page }) => {
     }
   });
 
+  await test.step('The org page: sections rise in, counts tick up, new rows and cards slide in', async () => {
+    await page.goto(`/orgs/${org.id}`);
+    await expect(page.getByTestId('fleet-table')).toBeVisible({ timeout: 8000 });
+    await page.waitForTimeout(1800);
+
+    // A new vehicle's row slides into the fleet table, and the header count ticks up.
+    const pickup = `MH12MK${tag}`;
+    await page.getByLabel('Registration Number').fill(pickup);
+    await page.getByLabel('Capacity (MT)').fill('2');
+    await page.getByLabel('Type', { exact: true }).selectOption('Pickup');
+    await page.getByRole('button', { name: /add vehicle/i }).click();
+    await expect(page.getByTestId('fleet-table').getByText(pickup)).toBeVisible({ timeout: 8000 });
+    await page.waitForTimeout(1500);
+
+    // A new godown's card slides in under the existing one.
+    await page.getByLabel('Godown Name').fill('Overflow Yard');
+    await page.getByLabel('Address').fill('Talegaon MIDC');
+    await page.getByRole('button', { name: /add godown/i }).click();
+    await expect(page.getByTestId('godown-card')).toHaveCount(2, { timeout: 8000 });
+    await page.getByTestId('godown-card').last().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+
+    // Dispatch form: an extra stock line slides in, and out again when removed.
+    await page.getByRole('button', { name: /add another line/i }).scrollIntoViewIfNeeded();
+    await page.getByRole('button', { name: /add another line/i }).click();
+    await expect(page.getByTestId('dispatch-line-item')).toHaveCount(2);
+    await page.waitForTimeout(1000);
+    await page.getByRole('button', { name: 'Remove stock line 2' }).click();
+    await expect(page.getByTestId('dispatch-line-item')).toHaveCount(1);
+    await page.waitForTimeout(1000);
+  });
+
   await test.step('The dashboard: stat cards rise in one after another and count up', async () => {
     await page.goto('/');
     await expect(page.locator('.stat-card')).toHaveCount(4);

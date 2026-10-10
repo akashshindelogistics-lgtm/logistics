@@ -9,14 +9,12 @@ import type { DispatchOrder } from '../types';
 import './page.css';
 import './Dashboard.css';
 import { m } from 'motion/react';
-import { DURATION, EASE_OUT, useCountUp, useListAnimation } from '../lib/motion';
+import { DURATION, EASE_OUT, useListAnimation } from '../lib/motion';
+import CountUp from '../components/CountUp';
 
 // Stat cards are links that fade up one after another on first paint.
 const MotionLink = m.create(Link);
 
-function StatValue({ value }: { value: number }) {
-  return <div className="stat-value">{useCountUp(value).toLocaleString()}</div>;
-}
 
 export default function Dashboard() {
   const rowsRef = useListAnimation();
@@ -78,7 +76,7 @@ export default function Dashboard() {
             <div>
               {loading
                 ? <div className="skeleton" style={{ width: 60, height: 36, marginBottom: 6 }} />
-                : <StatValue value={value} />
+                : <div className="stat-value"><CountUp value={value} /></div>
               }
               <div className="stat-label">{label}</div>
             </div>

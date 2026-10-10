@@ -1215,7 +1215,9 @@
    lib/motion.ts (prefersReducedMotion/useReducedMotion, useListAnimation over @formkit/auto-animate) on the
    Vehicles, Customers, Dispatches, Team, Vendors, Organizations and dashboard tables; MotionProvider
    (LazyMotion domMax + MotionConfig reducedMotion="user"); sliding sidebar highlight via layoutId; button press
-   scale, badge colour transitions; a global CSS reduced-motion kill switch. OrganizationDetail left alone.
+   scale, badge colour transitions; a global CSS reduced-motion kill switch. Later extended to the org page on request:
+   its five tables, godown cards + per-godown stock (animateList ref), dispatch stock lines, header count-up,
+   staggered section entrance, gliding vehicle pins with 10 s refresh.
 ** DONE Phase 2: page transitions - React Router viewTransition for list -> detail (vehicle row icon morphs into the VehicleDetail showcase), with a plain fade fallback where the API is missing
    React Router's viewTransition needs a data router and the app uses <BrowserRouter>, so lib/viewTransition.ts
    wraps navigate() in document.startViewTransition + flushSync. Sidebar links cross-fade the page (sidebar is its

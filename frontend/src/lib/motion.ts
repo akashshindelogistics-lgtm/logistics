@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { animate } from 'motion/react';
+import autoAnimate from '@formkit/auto-animate';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 
 // Shared motion settings. Everything that moves goes through here or through
@@ -88,4 +89,15 @@ export function useLivePolling(refresh: () => void, intervalMs = LIVE_POLL_MS) {
       document.removeEventListener('visibilitychange', tick);
     };
   }, [intervalMs]);
+}
+
+/**
+ * Ref callback version of useListAnimation, for list containers rendered
+ * inside a loop (where a hook cannot be called). Stable across renders, and
+ * marks the element so it is only set up once.
+ */
+export function animateList(el: HTMLElement | null) {
+  if (!el || el.dataset.listAnimated) return;
+  el.dataset.listAnimated = '1';
+  autoAnimate(el, { duration: 220, easing: 'ease-out' });
 }
