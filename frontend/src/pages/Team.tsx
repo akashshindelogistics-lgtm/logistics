@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { listOrgUsers, createOrgUser, updateOrgUser, deleteOrgUser } from '../api/users';
 import { getOrgId, isAdmin } from '../api/auth';
-import { IconUsers, IconPlus, IconX, IconTrash } from '../components/Icons';
+import { IconPlus, IconX, IconTrash } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import { ORG_ROLES, ROLE_LABELS, type OrgRole, type OrgUser } from '../types';
 import './page.css';
 
@@ -70,7 +71,7 @@ export default function Team() {
     return (
       <div className="page">
         <div className="empty-state">
-          <div className="empty-state-icon"><IconUsers size={26} /></div>
+          <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="people" size={48} /></div>
           <h3>Admins only</h3>
           <p>Only an organization admin can manage team members.</p>
         </div>
@@ -132,7 +133,7 @@ export default function Team() {
           <div style={{ padding: 20 }}><div className="skeleton" style={{ height: 20 }} /></div>
         ) : users.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconUsers size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="people" size={48} /></div>
             <h3>No team members yet</h3>
             <p>The organization sign-in is the admin. Add members so others can log in with their own role.</p>
           </div>

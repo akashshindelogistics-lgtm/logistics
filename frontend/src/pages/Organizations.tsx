@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { listOrgs, deleteOrg } from '../api/orgs';
 import { getOrgId } from '../api/auth';
 import { IconBuilding, IconPin, IconChevron } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import type { Organization } from '../types';
 import './page.css';
 
@@ -55,7 +56,7 @@ export default function Organizations() {
           </div>
         ) : orgs.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconBuilding size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="building" size={48} /></div>
             <h3>No organizations found</h3>
             <p>You are not associated with any organization.</p>
           </div>

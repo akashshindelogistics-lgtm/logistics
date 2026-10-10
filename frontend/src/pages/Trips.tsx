@@ -5,7 +5,9 @@ import { listCustomers } from '../api/customers';
 import { listVehicles } from '../api/vehicles';
 import { getOrgId } from '../api/auth';
 import { listVendors } from '../api/vendors';
-import { IconDispatch, IconPlus, IconX, IconTruck } from '../components/Icons';
+import { IconPlus, IconX, IconTruck } from '../components/Icons';
+import Icon3D, { ICONS_3D } from '../components/Icon3D';
+import { vehicleVisual } from '../lib/vehicleVisuals';
 import { STATUS_TAG_CLASS, formatStatus } from '../lib/dispatchLifecycle';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import type { Customer, Trip, TripStatus, Vehicle, VehicleVendor } from '../types';
@@ -68,6 +70,7 @@ export default function Trips() {
         lng: vehicle.location.longitude,
         label: `🚚 ${vehicle.registration_number}`,
         detail: `Last reported ${new Date(vehicle.location.timestamp * 1000).toLocaleString()}`,
+        iconUrl: vehicleVisual(vehicle.vehicle_type).icon,
       });
     }
     for (const s of t.stops) {
@@ -78,6 +81,7 @@ export default function Trips() {
           lng: c.location.longitude,
           label: `Stop ${s.stop_sequence}: ${c.name}`,
           detail: formatStatus(s.status),
+          iconUrl: ICONS_3D.store,
         });
       }
     }
@@ -197,7 +201,7 @@ export default function Trips() {
           <div style={{ padding: 20 }}><div className="skeleton" style={{ height: 20 }} /></div>
         ) : trips.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconDispatch size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="road" size={48} /></div>
             <h3>No trips yet</h3>
             <p>Plan a multi-stop trip to send one vehicle to several customers in a row.</p>
           </div>

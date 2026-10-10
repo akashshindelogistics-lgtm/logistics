@@ -1,0 +1,86 @@
+.vehicle-showcase {
+  background:
+    radial-gradient(ellipse at 50% 85%, color-mix(in srgb, var(--status) 14%, transparent), transparent 60%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  overflow: hidden;
+}
+
+.vehicle-showcase-stage {
+  position: relative;
+  height: 280px;
+}
+
+.vehicle-showcase-poster {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 200px;
+  height: 200px;
+  object-fit: contain;
+  transition: opacity 0.4s ease;
+  filter: drop-shadow(0 10px 14px rgba(15, 23, 42, 0.18));
+}
+
+.vehicle-showcase-canvas {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  cursor: grab;
+}
+.vehicle-showcase-canvas:active { cursor: grabbing; }
+
+.vehicle-showcase.is-ready .vehicle-showcase-poster { opacity: 0; }
+.vehicle-showcase.is-ready .vehicle-showcase-canvas { opacity: 1; }
+
+.vehicle-showcase-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.vehicle-showcase-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+  color: var(--status);
+  background: color-mix(in srgb, var(--status) 12%, transparent);
+}
+
+.vehicle-showcase-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status) 25%, transparent);
+}
+
+.vehicle-showcase[data-activity='in-transit'] .vehicle-showcase-dot {
+  animation: vehicle-showcase-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes vehicle-showcase-pulse {
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--status) 0%, transparent); }
+}
+
+.vehicle-showcase-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vehicle-showcase-poster,
+  .vehicle-showcase-canvas { transition: none; }
+  .vehicle-showcase[data-activity='in-transit'] .vehicle-showcase-dot { animation: none; }
+}

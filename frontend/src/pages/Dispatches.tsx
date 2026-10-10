@@ -7,6 +7,7 @@ import { uploadFile, uploadedFileHref } from '../api/uploads';
 import { getOrgId } from '../api/auth';
 import { listVehicleHires, assignVehicleHire } from '../api/vendors';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, isRunningLate, type NextAction } from '../lib/dispatchLifecycle';
 import type { DispatchOrder, Invoice, Notification, NotificationStatus, PaymentStatus, VehicleHire } from '../types';
 import './page.css';
@@ -318,7 +319,7 @@ export default function Dispatches() {
           </div>
         ) : orders.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconDispatch size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="outbox" size={48} /></div>
             <h3>No dispatch orders yet</h3>
             <p>Dispatch orders are created from an organization's detail page when stock is sent to a customer.</p>
           </div>

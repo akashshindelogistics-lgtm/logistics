@@ -318,6 +318,31 @@ tbody tr:hover td { background: var(--row-hover); }
   padding: 60px 20px;
 }
 
+/* Rendered vehicle-type icon in fleet tables */
+.vehicle-type-icon {
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 3px rgba(15, 23, 42, 0.18));
+}
+
+/* Vehicle detail: 3D showcase beside the edit form */
+.vehicle-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 460px);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .vehicle-detail-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.empty-state-icon.empty-state-icon-3d {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: radial-gradient(circle at 50% 40%, var(--brand-light), transparent 72%);
+}
+
 .empty-state-icon {
   width: 56px;
   height: 56px;

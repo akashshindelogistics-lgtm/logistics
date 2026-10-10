@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { listVehicles, updateVehicle, rotateTrackerKey } from '../api/vehicles';
+import { listVehicles, updateVehicle, rotateTrackerKey, listVehicleMaintenance } from '../api/vehicles';
 import { listDrivers } from '../api/drivers';
-import { IconTruck, IconChevron, IconCheck } from '../components/Icons';
-import type { Driver, Unit, Vehicle } from '../types';
-import { UNITS } from '../types';
+import { listDispatches } from '../api/dispatches';
+import { IconChevron, IconCheck } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
+import VehicleShowcase from '../components/vehicle3d/VehicleShowcase';
+import { vehicleActivity, vehicleVisual, type VehicleActivity } from '../lib/vehicleVisuals';
+import type { Driver, Unit, Vehicle, VehicleType } from '../types';
+import { UNITS, VEHICLE_TYPES } from '../types';
 import './page.css';
 
 export default function VehicleDetail() {
@@ -16,10 +20,12 @@ export default function VehicleDetail() {
   const [loading, setLoading] = useState(true);
   const [capacity, setCapacity] = useState('');
   const [unit, setUnit] = useState<Unit>('MetricTon');
+  const [vehicleType, setVehicleType] = useState<VehicleType>('Truck');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [rotating, setRotating] = useState(false);
   const [keyMsg, setKeyMsg] = useState<string | null>(null);
+  const [activity, setActivity] = useState<VehicleActivity>('idle');
 
   useEffect(() => {
     Promise.all([listVehicles(), listDrivers()])
@@ -30,9 +36,22 @@ export default function VehicleDetail() {
         if (v) {
           setCapacity(String(v.capacity));
           setUnit(v.unit);
+          setVehicleType(v.vehicle_type ?? 'Truck');
         }
       })
       .finally(() => setLoading(false));
+  }, [reg]);
+
+  // What the vehicle is doing, for the 3D view's status ring. Best effort:
+  // if either list fails the vehicle just shows as available.
+  useEffect(() => {
+    let cancelled = false;
+    const orEmpty = <T,>(load: () => Promise<{ data?: T[] | null }>) =>
+      Promise.resolve().then(load).then(r => r?.data ?? []).catch(() => [] as T[]);
+    Promise.all([orEmpty(listDispatches), orEmpty(() => listVehicleMaintenance(reg))]).then(([dispatches, maintenance]) => {
+      if (!cancelled) setActivity(vehicleActivity(reg, dispatches, maintenance));
+    });
+    return () => { cancelled = true; };
   }, [reg]);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -40,7 +59,7 @@ export default function VehicleDetail() {
     setSaving(true);
     setMsg(null);
     try {
-      const res = await updateVehicle(reg, Number(capacity), unit);
+      const res = await updateVehicle(reg, Number(capacity), unit, vehicleType);
       setVehicle(res.data ?? vehicle);
       setMsg({ text: 'Vehicle updated.', ok: true });
     } catch (err) {
@@ -64,7 +83,7 @@ export default function VehicleDetail() {
     return (
       <div className="page">
         <div className="empty-state">
-          <div className="empty-state-icon"><IconTruck size={28} /></div>
+          <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="truck" size={48} /></div>
           <h3>Vehicle not found</h3>
           <p>This vehicle may have been removed, or belongs to another organization.</p>
           <Link to="/vehicles" className="btn btn-primary">Back to Fleet</Link>
@@ -100,15 +119,16 @@ export default function VehicleDetail() {
 
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--green-bg)', color: 'var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <IconTruck size={22} />
-          </div>
+          <img src={vehicleVisual(vehicle.vehicle_type).icon} alt="" width={56} height={56} style={{ objectFit: 'contain', flexShrink: 0 }} />
           <div className="page-title-group">
             <h1>{vehicle.registration_number}</h1>
             <p>Edit this vehicle's details</p>
           </div>
         </div>
       </div>
+
+      <div className="vehicle-detail-grid">
+      <VehicleShowcase type={vehicleType} activity={activity} />
 
       <div className="form-panel" style={{ maxWidth: 460 }}>
         <h2>Vehicle Details</h2>
@@ -128,6 +148,12 @@ export default function VehicleDetail() {
               {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
           </div>
+          <div className="field">
+            <label htmlFor="v-type">Type</label>
+            <select id="v-type" value={vehicleType} onChange={e => setVehicleType(e.target.value as VehicleType)}>
+              {VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-primary" type="submit" disabled={saving}>
               {saving ? 'Saving…' : 'Save'}
@@ -140,6 +166,7 @@ export default function VehicleDetail() {
           <div><span className="muted">Assigned driver</span><div>{assignedDriver ? assignedDriver.name : <span className="muted">None</span>}</div></div>
           <div><span className="muted">Location</span><div>{vehicle.location ? `${vehicle.location.latitude.toFixed(4)}, ${vehicle.location.longitude.toFixed(4)}` : <span className="muted">Not set</span>}</div></div>
         </div>
+      </div>
       </div>
 
       {vehicle.tracker_key && (

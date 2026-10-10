@@ -2,7 +2,7 @@
 //! (`POST /api/track/{tracker_key}`).
 
 use crate::logistics::orgs::orgs::Organization;
-use crate::logistics::vehicle::vehicle::{Unit, Vehicle};
+use crate::logistics::vehicle::vehicle::{Unit, Vehicle, VehicleType};
 use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -27,12 +27,19 @@ pub struct CreateVehiclePayload {
     pub registration_number: String,
     pub capacity: i64,
     pub unit: String,
+    /// Truck, Tipper, Trailer, Tempo, Pickup or Tanker. Omitted or
+    /// unrecognised means Truck.
+    #[serde(default)]
+    pub vehicle_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct UpdateVehiclePayload {
     pub capacity: i64,
     pub unit: String,
+    /// New body style. Omitted keeps the vehicle's current type.
+    #[serde(default)]
+    pub vehicle_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -105,7 +112,13 @@ pub async fn add_vehicle(
     };
 
     let unit = Unit::from_str(&payload.unit);
-    let vehicle = Vehicle::new(&payload.registration_number, payload.capacity, unit);
+    let vehicle_type = payload
+        .vehicle_type
+        .as_deref()
+        .map(VehicleType::from_str)
+        .unwrap_or_default();
+    let vehicle = Vehicle::new(&payload.registration_number, payload.capacity, unit)
+        .with_type(vehicle_type);
 
     match vehicle.add_new_vehicle_to_org(&org) {
         Ok(_) => HttpResponse::Created().json(ApiResponse {
@@ -170,7 +183,13 @@ pub async fn edit_vehicle(
     }
 
     let mut vehicle = Vehicle::new(&reg, payload.capacity, Unit::from_str(&payload.unit));
-    match vehicle.update_vehicle(payload.capacity, Unit::from_str(&payload.unit)) {
+    let updated = vehicle
+        .update_vehicle(payload.capacity, Unit::from_str(&payload.unit))
+        .and_then(|_| match payload.vehicle_type.as_deref() {
+            Some(t) => vehicle.set_vehicle_type(VehicleType::from_str(t)),
+            None => Ok(()),
+        });
+    match updated {
         Ok(_) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: "Vehicle updated successfully".to_string(),

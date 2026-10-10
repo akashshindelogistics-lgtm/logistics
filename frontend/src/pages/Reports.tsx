@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getOpsReport, getOpsReportSummary } from '../api/reports';
 import { getOrgId } from '../api/auth';
 import { IconChart, IconTruck, IconDispatch, IconClock, IconCheck, IconPackage } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import type { HiredTransport, OpsReport } from '../types';
 import './page.css';
 import './Dashboard.css';
@@ -75,7 +76,7 @@ export default function Reports() {
         </div>
       ) : error || !report ? (
         <div className="empty-state">
-          <div className="empty-state-icon"><IconChart size={26} /></div>
+          <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="chart" size={48} /></div>
           <h3>No report available</h3>
           <p>Reports need an organization. Once you have dispatches and vehicles, the numbers show up here.</p>
         </div>

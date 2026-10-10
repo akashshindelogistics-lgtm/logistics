@@ -1,5 +1,32 @@
 .dash-hero {
   margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* Overlapping 3D icon cluster on the right of the greeting */
+.dash-hero-art {
+  position: relative;
+  width: 170px;
+  height: 96px;
+  flex-shrink: 0;
+}
+.dash-hero-art .icon-3d { position: absolute; }
+.dash-hero-art-back  { left: 0;    top: 4px;  opacity: .9; transform: rotate(-8deg); }
+.dash-hero-art-main  { left: 44px; top: 4px; }
+.dash-hero-art-front { right: 0;   bottom: 0; transform: rotate(6deg); }
+
+@media (max-width: 640px) {
+  .dash-hero-art { display: none; }
+}
+
+/* 3D icons carry their own color; drop the tinted tile behind them */
+.stat-icon.stat-icon-3d {
+  width: 44px;
+  height: 44px;
+  background: none !important;
 }
 
 .dash-hero-title {

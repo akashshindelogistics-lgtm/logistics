@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import VehicleDetail from './VehicleDetail';
 import * as vehiclesApi from '../api/vehicles';
 import * as driversApi from '../api/drivers';
+import * as dispatchesApi from '../api/dispatches';
 
 vi.mock('react-router-dom', async importOriginal => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
@@ -12,6 +13,7 @@ vi.mock('react-router-dom', async importOriginal => {
 });
 vi.mock('../api/vehicles');
 vi.mock('../api/drivers');
+vi.mock('../api/dispatches');
 
 const ok = <T,>(data: T) => ({ success: true, message: '', data });
 
@@ -43,9 +45,11 @@ describe('VehicleDetail page', () => {
     await user.clear(capacity);
     await user.type(capacity, '25');
     await user.selectOptions(screen.getByLabelText(/unit/i), 'Box');
+    expect(screen.getByLabelText(/^type$/i)).toHaveValue('Truck');
+    await user.selectOptions(screen.getByLabelText(/^type$/i), 'Pickup');
     await user.click(screen.getByRole('button', { name: /^save$/i }));
 
-    expect(vehiclesApi.updateVehicle).toHaveBeenCalledWith('MH01AB1234', 25, 'Box');
+    expect(vehiclesApi.updateVehicle).toHaveBeenCalledWith('MH01AB1234', 25, 'Box', 'Pickup');
     await waitFor(() => expect(screen.getByText(/vehicle updated/i)).toBeInTheDocument());
   });
 
@@ -101,5 +105,42 @@ describe('VehicleDetail page', () => {
     render(<VehicleDetail />, { wrapper: MemoryRouter });
     await screen.findByLabelText(/capacity/i);
     expect(screen.queryByLabelText(/tracker push url/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the vehicle as in transit from its dispatches and previews a newly picked type', async () => {
+    const user = userEvent.setup();
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(
+      ok([{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon', vehicle_type: 'Tipper' }]),
+    );
+    vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue(
+      ok([
+        { vehicle_registration_number: 'OTHER', status: 'DELIVERED' },
+        { vehicle_registration_number: 'MH01AB1234', status: 'IN_TRANSIT' },
+      ] as never),
+    );
+    vi.mocked(vehiclesApi.listVehicleMaintenance).mockResolvedValue(ok([]));
+
+    render(<VehicleDetail />, { wrapper: MemoryRouter });
+
+    expect(await screen.findByAltText('Tipper illustration')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('vehicle-activity')).toHaveTextContent('In transit'));
+
+    await user.selectOptions(screen.getByLabelText(/^type$/i), 'Tanker');
+    expect(screen.getByAltText('Tanker illustration')).toBeInTheDocument();
+  });
+
+  it('still renders, as available, when the activity lookups fail', async () => {
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(
+      ok([{ registration_number: 'MH01AB1234', capacity: 10, unit: 'MetricTon' }]),
+    );
+    vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([]));
+    vi.mocked(dispatchesApi.listDispatches).mockRejectedValue(new Error('boom'));
+    vi.mocked(vehiclesApi.listVehicleMaintenance).mockRejectedValue(new Error('boom'));
+
+    render(<VehicleDetail />, { wrapper: MemoryRouter });
+
+    expect(await screen.findByTestId('vehicle-activity')).toHaveTextContent('Available');
+    expect(screen.getByAltText('Truck illustration')).toBeInTheDocument();
   });
 });

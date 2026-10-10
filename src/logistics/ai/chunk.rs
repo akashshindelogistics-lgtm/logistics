@@ -384,8 +384,8 @@ pub fn godown_directory_text(g: &Godown) -> String {
     format!("Godown '{}' is located at {}.{}", g.name, g.address, capacity_note)
 }
 
-/// The narrative text for a [`Vehicle`] directory chunk — capacity and its
-/// currently assigned driver, if any.
+/// The narrative text for a [`Vehicle`] directory chunk — body type,
+/// capacity and its currently assigned driver, if any.
 pub fn vehicle_directory_text(v: &Vehicle, driver: Option<&Driver>) -> String {
     let driver_note = match driver {
         Some(d) => format!(
@@ -396,8 +396,9 @@ pub fn vehicle_directory_text(v: &Vehicle, driver: Option<&Driver>) -> String {
         None => " No driver currently assigned.".to_string(),
     };
     format!(
-        "Vehicle {} has a capacity of {} {}.{}",
+        "Vehicle {} is a {} with a capacity of {} {}.{}",
         v.registration_number,
+        v.vehicle_type.as_str().to_ascii_lowercase(),
         v.capacity,
         v.unit.as_str(),
         driver_note
@@ -773,6 +774,12 @@ mod tests {
         assert!(text.contains("10000"));
         assert!(text.contains("MetricTon"));
         assert!(text.contains("No driver currently assigned."));
+    }
+
+    #[test]
+    fn vehicle_directory_text_names_the_body_type() {
+        let v = sample_vehicle().with_type(crate::logistics::vehicle::vehicle::VehicleType::Tanker);
+        assert!(vehicle_directory_text(&v, None).contains("is a tanker"));
     }
 
     #[test]

@@ -122,11 +122,15 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await expect(overflowCard.locator('tr', { has: page.getByText(stockA) }).getByText('Building Materials')).toBeVisible();
   });
 
-  await test.step('Register a fleet vehicle', async () => {
+  await test.step('Register a fleet vehicle (a tipper)', async () => {
     await page.getByLabel('Registration Number').fill(vehicleReg);
     await page.getByLabel('Capacity (MT)').fill('60');
+    await page.getByLabel('Type', { exact: true }).selectOption('Tipper');
     await page.getByRole('button', { name: /add vehicle/i }).click();
     await expect(page.getByTestId('fleet-table').getByText(vehicleReg)).toBeVisible({ timeout: 8000 });
+    await expect(
+      page.getByTestId('fleet-table').getByRole('row', { name: new RegExp(vehicleReg) }).locator('img.vehicle-type-icon'),
+    ).toHaveAttribute('title', 'Tipper');
   });
 
   await test.step('Record the vehicle’s insurance document', async () => {
@@ -397,6 +401,9 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
     await page.goto('/vehicles');
     await page.getByRole('link', { name: vehicleReg }).click();
     await expect(page).toHaveURL(new RegExp(`/vehicles/${encodeURIComponent(vehicleReg)}$`));
+    // The vehicle's 3D model (or its still render without WebGL) sits beside the form.
+    await expect(page.getByAltText('Tipper illustration')).toBeAttached();
+    await page.waitForTimeout(1500);
     await page.getByLabel('Capacity').fill('30');
     await page.getByRole('button', { name: /^save$/i }).click();
     await expect(page.getByText(/vehicle updated/i)).toBeVisible({ timeout: 8000 });

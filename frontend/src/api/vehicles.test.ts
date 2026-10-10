@@ -35,14 +35,21 @@ describe('vehicles api client', () => {
     expect(res.data).toEqual([{ registration_number: 'MH01AB1234' }]);
   });
 
-  it('addVehicle POSTs to /orgs/{id}/vehicles with a hardcoded MetricTon unit', async () => {
+  it('addVehicle POSTs to /orgs/{id}/vehicles with a hardcoded MetricTon unit and Truck by default', async () => {
     vi.mocked(api.post).mockResolvedValue(envelope({}));
     await addVehicle('o1', 'MH01AB1234', 12);
     expect(api.post).toHaveBeenCalledWith('/orgs/o1/vehicles', {
       registration_number: 'MH01AB1234',
       capacity: 12,
       unit: 'MetricTon',
+      vehicle_type: 'Truck',
     });
+  });
+
+  it('addVehicle sends the chosen vehicle type', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({}));
+    await addVehicle('o1', 'MH01AB1234', 12, 'Tanker');
+    expect(api.post).toHaveBeenCalledWith('/orgs/o1/vehicles', expect.objectContaining({ vehicle_type: 'Tanker' }));
   });
 
   it('updateVehicle PUTs capacity/unit to /vehicles/{reg} (URL-encoded) and unwraps', async () => {
@@ -50,6 +57,12 @@ describe('vehicles api client', () => {
     const res = await updateVehicle('MH 01', 30, 'Box');
     expect(api.put).toHaveBeenCalledWith('/vehicles/MH%2001', { capacity: 30, unit: 'Box' });
     expect(res.data).toEqual({ registration_number: 'MH 01', capacity: 30, unit: 'Box' });
+  });
+
+  it('updateVehicle includes vehicle_type only when given', async () => {
+    vi.mocked(api.put).mockResolvedValue(envelope({}));
+    await updateVehicle('MH01', 30, 'Box', 'Tipper');
+    expect(api.put).toHaveBeenCalledWith('/vehicles/MH01', { capacity: 30, unit: 'Box', vehicle_type: 'Tipper' });
   });
 
   it('rotateTrackerKey POSTs to the URL-encoded tracker-key/rotate route and unwraps', async () => {

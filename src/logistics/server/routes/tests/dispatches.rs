@@ -152,6 +152,7 @@ async fn test_dispatch_stock_carries_multiple_line_items() {
             registration_number: "DISP-VH-002".to_string(),
             capacity: 100_000,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     test::call_service(&app, req).await;
@@ -645,6 +646,7 @@ async fn test_dispatch_rejected_when_no_vehicle_has_an_active_driver() {
             registration_number: "ND-VH-1".to_string(),
             capacity: 20,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);

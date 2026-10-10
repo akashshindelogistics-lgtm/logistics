@@ -49,6 +49,47 @@ impl Unit {
     }
 }
 
+/// The body style of a vehicle. Drives which icon and 3D model the dashboard
+/// shows for it; the backend itself treats every type the same. `Truck` is
+/// the default for vehicles registered before the field existed and the
+/// fallback [`VehicleType::from_str`] returns for anything it doesn't know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, utoipa::ToSchema)]
+pub enum VehicleType {
+    #[default]
+    Truck,
+    Tipper,
+    Trailer,
+    Tempo,
+    Pickup,
+    Tanker,
+}
+
+impl VehicleType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            VehicleType::Truck => "Truck",
+            VehicleType::Tipper => "Tipper",
+            VehicleType::Trailer => "Trailer",
+            VehicleType::Tempo => "Tempo",
+            VehicleType::Pickup => "Pickup",
+            VehicleType::Tanker => "Tanker",
+        }
+    }
+
+    /// Parse a stored/incoming type string case-insensitively. Unknown input
+    /// falls back to `Truck`, the same leniency [`Unit::from_str`] has.
+    pub fn from_str(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "tipper" | "dumper" => VehicleType::Tipper,
+            "trailer" | "semi" => VehicleType::Trailer,
+            "tempo" | "mini_truck" => VehicleType::Tempo,
+            "pickup" | "pick_up" => VehicleType::Pickup,
+            "tanker" => VehicleType::Tanker,
+            _ => VehicleType::Truck,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Location {
     pub latitude: f64,
@@ -74,6 +115,10 @@ pub struct Vehicle {
     /// `POST /api/vehicles/{reg}/tracker-key/rotate` if a device is lost.
     #[serde(default = "Uuid::new_v4")]
     pub tracker_key: Uuid,
+    /// Body style — truck, tipper, trailer, tempo, pickup or tanker. Set on
+    /// create and changeable through `PUT /api/vehicles/{reg}`.
+    #[serde(default)]
+    pub vehicle_type: VehicleType,
 }
 
 /// Add the `tracker_key` column to a `Vehicle` table that predates it and
@@ -94,8 +139,43 @@ pub(crate) fn ensure_tracker_key_column(
         conn.query_drop("ALTER TABLE Vehicle ADD COLUMN tracker_key VARCHAR(36) NULL")?;
         conn.query_drop("UPDATE Vehicle SET tracker_key = UUID() WHERE tracker_key IS NULL")?;
     }
+    ensure_vehicle_type_column(conn)
+}
+
+/// Add the `vehicle_type` column to a `Vehicle` table that predates it.
+/// Existing rows become `Truck` through the column default. Called from
+/// [`ensure_tracker_key_column`], so every path that already brings an old
+/// table up to date picks this up too.
+fn ensure_vehicle_type_column(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    let has_column: Option<i64> = conn.exec_first(
+        "SELECT 1 FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'Vehicle'
+           AND column_name = 'vehicle_type'",
+        (),
+    )?;
+    if has_column.is_none() {
+        conn.query_drop(
+            "ALTER TABLE Vehicle ADD COLUMN vehicle_type VARCHAR(20) NOT NULL DEFAULT 'Truck'",
+        )?;
+    }
     Ok(())
 }
+
+/// A `SELECT registration_number, capacity, unit, assigned_driver_id,
+/// latitude, longitude, last_updated_at, location_address, tracker_key,
+/// vehicle_type FROM Vehicle` row, as [`Vehicle::row_to_vehicle`] takes it.
+pub(crate) type VehicleRow = (
+    String,
+    i64,
+    String,
+    Option<String>,
+    Option<f64>,
+    Option<f64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 impl Vehicle {
     pub fn new(registration_number: impl Into<String>, capacity: i64, unit: Unit) -> Self {
@@ -106,7 +186,14 @@ impl Vehicle {
             location: None,
             assigned_driver_id: None,
             tracker_key: Uuid::new_v4(),
+            vehicle_type: VehicleType::default(),
         }
+    }
+
+    /// Builder-style setter for the body style, for use with [`Vehicle::new`].
+    pub fn with_type(mut self, vehicle_type: VehicleType) -> Self {
+        self.vehicle_type = vehicle_type;
+        self
     }
 
     /// Look up the vehicle a GPS tracker's key belongs to. Returns `None`
@@ -116,8 +203,8 @@ impl Vehicle {
         let mut conn = db_connection.get_connection()?;
         ensure_tracker_key_column(&mut conn)?;
 
-        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle WHERE tracker_key = :tracker_key LIMIT 1",
+        let rows: Vec<VehicleRow> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key, vehicle_type FROM Vehicle WHERE tracker_key = :tracker_key LIMIT 1",
             params! { "tracker_key" => tracker_key.to_string() },
             |r| r,
         )?;
@@ -133,8 +220,8 @@ impl Vehicle {
         let mut conn = db_connection.get_connection()?;
         ensure_tracker_key_column(&mut conn)?;
 
-        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle WHERE assigned_driver_id = :driver_id ORDER BY registration_number LIMIT 1",
+        let rows: Vec<VehicleRow> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key, vehicle_type FROM Vehicle WHERE assigned_driver_id = :driver_id ORDER BY registration_number LIMIT 1",
             params! { "driver_id" => driver_id.to_string() },
             |r| r,
         )?;
@@ -202,11 +289,9 @@ impl Vehicle {
 
     /// Build a `Vehicle` from a `SELECT registration_number, capacity, unit,
     /// assigned_driver_id, latitude, longitude, last_updated_at,
-    /// location_address, tracker_key` row.
-    fn row_to_vehicle(
-        row: (String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>),
-    ) -> Self {
-        let (reg, cap, unit_str, driver, lat, lng, ts, addr, tracker) = row;
+    /// location_address, tracker_key, vehicle_type` row.
+    pub(crate) fn row_to_vehicle(row: VehicleRow) -> Self {
+        let (reg, cap, unit_str, driver, lat, lng, ts, addr, tracker, vtype) = row;
         let location = lat.map(|latitude| Location {
             latitude,
             longitude: lng.unwrap_or(0.0),
@@ -222,6 +307,7 @@ impl Vehicle {
             tracker_key: tracker
                 .and_then(|t| Uuid::parse_str(&t).ok())
                 .unwrap_or_else(Uuid::new_v4),
+            vehicle_type: vtype.map(|t| VehicleType::from_str(&t)).unwrap_or_default(),
         }
     }
 
@@ -264,6 +350,7 @@ impl Vehicle {
                 last_updated_at BIGINT DEFAULT NULL,
                 location_address VARCHAR(255) DEFAULT NULL,
                 tracker_key VARCHAR(36) DEFAULT NULL,
+                vehicle_type VARCHAR(20) NOT NULL DEFAULT 'Truck',
                 CONSTRAINT fk_vehicle_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
             (),
@@ -284,9 +371,9 @@ impl Vehicle {
         // on insert — re-registering an existing registration number keeps the
         // key its devices already use.
         conn.exec_drop(
-            "INSERT INTO Vehicle (registration_number, capacity, unit, org_id, latitude, longitude, last_updated_at, location_address, tracker_key)
-             VALUES (:registration_number, :capacity, :unit, :org_id, :latitude, :longitude, :last_updated_at, :location_address, :tracker_key)
-             ON DUPLICATE KEY UPDATE capacity = VALUES(capacity), unit = VALUES(unit), org_id = VALUES(org_id), latitude = VALUES(latitude), longitude = VALUES(longitude), last_updated_at = VALUES(last_updated_at), location_address = VALUES(location_address)",
+            "INSERT INTO Vehicle (registration_number, capacity, unit, org_id, latitude, longitude, last_updated_at, location_address, tracker_key, vehicle_type)
+             VALUES (:registration_number, :capacity, :unit, :org_id, :latitude, :longitude, :last_updated_at, :location_address, :tracker_key, :vehicle_type)
+             ON DUPLICATE KEY UPDATE capacity = VALUES(capacity), unit = VALUES(unit), org_id = VALUES(org_id), latitude = VALUES(latitude), longitude = VALUES(longitude), last_updated_at = VALUES(last_updated_at), location_address = VALUES(location_address), vehicle_type = VALUES(vehicle_type)",
             params! {
                 "registration_number" => &self.registration_number,
                 "capacity" => self.capacity,
@@ -297,6 +384,7 @@ impl Vehicle {
                 "last_updated_at" => ts,
                 "location_address" => addr,
                 "tracker_key" => self.tracker_key.to_string(),
+                "vehicle_type" => self.vehicle_type.as_str(),
             },
         )?;
 
@@ -324,13 +412,37 @@ impl Vehicle {
         // Keep `tracker_key` on the returned struct honest: callers build a
         // fresh `Vehicle` (with a throwaway generated key) before calling this,
         // so read back the real one the row already holds.
-        let stored_key: Option<String> = conn.exec_first(
-            "SELECT tracker_key FROM Vehicle WHERE registration_number = :registration_number",
+        // The same goes for `vehicle_type`, which this call does not change.
+        let stored: Option<(Option<String>, String)> = conn.exec_first(
+            "SELECT tracker_key, vehicle_type FROM Vehicle WHERE registration_number = :registration_number",
             params! { "registration_number" => &self.registration_number },
         )?;
-        if let Some(key) = stored_key.and_then(|s| Uuid::parse_str(&s).ok()) {
-            self.tracker_key = key;
+        if let Some((stored_key, stored_type)) = stored {
+            if let Some(key) = stored_key.and_then(|s| Uuid::parse_str(&s).ok()) {
+                self.tracker_key = key;
+            }
+            self.vehicle_type = VehicleType::from_str(&stored_type);
         }
+        if let Ok(Some(org_id)) = Self::org_of(&self.registration_number) {
+            crate::logistics::ai::chunk::reindex_vehicle_best_effort(self, org_id);
+        }
+        Ok(())
+    }
+
+    /// Change the vehicle's body style.
+    pub fn set_vehicle_type(&mut self, vehicle_type: VehicleType) -> Result<(), Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        ensure_tracker_key_column(&mut conn)?;
+
+        conn.exec_drop(
+            "UPDATE Vehicle SET vehicle_type = :vehicle_type WHERE registration_number = :registration_number",
+            params! {
+                "registration_number" => &self.registration_number,
+                "vehicle_type" => vehicle_type.as_str(),
+            },
+        )?;
+        self.vehicle_type = vehicle_type;
         if let Ok(Some(org_id)) = Self::org_of(&self.registration_number) {
             crate::logistics::ai::chunk::reindex_vehicle_best_effort(self, org_id);
         }
@@ -408,14 +520,15 @@ impl Vehicle {
                 last_updated_at BIGINT DEFAULT NULL,
                 location_address VARCHAR(255) DEFAULT NULL,
                 tracker_key VARCHAR(36) DEFAULT NULL,
+                vehicle_type VARCHAR(20) NOT NULL DEFAULT 'Truck',
                 CONSTRAINT fk_vehicle_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
             (),
         )?;
         ensure_tracker_key_column(&mut conn)?;
 
-        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle",
+        let rows: Vec<VehicleRow> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key, vehicle_type FROM Vehicle",
             (),
             |r| r,
         )?;
@@ -428,8 +541,8 @@ impl Vehicle {
         let mut conn = db_connection.get_connection()?;
         ensure_tracker_key_column(&mut conn)?;
 
-        let rows: Vec<(String, i64, String, Option<String>, Option<f64>, Option<f64>, Option<i64>, Option<String>, Option<String>)> = conn.exec_map(
-            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key FROM Vehicle WHERE org_id = :org_id",
+        let rows: Vec<VehicleRow> = conn.exec_map(
+            "SELECT registration_number, capacity, unit, assigned_driver_id, latitude, longitude, last_updated_at, location_address, tracker_key, vehicle_type FROM Vehicle WHERE org_id = :org_id",
             params! { "org_id" => org_id.to_string() },
             |r| r,
         )?;
@@ -596,6 +709,85 @@ mod tests {
         assert_ne!(editing.tracker_key, real_key);
         editing.update_vehicle(99, Unit::Kg).expect("update");
         assert_eq!(editing.tracker_key, real_key, "update_vehicle must read back the stored key");
+    }
+
+    #[test]
+    fn test_vehicle_type_from_str_is_lenient() {
+        assert_eq!(VehicleType::from_str("Tipper"), VehicleType::Tipper);
+        assert_eq!(VehicleType::from_str("  tanker "), VehicleType::Tanker);
+        assert_eq!(VehicleType::from_str("PICKUP"), VehicleType::Pickup);
+        assert_eq!(VehicleType::from_str("dumper"), VehicleType::Tipper);
+        assert_eq!(VehicleType::from_str("spaceship"), VehicleType::Truck);
+        for t in [
+            VehicleType::Truck,
+            VehicleType::Tipper,
+            VehicleType::Trailer,
+            VehicleType::Tempo,
+            VehicleType::Pickup,
+            VehicleType::Tanker,
+        ] {
+            assert_eq!(VehicleType::from_str(t.as_str()), t, "as_str round-trips");
+        }
+    }
+
+    #[test]
+    fn test_vehicle_type_defaults_to_truck_when_missing_from_json() {
+        let v: Vehicle = serde_json::from_str(
+            r#"{"registration_number":"X","capacity":1,"unit":"Kg","location":null}"#,
+        )
+        .expect("deserialize");
+        assert_eq!(v.vehicle_type, VehicleType::Truck);
+    }
+
+    #[test]
+    fn test_vehicle_type_round_trips_through_every_read_path() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Type Org", "7 Depot Rd").expect("org");
+        let v = Vehicle::new("MH14 TY 0001", 12, Unit::MetricTon).with_type(VehicleType::Tipper);
+        v.add_new_vehicle_to_org(&org).expect("add vehicle");
+
+        assert_eq!(Vehicle::list_by_org(org.id).expect("list")[0].vehicle_type, VehicleType::Tipper);
+        assert_eq!(
+            Vehicle::by_tracker_key(v.tracker_key).expect("lookup").expect("found").vehicle_type,
+            VehicleType::Tipper,
+        );
+        let on_org = Organization::get_by_id(org.id).expect("get").expect("org").vehicles;
+        assert_eq!(on_org[0].vehicle_type, VehicleType::Tipper);
+    }
+
+    #[test]
+    fn test_set_vehicle_type_persists_and_update_vehicle_keeps_it() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Retype Org", "8 Depot Rd").expect("org");
+        let mut v = Vehicle::new("MH14 TY 0002", 12, Unit::MetricTon);
+        v.add_new_vehicle_to_org(&org).expect("add vehicle");
+        assert_eq!(v.vehicle_type, VehicleType::Truck);
+
+        v.set_vehicle_type(VehicleType::Tanker).expect("set type");
+        assert_eq!(Vehicle::list_by_org(org.id).expect("list")[0].vehicle_type, VehicleType::Tanker);
+
+        // Editing capacity via a freshly built struct (default type) reads
+        // the stored type back instead of reporting Truck.
+        let mut editing = Vehicle::new("MH14 TY 0002", 30, Unit::Kg);
+        editing.update_vehicle(30, Unit::Kg).expect("update");
+        assert_eq!(editing.vehicle_type, VehicleType::Tanker);
+    }
+
+    #[test]
+    fn test_ensure_columns_adds_vehicle_type_to_a_legacy_table() {
+        let _db = TestDb::create();
+        let org = Organization::create_organization("Legacy Org", "9 Depot Rd").expect("org");
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection().expect("conn");
+        conn.query_drop("ALTER TABLE Vehicle DROP COLUMN vehicle_type").expect("drop column");
+        conn.exec_drop(
+            "INSERT INTO Vehicle (registration_number, capacity, unit, org_id, tracker_key) VALUES ('OLD 1', 5, 'Kg', :org, UUID())",
+            params! { "org" => org.id.to_string() },
+        )
+        .expect("legacy insert");
+
+        let vehicles = Vehicle::list_by_org(org.id).expect("list migrates the table");
+        assert_eq!(vehicles[0].vehicle_type, VehicleType::Truck);
     }
 
     #[test]
