@@ -1,4 +1,5 @@
-/* Greeting banner: navy-to-claret gradient with an antique-gold glow in the corner */
+/* Greeting banner: a quiet ivory panel with an antique-gold glow in the corner,
+   so it frames the greeting without pulling focus from the figures below */
 .dash-hero {
   margin-bottom: 24px;
   display: flex;
@@ -10,7 +11,8 @@
   background:
     radial-gradient(90% 140% at 100% 0%, var(--accent-glow), transparent 55%),
     linear-gradient(120deg, var(--hero-a), var(--hero-b));
-  box-shadow: var(--shadow);
+  border: 1px solid var(--hero-line);
+  box-shadow: var(--shadow-sm);
   position: relative;
   overflow: hidden;
 }

@@ -22,15 +22,15 @@ test.describe('Theme toggle', () => {
     await registerOrg(page, `Theme Palette ${uid()}`);
     await page.goto('/');
 
-    // Oxford navy brand, a navy gradient sidebar and a gold "Customers" stat card in light mode…
+    // Claret brand, a warm charcoal sidebar and a gold "Customers" stat card in light mode…
     const brand = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--brand').trim());
-    expect(await brand()).toBe('#1f3a6b');
-    await expect(page.locator('.sidebar')).toHaveCSS('background-image', /linear-gradient\(rgb\(18, 29, 54\)/);
+    expect(await brand()).toBe('#7a1f3d');
+    await expect(page.locator('.sidebar')).toHaveCSS('background-image', /linear-gradient\(rgb\(27, 25, 23\)/);
     await expect(page.locator('.card-amber .stat-value')).toHaveCSS('color', 'rgb(154, 106, 18)');
 
     // …and their brighter counterparts in dark mode.
     await page.getByRole('button', { name: /switch to dark theme/i }).click();
-    expect(await brand()).toBe('#93abe3');
+    expect(await brand()).toBe('#d99aae');
     await expect(page.locator('.card-amber .stat-value')).toHaveCSS('color', 'rgb(227, 184, 90)');
   });
 });

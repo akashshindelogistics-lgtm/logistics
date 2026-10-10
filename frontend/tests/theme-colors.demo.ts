@@ -3,8 +3,8 @@ import { registerOrg, uid } from './helpers';
 
 /**
  * A narrated walk through the **Oxford & Claret** colour theme on its own:
- * the Oxford navy sidebar, the navy-to-claret greeting banner, stat cards in
- * royal blue / antique gold / claret / plum, dispatch status tags in their lifecycle
+ * the warm charcoal sidebar, the ivory greeting banner, stat cards in
+ * slate / antique gold / claret / mauve, dispatch status tags in their lifecycle
  * colours, and the same pages again in dark mode, ending on the login screen.
  *
  * Watch it with `npm run test:e2e:demo:theme-colors` (headed, slowed).
@@ -56,7 +56,7 @@ test('Oxford & Claret colour theme', async ({ page }) => {
     }
   });
 
-  await test.step('Dashboard in light mode: navy-to-claret banner, tinted stat cards, coloured statuses', async () => {
+  await test.step('Dashboard in light mode: ivory banner, evenly tinted stat cards, coloured statuses', async () => {
     await page.goto('/');
     await expect(page.locator('.dash-hero')).toBeVisible();
     await expect(page.getByText('DELIVERED').first()).toHaveClass(/tag-green/);
