@@ -4,6 +4,13 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.11.1](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.11.0...v0.11.1) (2026-10-10)
+
+
+### Documentation
+
+* **onboarding:** add E2E test org manifest as a rehearsal before Mau… ([dfc558f](https://github.com/akashshindelogistics-lgtm/logistics/commit/dfc558f28919004b4404a330052d18bae4c220f4))
+
 ## [0.11.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.10.0...v0.11.0) (2026-10-10)
 
 
