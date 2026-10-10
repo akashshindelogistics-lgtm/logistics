@@ -1,114 +1,172 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* Monochrome theme: every token is a neutral gray. The status tokens (green,
-   amber, red, blue, purple) keep their names so components don't change, but
-   are told apart by lightness instead of hue. */
+/* Peacock & Marigold theme: deep teal brand with marigold, magenta and olive
+   accents, after painted Indian truck art. The status tokens (green, amber,
+   red, blue, purple) keep their meaning; the dashboard's stat cards use the
+   separate --stat-* hues so they never read as a status. The sidebar keeps
+   its own always-dark --sidebar-* tokens in both themes. */
 :root {
-  --brand:       #111111;
-  --brand-dark:  #000000;
-  --brand-light: #f0f0f0;
-  --brand-glow:  rgba(0,0,0,0.12);
+  --brand:       #0f766e;
+  --brand-2:     #0e7490;
+  --brand-dark:  #0d645e;
+  --brand-light: #e7f1f1;
+  --brand-glow:  rgba(15,118,110,0.15);
   --on-brand:    #ffffff;
+  --accent:      #f59e0b;
 
-  --green:  #262626; --green-bg:  #e5e5e5; --green-text:  #171717;
-  --amber:  #525252; --amber-bg:  #f0f0f0; --amber-text:  #262626;
-  --red:    #000000; --red-bg:    #d4d4d4; --red-text:    #000000;
-  --blue:   #404040; --blue-bg:   #ebebeb; --blue-text:   #1f1f1f;
-  --purple: #5c5c5c; --purple-bg: #f2f2f2; --purple-text: #2b2b2b;
+  --green:  #15803d; --green-bg:  #e1eee6; --green-text:  #0f5a2b;
+  --amber:  #b45309; --amber-bg:  #f5e9df; --amber-text:  #7e3a06;
+  --red:    #be123c; --red-bg:    #f7e0e6; --red-text:    #850d2a;
+  --blue:   #0e7490; --blue-bg:   #e0edf1; --blue-text:   #0a5165;
+  --purple: #a21caf; --purple-bg: #f3e1f5; --purple-text: #71147a;
+
+  --stat-1: #0e7490; --stat-1-bg: #ddecef; --stat-1-line: #a8ccd1;
+  --stat-2: #c2410c; --stat-2-bg: #f6e4dd; --stat-2-line: #d5bfb0;
+  --stat-3: #a21caf; --stat-3-bg: #f2dff4; --stat-3-line: #cdb6d8;
+  --stat-4: #4d7c0f; --stat-4-bg: #e6eddd; --stat-4-line: #b8ceb0;
+
+  --hero-a:   #0f766e;
+  --hero-b:   #0e7490;
+  --hero-fg:  #ffffff;
+  --hero-sub: rgba(255,255,255,0.82);
+
+  --sidebar-bg:     #08332f;
+  --sidebar-bg-2:   #0b4a52;
+  --sidebar-text:   #e6fffb;
+  --sidebar-muted:  #8cc7bf;
+  --sidebar-faint:  #4f8f87;
+  --sidebar-accent: #5eead4;
 
   --sidebar-w: 240px;
   --nav-h:     0px;
 
-  --bg:      #f5f5f5;
+  --bg:      #f3f8f7;
   --surface: #ffffff;
-  --border:  #e5e5e5;
-  --border2: #f5f5f5;
+  --border:  #dbe9e6;
+  --border2: #ebf3f1;
 
-  --text-1: #0a0a0a;
-  --text-2: #525252;
-  --text-3: #a3a3a3;
+  --text-1: #0b2724;
+  --text-2: #3d5b57;
+  --text-3: #7b9893;
 
   --radius-sm: 6px;
   --radius:    10px;
   --radius-lg: 16px;
 
-  --shadow-sm: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
-  --shadow:    0 4px 6px -1px rgba(0,0,0,.07), 0 2px 4px -1px rgba(0,0,0,.04);
-  --shadow-lg: 0 10px 25px -3px rgba(0,0,0,.1),  0 4px 10px -2px rgba(0,0,0,.05);
+  --shadow-sm: 0 1px 3px rgba(8,51,47,.07), 0 1px 2px rgba(8,51,47,.04);
+  --shadow:    0 4px 6px -1px rgba(8,51,47,.08), 0 2px 4px -1px rgba(8,51,47,.05);
+  --shadow-lg: 0 10px 25px -3px rgba(8,51,47,.12), 0 4px 10px -2px rgba(8,51,47,.06);
 
-  --row-hover:      #fafafa;
-  --danger-border:  #a3a3a3;
-  --skeleton-1:     #f5f5f5;
-  --skeleton-2:     #e5e5e5;
+  --row-hover:      #f3f8f8;
+  --danger-border:  #e8acbb;
+  --card-gloss:     rgba(255,255,255,.6);
+  --skeleton-1:     #f5faf9;
+  --skeleton-2:     #e9f3f2;
 }
 
 /* System preference dark mode, unless the user has made an explicit choice
    (tracked via the data-theme attribute set by ThemeProvider). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --brand:       #fafafa;
-    --brand-dark:  #e5e5e5;
-    --brand-light: #1f1f1f;
-    --brand-glow:  rgba(255,255,255,0.12);
-    --on-brand:    #000000;
+    --brand:       #2dd4bf;
+    --brand-2:     #22d3ee;
+    --brand-dark:  #4ddac9;
+    --brand-light: #12413c;
+    --brand-glow:  rgba(45,212,191,0.25);
+    --on-brand:    #04211e;
+    --accent:      #fbbf24;
 
-    --green:  #e5e5e5; --green-bg:  #262626; --green-text:  #f5f5f5;
-    --amber:  #a3a3a3; --amber-bg:  #1f1f1f; --amber-text:  #d4d4d4;
-    --red:    #ffffff; --red-bg:    #404040; --red-text:    #ffffff;
-    --blue:   #d4d4d4; --blue-bg:   #2a2a2a; --blue-text:   #e5e5e5;
-    --purple: #b3b3b3; --purple-bg: #222222; --purple-text: #d9d9d9;
+    --green:  #4ade80; --green-bg:  #1a4b34; --green-text:  #80e8a6;
+    --amber:  #fbbf24; --amber-bg:  #414420; --amber-text:  #fcd266;
+    --red:    #fb7185; --red-bg:    #413335; --red-text:    #fc9caa;
+    --blue:   #22d3ee; --blue-bg:   #11484d; --blue-text:   #64e0f3;
+    --purple: #e879f9; --purple-bg: #3c344f; --purple-text: #efa1fb;
 
-    --bg:      #0a0a0a;
-    --surface: #141414;
-    --border:  #262626;
-    --border2: #1c1c1c;
+    --stat-1: #22d3ee; --stat-1-bg: #11484d; --stat-1-line: #1a6468;
+    --stat-2: #fb923c; --stat-2-bg: #413a25; --stat-2-line: #5b5133;
+    --stat-3: #e879f9; --stat-3-bg: #3c344f; --stat-3-line: #56496c;
+    --stat-4: #a3e635; --stat-4-bg: #2d4c24; --stat-4-line: #416a31;
 
-    --text-1: #f5f5f5;
-    --text-2: #d4d4d4;
-    --text-3: #737373;
+    --hero-a:   #175a52;
+    --hero-b:   #0f3a3c;
+    --hero-fg:  #e8fbf7;
+    --hero-sub: #b5d6cf;
+
+    --sidebar-bg:     #041110;
+    --sidebar-bg-2:   #072a2c;
+    --sidebar-muted:  #75b3aa;
+    --sidebar-faint:  #3f7a73;
+
+    --bg:      #061614;
+    --surface: #0c211f;
+    --border:  #17352f;
+    --border2: #122c28;
+
+    --text-1: #e8fbf7;
+    --text-2: #b5d6cf;
+    --text-3: #6f948d;
 
     --shadow-sm: 0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
     --shadow:    0 4px 6px -1px rgba(0,0,0,.5), 0 2px 4px -1px rgba(0,0,0,.3);
     --shadow-lg: 0 10px 25px -3px rgba(0,0,0,.6), 0 4px 10px -2px rgba(0,0,0,.4);
 
-    --row-hover:     #1c1c1c;
-    --danger-border: #525252;
-    --skeleton-1:    #1c1c1c;
-    --skeleton-2:    #2a2a2a;
+    --row-hover:     #0f2f2c;
+    --danger-border: #78454d;
+    --card-gloss:    rgba(255,255,255,.03);
+    --skeleton-1:    #0e2c29;
+    --skeleton-2:    #103632;
   }
 }
 
 /* Explicit dark theme choice, wins regardless of system preference. */
 :root[data-theme="dark"] {
-  --brand:       #fafafa;
-  --brand-dark:  #e5e5e5;
-  --brand-light: #1f1f1f;
-  --brand-glow:  rgba(255,255,255,0.12);
-  --on-brand:    #000000;
+  --brand:       #2dd4bf;
+  --brand-2:     #22d3ee;
+  --brand-dark:  #4ddac9;
+  --brand-light: #12413c;
+  --brand-glow:  rgba(45,212,191,0.25);
+  --on-brand:    #04211e;
+  --accent:      #fbbf24;
 
-  --green:  #e5e5e5; --green-bg:  #262626; --green-text:  #f5f5f5;
-  --amber:  #a3a3a3; --amber-bg:  #1f1f1f; --amber-text:  #d4d4d4;
-  --red:    #ffffff; --red-bg:    #404040; --red-text:    #ffffff;
-  --blue:   #d4d4d4; --blue-bg:   #2a2a2a; --blue-text:   #e5e5e5;
-  --purple: #b3b3b3; --purple-bg: #222222; --purple-text: #d9d9d9;
+  --green:  #4ade80; --green-bg:  #1a4b34; --green-text:  #80e8a6;
+  --amber:  #fbbf24; --amber-bg:  #414420; --amber-text:  #fcd266;
+  --red:    #fb7185; --red-bg:    #413335; --red-text:    #fc9caa;
+  --blue:   #22d3ee; --blue-bg:   #11484d; --blue-text:   #64e0f3;
+  --purple: #e879f9; --purple-bg: #3c344f; --purple-text: #efa1fb;
 
-  --bg:      #0a0a0a;
-  --surface: #141414;
-  --border:  #262626;
-  --border2: #1c1c1c;
+  --stat-1: #22d3ee; --stat-1-bg: #11484d; --stat-1-line: #1a6468;
+  --stat-2: #fb923c; --stat-2-bg: #413a25; --stat-2-line: #5b5133;
+  --stat-3: #e879f9; --stat-3-bg: #3c344f; --stat-3-line: #56496c;
+  --stat-4: #a3e635; --stat-4-bg: #2d4c24; --stat-4-line: #416a31;
 
-  --text-1: #f5f5f5;
-  --text-2: #d4d4d4;
-  --text-3: #737373;
+  --hero-a:   #175a52;
+  --hero-b:   #0f3a3c;
+  --hero-fg:  #e8fbf7;
+  --hero-sub: #b5d6cf;
+
+  --sidebar-bg:     #041110;
+  --sidebar-bg-2:   #072a2c;
+  --sidebar-muted:  #75b3aa;
+  --sidebar-faint:  #3f7a73;
+
+  --bg:      #061614;
+  --surface: #0c211f;
+  --border:  #17352f;
+  --border2: #122c28;
+
+  --text-1: #e8fbf7;
+  --text-2: #b5d6cf;
+  --text-3: #6f948d;
 
   --shadow-sm: 0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
   --shadow:    0 4px 6px -1px rgba(0,0,0,.5), 0 2px 4px -1px rgba(0,0,0,.3);
   --shadow-lg: 0 10px 25px -3px rgba(0,0,0,.6), 0 4px 10px -2px rgba(0,0,0,.4);
 
-  --row-hover:     #1c1c1c;
-  --danger-border: #525252;
-  --skeleton-1:    #1c1c1c;
-  --skeleton-2:    #2a2a2a;
+  --row-hover:     #0f2f2c;
+  --danger-border: #78454d;
+  --card-gloss:    rgba(255,255,255,.03);
+  --skeleton-1:    #0e2c29;
+  --skeleton-2:    #103632;
 }
 
 html, body { height: 100%; }
@@ -132,9 +190,8 @@ button { font-family: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 
 /* Third-party colour sources (map tiles, default markers) are desaturated so
-   nothing breaks the monochrome theme. The 3D icons (Icon3D, vehicle renders,
-   and map markers drawn from them) are the deliberate exception: they are the
-   one place colour is meant to show. */
+   their own palette doesn't fight the theme's, and the route line and 3D map
+   markers (Icon3D, vehicle renders) stand out against a neutral map. */
 .leaflet-tile-pane,
 .leaflet-marker-pane .leaflet-marker-icon:not(.map-pin-3d),
 .leaflet-shadow-pane { filter: grayscale(1); }

@@ -84,6 +84,25 @@ describe('Dashboard page', () => {
     expect(rows).toHaveLength(1 + 5);
   });
 
+  it('colors each recent dispatch status tag by its lifecycle stage', async () => {
+    vi.mocked(orgsApi.listOrgs).mockResolvedValue(ok([]));
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(ok([]));
+    vi.mocked(customersApi.listCustomers).mockResolvedValue(ok([]));
+    vi.mocked(dispatchesApi.listDispatches).mockResolvedValue(
+      ok([
+        order({ id: 'delivered-order', status: 'DELIVERED', dispatched_at: 3 }),
+        order({ id: 'transit-order', status: 'IN_TRANSIT', dispatched_at: 2 }),
+        order({ id: 'cancelled-order', status: 'CANCELLED', dispatched_at: 1 }),
+      ]),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('DELIVERED')).toHaveClass('status-tag', 'tag-green');
+    expect(screen.getByText('IN TRANSIT')).toHaveClass('status-tag', 'tag-purple');
+    expect(screen.getByText('CANCELLED')).toHaveClass('status-tag', 'tag-red');
+  });
+
   it('shows the "no dispatches yet" empty state when there are none', async () => {
     vi.mocked(orgsApi.listOrgs).mockResolvedValue(ok([]));
     vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(ok([]));

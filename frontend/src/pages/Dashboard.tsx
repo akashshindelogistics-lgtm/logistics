@@ -11,6 +11,7 @@ import './Dashboard.css';
 import { m } from 'motion/react';
 import { DURATION, EASE_OUT, useListAnimation } from '../lib/motion';
 import CountUp from '../components/CountUp';
+import { STATUS_TAG_CLASS, formatStatus } from '../lib/dispatchLifecycle';
 
 // Stat cards are links that fade up one after another on first paint.
 const MotionLink = m.create(Link);
@@ -118,7 +119,7 @@ export default function Dashboard() {
                         : `${o.line_items.length} items`}
                     </td>
                     <td><strong>{o.line_items.reduce((sum, li) => sum + li.quantity, 0)}</strong></td>
-                    <td><span className="status-tag tag-green">{o.status}</span></td>
+                    <td><span className={`status-tag ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span></td>
                     <td className="muted">{new Date(o.dispatched_at * 1000).toLocaleString()}</td>
                   </tr>
                 ))}

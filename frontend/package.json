@@ -26,6 +26,7 @@
     "test:e2e:demo:vendors": "playwright test --config=playwright.demo.config.ts vendors.demo",
     "test:e2e:demo:hired-vehicles": "playwright test --config=playwright.demo.config.ts hired-vehicles.demo",
     "test:e2e:demo:vendor-payments": "playwright test --config=playwright.demo.config.ts vendor-payments.demo",
+    "test:e2e:demo:theme-colors": "playwright test --config=playwright.demo.config.ts theme-colors.demo",
     "render:vehicle-icons": "node scripts/render-vehicle-icons.mjs"
   },
   "dependencies": {

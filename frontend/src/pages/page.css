@@ -94,7 +94,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, transparent 60%, rgba(255,255,255,.6));
+  background: linear-gradient(135deg, transparent 60%, var(--card-gloss));
   pointer-events: none;
 }
 
