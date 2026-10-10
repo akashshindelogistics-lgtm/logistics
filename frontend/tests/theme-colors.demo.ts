@@ -30,10 +30,11 @@ test('Peacock & Marigold colour theme', async ({ page }) => {
       await api(page, 'post', `/api/orgs/${org.id}/vehicles`, { registration_number: reg, capacity: 100000, unit: 'MetricTon', vehicle_type: 'Truck' });
       const driver = await api(page, 'post', `/api/orgs/${org.id}/drivers`, { name, license_number: `L${uid()}${i}`, phone: '0' });
       await api(page, 'put', `/api/vehicles/${encodeURIComponent(reg)}/driver`, { driver_id: driver.id });
+      await api(page, 'put', `/api/vehicles/${encodeURIComponent(reg)}/location`, { latitude: 18.52 + i * 0.01, longitude: 73.85, address: null });
     }
     const godown = await api(page, 'post', `/api/orgs/${org.id}/godowns`, { name: 'Chakan Kiln Yard', address: 'Chakan MIDC' });
     await api(page, 'post', `/api/godowns/${godown.id}/stock`, { description: stock, quantity: 50000, volume_in_size: 1 });
-    const customer = await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: 'Hinjewadi Site', address: 'Hinjewadi, Pune' });
+    const customer = await api(page, 'post', `/api/orgs/${org.id}/customers`, { name: 'Hinjewadi Site', address: 'Hinjewadi, Pune', latitude: 18.59, longitude: 73.74 });
 
     // Each dispatch is advanced to a different stage so every status colour shows.
     const stages: string[][] = [
