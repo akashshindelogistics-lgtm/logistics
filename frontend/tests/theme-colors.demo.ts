@@ -18,6 +18,18 @@ async function api(page: Page, method: 'post' | 'put', path: string, data?: unkn
   return (await res.json()).data;
 }
 
+// Flip the sidebar theme toggle until <html> reports the theme. A click that
+// lands while a page is still animating in can be lost, so retry it.
+async function setTheme(page: Page, theme: 'light' | 'dark') {
+  const html = page.locator('html');
+  await expect(async () => {
+    if ((await html.getAttribute('data-theme')) !== theme) {
+      await page.getByRole('button', { name: new RegExp(`switch to ${theme} theme`, 'i') }).click();
+    }
+    await expect(html).toHaveAttribute('data-theme', theme, { timeout: 1500 });
+  }).toPass({ timeout: 15_000 });
+}
+
 test('Oxford & Claret colour theme', async ({ page }) => {
   test.slow();
   const tag = uid().toUpperCase().slice(-4);
@@ -74,8 +86,7 @@ test('Oxford & Claret colour theme', async ({ page }) => {
   });
 
   await test.step('Switch to dark mode and revisit the dashboard', async () => {
-    await page.getByRole('button', { name: /switch to dark theme/i }).click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await setTheme(page, 'dark');
     await page.waitForTimeout(2000);
     await page.goto('/');
     await expect(page.locator('.dash-hero')).toBeVisible();
@@ -85,7 +96,7 @@ test('Oxford & Claret colour theme', async ({ page }) => {
   });
 
   await test.step('Back to light, then the login screen', async () => {
-    await page.getByRole('button', { name: /switch to light theme/i }).click();
+    await setTheme(page, 'light');
     await page.waitForTimeout(1500);
     await page.getByRole('button', { name: /sign out/i }).click();
     await expect(page).toHaveURL(/login/);
