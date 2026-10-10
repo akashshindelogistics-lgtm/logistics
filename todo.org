@@ -1201,3 +1201,19 @@
    Vitest: vehicleVisuals, webgl, Icon3D, VehicleShowcase, LocationMap image pins, Vehicles/VehicleDetail pages.
    tests/vehicle-visuals.spec.ts (poster mode), a Tipper + 3D check in e2e-full-flow, and the narrated
    tests/vehicle-visuals.demo.ts (npm run test:e2e:demo:vehicle-visuals) with real WebGL.
+* TODO Motion in the UI - animate transitions, list changes, live tracking and feedback so the dashboard feels alive, without slowing anyone down
+  Motion is ordinary front-end code (any model or person can write it); the choice is the library, not the LLM.
+  Libraries:
+  - motion (formerly Framer Motion, motion/react) - entrances, springs, hover/tap, shared-layout moves; use LazyMotion + m to keep it small
+  - View Transitions API via React Router 7's viewTransition on Link/navigate - native page transitions, zero bundle cost
+  - @formkit/auto-animate (~2 KB) - one-line add/remove/reorder animation for tables and lists
+  - plain CSS transitions/keyframes for badges, shimmer, button press; react-three-fiber already covers 3D
+  Ground rules: honour prefers-reduced-motion everywhere (skip, don't shorten), 150-300 ms, no looping motion except
+  in-transit indicators, never block input; Playwright runs with reducedMotion: 'reduce' so the headless suite stays
+  deterministic. Leave OrganizationDetail.tsx until the org-page split lands.
+** TODO Phase 1: cheap wins - auto-animate on fleet/stock/dispatch/customer tables and dispatch line items, sliding sidebar active indicator, CSS button press + badge colour transitions, shared useReducedMotion helper
+** TODO Phase 2: page transitions - React Router viewTransition for list -> detail (vehicle row icon morphs into the VehicleDetail showcase), with a plain fade fallback where the API is missing
+** TODO Phase 3: motion library - add motion (LazyMotion); dashboard stat count-up + staggered card entrance, recent-dispatch rows fade in, toast-style success/error messages, assistant widget open/close spring
+** TODO Phase 4: dispatch lifecycle - animated status badge change and a PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED progress track on dispatch rows and detail
+** TODO Phase 5: live tracking - Leaflet vehicle markers glide between GPS fixes (interpolate over the poll interval, snap if the jump is huge or the tab was hidden), trip route polyline draws stop by stop
+** TODO Phase 6: Vitest for the reduced-motion helper and count-up, Playwright spec with reducedMotion, standalone headed demo flow (test:e2e:demo:motion), README note
