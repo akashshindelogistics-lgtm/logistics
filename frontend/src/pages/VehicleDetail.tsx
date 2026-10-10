@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { listVehicles, updateVehicle, rotateTrackerKey, listVehicleMaintenance } from '../api/vehicles';
 import { listDrivers } from '../api/drivers';
 import { listDispatches } from '../api/dispatches';
@@ -7,6 +7,7 @@ import { IconChevron, IconCheck } from '../components/Icons';
 import Icon3D from '../components/Icon3D';
 import VehicleShowcase from '../components/vehicle3d/VehicleShowcase';
 import { vehicleActivity, vehicleVisual, type VehicleActivity } from '../lib/vehicleVisuals';
+import { useTransitionClick, VEHICLE_HERO } from '../lib/viewTransition';
 import type { Driver, Unit, Vehicle, VehicleType } from '../types';
 import { UNITS, VEHICLE_TYPES } from '../types';
 import './page.css';
@@ -14,6 +15,10 @@ import './page.css';
 export default function VehicleDetail() {
   const { reg: rawReg } = useParams<{ reg: string }>();
   const reg = decodeURIComponent(rawReg ?? '');
+  // Set by the fleet list's link, so the header (and the icon morphing into
+  // it) can be drawn before the vehicle has loaded.
+  const hintedType = (useLocation().state as { vehicleType?: VehicleType } | null)?.vehicleType;
+  const backToFleet = useTransitionClick('/vehicles');
 
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -73,7 +78,16 @@ export default function VehicleDetail() {
   if (loading) {
     return (
       <div className="page">
-        <div className="skeleton" style={{ width: 220, height: 28, marginBottom: 8 }} />
+        {hintedType ? (
+          <div className="page-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <img src={vehicleVisual(hintedType).icon} alt="" width={56} height={56} style={{ objectFit: 'contain', flexShrink: 0, viewTransitionName: VEHICLE_HERO }} />
+              <div className="page-title-group"><h1>{reg}</h1></div>
+            </div>
+          </div>
+        ) : (
+          <div className="skeleton" style={{ width: 220, height: 28, marginBottom: 8 }} />
+        )}
         <div className="skeleton" style={{ width: '100%', height: 220, borderRadius: 12 }} />
       </div>
     );
@@ -112,14 +126,14 @@ export default function VehicleDetail() {
   return (
     <div className="page">
       <nav style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-3)', marginBottom: 18 }}>
-        <Link to="/vehicles" style={{ color: 'var(--text-3)', textDecoration: 'none' }}>Fleet Vehicles</Link>
+        <Link to="/vehicles" onClick={backToFleet} style={{ color: 'var(--text-3)', textDecoration: 'none' }}>Fleet Vehicles</Link>
         <IconChevron size={12} />
         <span style={{ color: 'var(--text-1)' }}>{vehicle.registration_number}</span>
       </nav>
 
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <img src={vehicleVisual(vehicle.vehicle_type).icon} alt="" width={56} height={56} style={{ objectFit: 'contain', flexShrink: 0 }} />
+          <img src={vehicleVisual(vehicle.vehicle_type).icon} alt="" width={56} height={56} style={{ objectFit: 'contain', flexShrink: 0, viewTransitionName: VEHICLE_HERO }} />
           <div className="page-title-group">
             <h1>{vehicle.registration_number}</h1>
             <p>Edit this vehicle's details</p>

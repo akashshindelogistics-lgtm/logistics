@@ -9,8 +9,10 @@ import { listVehicleHires, assignVehicleHire } from '../api/vendors';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
 import Icon3D from '../components/Icon3D';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, isRunningLate, type NextAction } from '../lib/dispatchLifecycle';
+import LifecycleTrack from '../components/LifecycleTrack';
 import type { DispatchOrder, Invoice, Notification, NotificationStatus, PaymentStatus, VehicleHire } from '../types';
 import './page.css';
+import { useListAnimation } from '../lib/motion';
 
 const PAYMENT_TAG_CLASS: Record<PaymentStatus, string> = {
   PENDING: 'tag-amber',
@@ -40,6 +42,7 @@ const emptyHireForm = {
 type HireFormState = typeof emptyHireForm;
 
 export default function Dispatches() {
+  const rowsRef = useListAnimation();
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [summaries, setSummaries] = useState<Record<string, string>>({});
@@ -340,7 +343,7 @@ export default function Dispatches() {
                   <th>AI Status</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef}>
                 {orders.map(o => (
                   <>
                     <tr key={o.id}>
@@ -385,12 +388,13 @@ export default function Dispatches() {
                         <span className="muted" style={{ marginLeft: 4 }}>units</span>
                       </td>
                       <td>
-                        <span className={`status-tag ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span>
+                        <span key={o.status} className={`status-tag status-tag-pop ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span>
                         {isRunningLate(o) && (
                           <span className="status-tag tag-red" style={{ marginLeft: 6 }} title="Still in transit past its expected delivery window">
                             ⚠ Running late
                           </span>
                         )}
+                        <LifecycleTrack order={o} />
                       </td>
                       <td data-testid="billing-cell">
                         {invoices[o.id] ? (

@@ -5,6 +5,36 @@
   flex: 1;
 }
 
+/* ── Page transitions (lib/viewTransition.ts) ──
+   The page cross-fades with a small rise; the sidebar is its own group so it
+   stays put; a vehicle's icon morphs from its fleet row into the detail page. */
+.sidebar { view-transition-name: sidebar; }
+
+::view-transition-old(root) {
+  animation: page-out .16s ease-in both;
+}
+::view-transition-new(root) {
+  animation: page-in .24s cubic-bezier(.22, 1, .36, 1) both;
+}
+::view-transition-group(vehicle-hero) {
+  animation-duration: .38s;
+  animation-timing-function: cubic-bezier(.22, 1, .36, 1);
+}
+
+@keyframes page-out { to { opacity: 0; } }
+@keyframes page-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* Browsers without view transitions still get a soft entrance. */
+@supports not (view-transition-name: none) {
+  .page { animation: page-in .24s cubic-bezier(.22, 1, .36, 1) both; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
+}
+
 /* ── Page header ── */
 .page-header {
   display: flex;
@@ -251,6 +281,9 @@ tbody tr:hover td { background: var(--row-hover); }
 
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 
+/* Press feedback: every button gives a little as it's clicked */
+.btn:not(:disabled):active { transform: scale(.97); }
+
 /* ── Misc ── */
 .badge {
   display: inline-flex;
@@ -262,6 +295,8 @@ tbody tr:hover td { background: var(--row-hover); }
   font-weight: 600;
   background: var(--brand-light);
   color: var(--brand);
+  /* A status change recolours the pill smoothly instead of snapping */
+  transition: background-color .3s ease, color .3s ease, box-shadow .3s ease;
 }
 
 .tag-green  { background: var(--green-bg);  color: var(--green-text); }
@@ -293,6 +328,16 @@ tbody tr:hover td { background: var(--row-hover); }
 .muted  { color: var(--text-3); font-size: 13px; }
 .errortxt { color: var(--red); font-size: 13px; }
 .successtxt { color: var(--green); font-size: 13px; }
+
+/* Feedback slides in when it appears; an error also gives a small shake. */
+.successtxt, .errortxt { animation: msg-in .26s cubic-bezier(.22, 1, .36, 1) both; }
+.errortxt { animation: msg-in .26s cubic-bezier(.22, 1, .36, 1) both, msg-shake .32s .26s ease-in-out; }
+
+@keyframes msg-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes msg-shake {
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
 
 .entity-name {
   font-weight: 600;

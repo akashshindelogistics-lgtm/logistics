@@ -5,6 +5,7 @@ import { IconPlus, IconX, IconTrash } from '../components/Icons';
 import Icon3D from '../components/Icon3D';
 import { ORG_ROLES, ROLE_LABELS, type OrgRole, type OrgUser } from '../types';
 import './page.css';
+import { useListAnimation } from '../lib/motion';
 
 const roleBadgeClass: Record<OrgRole, string> = {
   ADMIN: 'tag-purple',
@@ -13,6 +14,7 @@ const roleBadgeClass: Record<OrgRole, string> = {
 };
 
 export default function Team() {
+  const rowsRef = useListAnimation();
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -143,7 +145,7 @@ export default function Team() {
               <thead>
                 <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef}>
                 {users.map(u => (
                   <tr key={u.id}>
                     <td className="entity-name">{u.name}</td>

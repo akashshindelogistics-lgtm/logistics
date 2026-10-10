@@ -138,3 +138,15 @@ input, select, textarea { font-family: inherit; }
 .leaflet-tile-pane,
 .leaflet-marker-pane .leaflet-marker-icon:not(.map-pin-3d),
 .leaflet-shadow-pane { filter: grayscale(1); }
+
+/* "Reduce motion" turns every CSS animation and transition into an instant
+   change, app-wide. motion/react and auto-animate follow the same setting
+   on their own (see lib/MotionProvider.tsx and lib/motion.ts). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

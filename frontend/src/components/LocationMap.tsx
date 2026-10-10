@@ -1,5 +1,7 @@
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { useEffect, useRef, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
+import { prefersReducedMotion } from '../lib/motion';
 import 'leaflet/dist/leaflet.css';
 import './LocationMap.css';
 
@@ -18,6 +20,71 @@ export interface MapPin {
   detail?: string;
   /** Image to draw as the marker (e.g. a vehicle's 3D icon) instead of the default pin. */
   iconUrl?: string;
+  /**
+   * Stable identity (e.g. a registration number). With it, a pin whose
+   * position changes between renders glides to the new spot instead of the
+   * marker being rebuilt in place.
+   */
+  id?: string;
+}
+
+/** How long a moved marker takes to glide to its new position. */
+export const GLIDE_MS = 1200;
+/** Jumps longer than this (a stale fix, a teleport) snap instead of gliding. */
+export const GLIDE_MAX_METERS = 50_000;
+
+/**
+ * A Marker that eases from its previous position to a new one. react-leaflet
+ * would `setLatLng` straight to the new position; this keeps the first
+ * position as the prop and moves the Leaflet marker itself, frame by frame.
+ */
+function GlidingMarker({ pin }: { pin: MapPin }) {
+  const ref = useRef<L.Marker>(null);
+  const [initial] = useState<[number, number]>(() => [pin.lat, pin.lng]);
+
+  useEffect(() => {
+    const marker = ref.current;
+    if (!marker) return;
+    const from = marker.getLatLng();
+    const to = L.latLng(pin.lat, pin.lng);
+    if (from.equals(to)) return;
+    if (prefersReducedMotion() || document.hidden || from.distanceTo(to) > GLIDE_MAX_METERS) {
+      marker.setLatLng(to);
+      return;
+    }
+    const start = performance.now();
+    let frame = 0;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / GLIDE_MS);
+      const eased = 1 - Math.pow(1 - t, 3);
+      marker.setLatLng([from.lat + (to.lat - from.lat) * eased, from.lng + (to.lng - from.lng) * eased]);
+      if (t < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    // Interrupted by a newer fix: stop here; the next glide starts from wherever the marker is.
+    return () => cancelAnimationFrame(frame);
+  }, [pin.lat, pin.lng]);
+
+  return (
+    <Marker ref={ref} position={initial} {...(pin.iconUrl ? { icon: imagePinIcon(pin.iconUrl) } : {})}>
+      <Popup>
+        <strong>{pin.label}</strong>
+        {pin.detail && <><br />{pin.detail}</>}
+      </Popup>
+    </Marker>
+  );
+}
+
+/**
+ * A route line that draws itself from start to end when it appears. The path
+ * gets pathLength=1 so the CSS dash animation is independent of its pixel length.
+ */
+function DrawnRoute({ points }: { points: [number, number][] }) {
+  const ref = useRef<L.Polyline>(null);
+  useEffect(() => {
+    ref.current?.getElement()?.setAttribute('pathLength', '1');
+  }, [points]);
+  return <Polyline ref={ref} positions={points} pathOptions={{ className: 'map-route', color: '#3b82f6', weight: 3, opacity: 0.85 }} />;
 }
 
 // One DivIcon per image, so re-renders don't rebuild every marker.
@@ -46,9 +113,11 @@ export function imagePinIcon(url: string): L.DivIcon {
 interface LocationMapProps {
   pins: MapPin[];
   height?: string;
+  /** Points to join with a self-drawing line, in travel order (e.g. a trip's stops). */
+  route?: [number, number][];
 }
 
-export default function LocationMap({ pins, height = '400px' }: LocationMapProps) {
+export default function LocationMap({ pins, height = '400px', route }: LocationMapProps) {
   const center: [number, number] =
     pins.length > 0 ? [pins[0].lat, pins[0].lng] : [20.5937, 78.9629];
 
@@ -58,14 +127,8 @@ export default function LocationMap({ pins, height = '400px' }: LocationMapProps
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>'
       />
-      {pins.map((pin, i) => (
-        <Marker key={i} position={[pin.lat, pin.lng]} {...(pin.iconUrl ? { icon: imagePinIcon(pin.iconUrl) } : {})}>
-          <Popup>
-            <strong>{pin.label}</strong>
-            {pin.detail && <><br />{pin.detail}</>}
-          </Popup>
-        </Marker>
-      ))}
+      {route && route.length > 1 && <DrawnRoute points={route} />}
+      {pins.map((pin, i) => <GlidingMarker key={pin.id ?? `${i}:${pin.label}`} pin={pin} />)}
     </MapContainer>
   );
 }

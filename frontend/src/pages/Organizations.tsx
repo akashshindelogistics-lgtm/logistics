@@ -6,8 +6,10 @@ import { IconBuilding, IconPin, IconChevron } from '../components/Icons';
 import Icon3D from '../components/Icon3D';
 import type { Organization } from '../types';
 import './page.css';
+import { useListAnimation } from '../lib/motion';
 
 export default function Organizations() {
+  const rowsRef = useListAnimation();
   const navigate = useNavigate();
   const orgId = getOrgId();
   const [orgs, setOrgs] = useState<Organization[]>([]);
@@ -66,7 +68,7 @@ export default function Organizations() {
               <thead>
                 <tr><th>Organization</th><th>Address</th><th>Vehicles</th><th>Location</th><th></th></tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef}>
                 {orgs.map(org => (
                   <tr key={org.id}>
                     <td>

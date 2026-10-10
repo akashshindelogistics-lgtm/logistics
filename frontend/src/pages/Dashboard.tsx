@@ -8,8 +8,18 @@ import Icon3D, { type Icon3DName } from '../components/Icon3D';
 import type { DispatchOrder } from '../types';
 import './page.css';
 import './Dashboard.css';
+import { m } from 'motion/react';
+import { DURATION, EASE_OUT, useCountUp, useListAnimation } from '../lib/motion';
+
+// Stat cards are links that fade up one after another on first paint.
+const MotionLink = m.create(Link);
+
+function StatValue({ value }: { value: number }) {
+  return <div className="stat-value">{useCountUp(value).toLocaleString()}</div>;
+}
 
 export default function Dashboard() {
+  const rowsRef = useListAnimation();
   const [counts, setCounts] = useState({ orgs: 0, vehicles: 0, customers: 0, dispatches: 0 });
   const [recent, setRecent] = useState<DispatchOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,8 +61,15 @@ export default function Dashboard() {
       </div>
 
       <div className="stat-grid">
-        {cards.map(({ label, value, to, icon, cls }) => (
-          <Link key={to} to={to} className={`stat-card ${cls}`}>
+        {cards.map(({ label, value, to, icon, cls }, i) => (
+          <MotionLink
+            key={to}
+            to={to}
+            className={`stat-card ${cls}`}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: i * 0.07, duration: DURATION.slow, ease: EASE_OUT } }}
+            whileHover={{ y: -2, transition: { duration: DURATION.fast } }}
+          >
             <div className="stat-card-top">
               <div className="stat-icon stat-icon-3d">
                 <Icon3D name={icon} size={36} float />
@@ -61,11 +78,11 @@ export default function Dashboard() {
             <div>
               {loading
                 ? <div className="skeleton" style={{ width: 60, height: 36, marginBottom: 6 }} />
-                : <div className="stat-value">{value.toLocaleString()}</div>
+                : <StatValue value={value} />
               }
               <div className="stat-label">{label}</div>
             </div>
-          </Link>
+          </MotionLink>
         ))}
       </div>
 
@@ -92,7 +109,7 @@ export default function Dashboard() {
                   <th>Order ID</th><th>Vehicle</th><th>Stock</th><th>Qty</th><th>Status</th><th>Time</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef}>
                 {recent.map(o => (
                   <tr key={o.id}>
                     <td><span className="mono">{o.id.slice(0, 8)}…</span></td>

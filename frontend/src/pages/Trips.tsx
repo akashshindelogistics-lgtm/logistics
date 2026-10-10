@@ -12,6 +12,7 @@ import { STATUS_TAG_CLASS, formatStatus } from '../lib/dispatchLifecycle';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import type { Customer, Trip, TripStatus, Vehicle, VehicleVendor } from '../types';
 import './page.css';
+import { useLivePolling } from '../lib/motion';
 
 const TRIP_TAG: Record<TripStatus, string> = {
   PLANNED: 'tag-amber',
@@ -53,6 +54,10 @@ export default function Trips() {
       .catch(() => setVendors([]));
   };
   useEffect(load, []);
+  // Keep vehicle positions fresh while a trip map is open, so the truck glides along its route.
+  useLivePolling(() => {
+    if (mapOpenId) listVehicles().then(v => setVehicles(v.data ?? [])).catch(() => {});
+  });
 
   const custName = (id: string) => customers.find(c => c.id === id)?.name ?? id.slice(0, 8);
   const setStop = (i: number, patch: Partial<StopDraft>) =>
@@ -68,6 +73,7 @@ export default function Trips() {
       pins.push({
         lat: vehicle.location.latitude,
         lng: vehicle.location.longitude,
+        id: vehicle.registration_number,
         label: `🚚 ${vehicle.registration_number}`,
         detail: `Last reported ${new Date(vehicle.location.timestamp * 1000).toLocaleString()}`,
         iconUrl: vehicleVisual(vehicle.vehicle_type).icon,
@@ -79,6 +85,7 @@ export default function Trips() {
         pins.push({
           lat: c.location.latitude,
           lng: c.location.longitude,
+          id: `stop-${s.stop_sequence}`,
           label: `Stop ${s.stop_sequence}: ${c.name}`,
           detail: formatStatus(s.status),
           iconUrl: ICONS_3D.store,
@@ -87,6 +94,14 @@ export default function Trips() {
     }
     return pins;
   };
+
+  // The trip's stops in visiting order, for the self-drawing route line.
+  const tripRoute = (t: Trip): [number, number][] =>
+    [...t.stops]
+      .sort((a, b) => (a.stop_sequence ?? 0) - (b.stop_sequence ?? 0))
+      .map(s => customers.find(c => c.id === s.customer_id)?.location)
+      .filter((l): l is NonNullable<typeof l> => !!l)
+      .map(l => [l.latitude, l.longitude]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -228,7 +243,7 @@ export default function Trips() {
                 </div>
                 {mapOpenId === t.id && (
                   tripPins(t).length > 0 ? (
-                    <LocationMap pins={tripPins(t)} height="280px" />
+                    <LocationMap pins={tripPins(t)} route={tripRoute(t)} height="280px" />
                   ) : (
                     <p className="muted" style={{ padding: '0 16px' }}>
                       No location data yet — the vehicle hasn't reported GPS coordinates and none of this trip's customers have a location on file.

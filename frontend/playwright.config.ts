@@ -11,6 +11,9 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     headless: true,
+    // The assertion suite runs with "reduce motion" so animations never race
+    // the checks; the headed demos (playwright.demo.config.ts) keep motion on.
+    contextOptions: { reducedMotion: 'reduce' },
   },
   projects: [
     {
