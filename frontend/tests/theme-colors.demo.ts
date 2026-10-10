@@ -2,9 +2,9 @@ import { test, expect, type Page } from '@playwright/test';
 import { registerOrg, uid } from './helpers';
 
 /**
- * A narrated walk through the **Peacock & Marigold** colour theme on its own:
- * the teal sidebar, the gradient greeting banner, stat cards washed in
- * cyan / marigold / magenta / olive, dispatch status tags in their lifecycle
+ * A narrated walk through the **Oxford & Claret** colour theme on its own:
+ * the Oxford navy sidebar, the navy-to-claret greeting banner, stat cards in
+ * royal blue / antique gold / claret / plum, dispatch status tags in their lifecycle
  * colours, and the same pages again in dark mode, ending on the login screen.
  *
  * Watch it with `npm run test:e2e:demo:theme-colors` (headed, slowed).
@@ -18,7 +18,7 @@ async function api(page: Page, method: 'post' | 'put', path: string, data?: unkn
   return (await res.json()).data;
 }
 
-test('Peacock & Marigold colour theme', async ({ page }) => {
+test('Oxford & Claret colour theme', async ({ page }) => {
   test.slow();
   const tag = uid().toUpperCase().slice(-4);
   const stock = `Red Clay Bricks ${uid()}`;
@@ -56,7 +56,7 @@ test('Peacock & Marigold colour theme', async ({ page }) => {
     }
   });
 
-  await test.step('Dashboard in light mode: teal banner, tinted stat cards, coloured statuses', async () => {
+  await test.step('Dashboard in light mode: navy-to-claret banner, tinted stat cards, coloured statuses', async () => {
     await page.goto('/');
     await expect(page.locator('.dash-hero')).toBeVisible();
     await expect(page.getByText('DELIVERED').first()).toHaveClass(/tag-green/);

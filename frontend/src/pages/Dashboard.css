@@ -1,4 +1,4 @@
-/* Greeting banner: brand gradient with a warm marigold glow in the corner */
+/* Greeting banner: navy-to-claret gradient with an antique-gold glow in the corner */
 .dash-hero {
   margin-bottom: 24px;
   display: flex;
@@ -8,7 +8,7 @@
   padding: 22px 26px;
   border-radius: var(--radius-lg);
   background:
-    radial-gradient(90% 140% at 100% 0%, rgba(245,158,11,.28), transparent 55%),
+    radial-gradient(90% 140% at 100% 0%, var(--accent-glow), transparent 55%),
     linear-gradient(120deg, var(--hero-a), var(--hero-b));
   box-shadow: var(--shadow);
   position: relative;

@@ -1,172 +1,175 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* Peacock & Marigold theme: deep teal brand with marigold, magenta and olive
-   accents, after painted Indian truck art. The status tokens (green, amber,
+/* Oxford & Claret theme: an English heritage palette of Oxford navy, claret
+   and antique gold on warm stone, with royal blue and plum as accents. Green
+   is kept for the "delivered" status only. The status tokens (green, amber,
    red, blue, purple) keep their meaning; the dashboard's stat cards use the
    separate --stat-* hues so they never read as a status. The sidebar keeps
    its own always-dark --sidebar-* tokens in both themes. */
 :root {
-  --brand:       #0f766e;
-  --brand-2:     #0e7490;
-  --brand-dark:  #0d645e;
-  --brand-light: #e7f1f1;
-  --brand-glow:  rgba(15,118,110,0.15);
+  --brand:       #1f3a6b;
+  --brand-2:     #7a1f3d;
+  --brand-dark:  #1a315b;
+  --brand-light: #ebedf2;
+  --brand-glow:  rgba(31,58,107,0.15);
   --on-brand:    #ffffff;
-  --accent:      #f59e0b;
+  --accent:      #c9973a;
+  --accent-glow: rgba(212,166,74,0.30);
 
-  --green:  #15803d; --green-bg:  #e1eee6; --green-text:  #0f5a2b;
-  --amber:  #b45309; --amber-bg:  #f5e9df; --amber-text:  #7e3a06;
-  --red:    #be123c; --red-bg:    #f7e0e6; --red-text:    #850d2a;
-  --blue:   #0e7490; --blue-bg:   #e0edf1; --blue-text:   #0a5165;
-  --purple: #a21caf; --purple-bg: #f3e1f5; --purple-text: #71147a;
+  --green:  #2f6b4f; --green-bg:  #e6edea; --green-text:  #214b37;
+  --amber:  #a5610f; --amber-bg:  #f4ece2; --amber-text:  #73440b;
+  --red:    #b42318; --red-bg:    #f6e5e3; --red-text:    #7e1911;
+  --blue:   #2b4c9a; --blue-bg:   #e6eaf3; --blue-text:   #1e356c;
+  --purple: #5e3a8c; --purple-bg: #ece7f1; --purple-text: #422962;
 
-  --stat-1: #0e7490; --stat-1-bg: #ddecef; --stat-1-line: #a8ccd1;
-  --stat-2: #c2410c; --stat-2-bg: #f6e4dd; --stat-2-line: #d5bfb0;
-  --stat-3: #a21caf; --stat-3-bg: #f2dff4; --stat-3-line: #cdb6d8;
-  --stat-4: #4d7c0f; --stat-4-bg: #e6eddd; --stat-4-line: #b8ceb0;
+  --stat-1: #2b4c9a; --stat-1-bg: #e6eaf3; --stat-1-line: #b7bbc6;
+  --stat-2: #9a6a12; --stat-2-bg: #f3ede3; --stat-2-line: #d2c3a4;
+  --stat-3: #8c1d40; --stat-3-bg: #f1e4e8; --stat-3-line: #cfafb0;
+  --stat-4: #5e3a8c; --stat-4-bg: #ece7f1; --stat-4-line: #c3b7c3;
 
-  --hero-a:   #0f766e;
-  --hero-b:   #0e7490;
+  --hero-a:   #1f3a6b;
+  --hero-b:   #7a1f3d;
   --hero-fg:  #ffffff;
   --hero-sub: rgba(255,255,255,0.82);
 
-  --sidebar-bg:     #08332f;
-  --sidebar-bg-2:   #0b4a52;
-  --sidebar-text:   #e6fffb;
-  --sidebar-muted:  #8cc7bf;
-  --sidebar-faint:  #4f8f87;
-  --sidebar-accent: #5eead4;
+  --sidebar-bg:     #121d36;
+  --sidebar-bg-2:   #1d2b4f;
+  --sidebar-text:   #f3efe4;
+  --sidebar-muted:  #a9b3cc;
+  --sidebar-faint:  #5d6a8a;
+  --sidebar-accent: #d4a64a;
+  --sidebar-hover:  rgba(212,166,74,0.14);
 
   --sidebar-w: 240px;
   --nav-h:     0px;
 
-  --bg:      #f3f8f7;
+  --bg:      #f6f4ef;
   --surface: #ffffff;
-  --border:  #dbe9e6;
-  --border2: #ebf3f1;
+  --border:  #e5e0d5;
+  --border2: #f1eee8;
 
-  --text-1: #0b2724;
-  --text-2: #3d5b57;
-  --text-3: #7b9893;
+  --text-1: #1a2238;
+  --text-2: #4a5268;
+  --text-3: #8a8f9e;
 
   --radius-sm: 6px;
   --radius:    10px;
   --radius-lg: 16px;
 
-  --shadow-sm: 0 1px 3px rgba(8,51,47,.07), 0 1px 2px rgba(8,51,47,.04);
-  --shadow:    0 4px 6px -1px rgba(8,51,47,.08), 0 2px 4px -1px rgba(8,51,47,.05);
-  --shadow-lg: 0 10px 25px -3px rgba(8,51,47,.12), 0 4px 10px -2px rgba(8,51,47,.06);
+  --shadow-sm: 0 1px 3px rgba(18,29,54,.07), 0 1px 2px rgba(18,29,54,.04);
+  --shadow:    0 4px 6px -1px rgba(18,29,54,.08), 0 2px 4px -1px rgba(18,29,54,.05);
+  --shadow-lg: 0 10px 25px -3px rgba(18,29,54,.12), 0 4px 10px -2px rgba(18,29,54,.06);
 
-  --row-hover:      #f3f8f8;
-  --danger-border:  #e8acbb;
+  --row-hover:      #f7f8fa;
+  --danger-border:  #e5b2ae;
   --card-gloss:     rgba(255,255,255,.6);
-  --skeleton-1:     #f5faf9;
-  --skeleton-2:     #e9f3f2;
+  --skeleton-1:     #f8f9fb;
+  --skeleton-2:     #eff1f5;
 }
 
 /* System preference dark mode, unless the user has made an explicit choice
    (tracked via the data-theme attribute set by ThemeProvider). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --brand:       #2dd4bf;
-    --brand-2:     #22d3ee;
-    --brand-dark:  #4ddac9;
-    --brand-light: #12413c;
-    --brand-glow:  rgba(45,212,191,0.25);
-    --on-brand:    #04211e;
-    --accent:      #fbbf24;
+    --brand:       #93abe3;
+    --brand-2:     #e08aa5;
+    --brand-dark:  #a3b8e7;
+    --brand-light: #2d3851;
+    --brand-glow:  rgba(147,171,227,0.25);
+    --on-brand:    #10172a;
+    --accent:      #e3b85a;
+    --accent-glow: rgba(227,184,90,0.22);
 
-    --green:  #4ade80; --green-bg:  #1a4b34; --green-text:  #80e8a6;
-    --amber:  #fbbf24; --amber-bg:  #414420; --amber-text:  #fcd266;
-    --red:    #fb7185; --red-bg:    #413335; --red-text:    #fc9caa;
-    --blue:   #22d3ee; --blue-bg:   #11484d; --blue-text:   #64e0f3;
-    --purple: #e879f9; --purple-bg: #3c344f; --purple-text: #efa1fb;
+    --green:  #7cc4a0; --green-bg:  #2b4046; --green-text:  #a3d6bd;
+    --amber:  #e9b35c; --amber-bg:  #433c37; --amber-text:  #f0ca8d;
+    --red:    #f28b82; --red-bg:    #453440; --red-text:    #f6aea8;
+    --blue:   #93abe3; --blue-bg:   #303b55; --blue-text:   #b3c4eb;
+    --purple: #bba0e6; --purple-bg: #393856; --purple-text: #cfbdee;
 
-    --stat-1: #22d3ee; --stat-1-bg: #11484d; --stat-1-line: #1a6468;
-    --stat-2: #fb923c; --stat-2-bg: #413a25; --stat-2-line: #5b5133;
-    --stat-3: #e879f9; --stat-3-bg: #3c344f; --stat-3-line: #56496c;
-    --stat-4: #a3e635; --stat-4-bg: #2d4c24; --stat-4-line: #416a31;
+    --stat-1: #93abe3; --stat-1-bg: #303b55; --stat-1-line: #475476;
+    --stat-2: #e3b85a; --stat-2-bg: #423e37; --stat-2-line: #5f584d;
+    --stat-3: #ec8fab; --stat-3-bg: #443549; --stat-3-line: #614c65;
+    --stat-4: #bba0e6; --stat-4-bg: #393856; --stat-4-line: #535177;
 
-    --hero-a:   #175a52;
-    --hero-b:   #0f3a3c;
-    --hero-fg:  #e8fbf7;
-    --hero-sub: #b5d6cf;
+    --hero-a:   #445272;
+    --hero-b:   #513c51;
+    --hero-fg:  #f3efe4;
+    --hero-sub: #c4c9d8;
 
-    --sidebar-bg:     #041110;
-    --sidebar-bg-2:   #072a2c;
-    --sidebar-muted:  #75b3aa;
-    --sidebar-faint:  #3f7a73;
+    --sidebar-bg:     #080c18;
+    --sidebar-bg-2:   #111a33;
+    --sidebar-faint:  #4f5a78;
 
-    --bg:      #061614;
-    --surface: #0c211f;
-    --border:  #17352f;
-    --border2: #122c28;
+    --bg:      #0d1220;
+    --surface: #141b2d;
+    --border:  #262f47;
+    --border2: #1e263b;
 
-    --text-1: #e8fbf7;
-    --text-2: #b5d6cf;
-    --text-3: #6f948d;
+    --text-1: #f1ede3;
+    --text-2: #c4c9d8;
+    --text-3: #7c8499;
 
     --shadow-sm: 0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
     --shadow:    0 4px 6px -1px rgba(0,0,0,.5), 0 2px 4px -1px rgba(0,0,0,.3);
     --shadow-lg: 0 10px 25px -3px rgba(0,0,0,.6), 0 4px 10px -2px rgba(0,0,0,.4);
 
-    --row-hover:     #0f2f2c;
-    --danger-border: #78454d;
+    --row-hover:     #1e273c;
+    --danger-border: #784d53;
     --card-gloss:    rgba(255,255,255,.03);
-    --skeleton-1:    #0e2c29;
-    --skeleton-2:    #103632;
+    --skeleton-1:    #1c2438;
+    --skeleton-2:    #232c43;
   }
 }
 
 /* Explicit dark theme choice, wins regardless of system preference. */
 :root[data-theme="dark"] {
-  --brand:       #2dd4bf;
-  --brand-2:     #22d3ee;
-  --brand-dark:  #4ddac9;
-  --brand-light: #12413c;
-  --brand-glow:  rgba(45,212,191,0.25);
-  --on-brand:    #04211e;
-  --accent:      #fbbf24;
+  --brand:       #93abe3;
+  --brand-2:     #e08aa5;
+  --brand-dark:  #a3b8e7;
+  --brand-light: #2d3851;
+  --brand-glow:  rgba(147,171,227,0.25);
+  --on-brand:    #10172a;
+  --accent:      #e3b85a;
+  --accent-glow: rgba(227,184,90,0.22);
 
-  --green:  #4ade80; --green-bg:  #1a4b34; --green-text:  #80e8a6;
-  --amber:  #fbbf24; --amber-bg:  #414420; --amber-text:  #fcd266;
-  --red:    #fb7185; --red-bg:    #413335; --red-text:    #fc9caa;
-  --blue:   #22d3ee; --blue-bg:   #11484d; --blue-text:   #64e0f3;
-  --purple: #e879f9; --purple-bg: #3c344f; --purple-text: #efa1fb;
+  --green:  #7cc4a0; --green-bg:  #2b4046; --green-text:  #a3d6bd;
+  --amber:  #e9b35c; --amber-bg:  #433c37; --amber-text:  #f0ca8d;
+  --red:    #f28b82; --red-bg:    #453440; --red-text:    #f6aea8;
+  --blue:   #93abe3; --blue-bg:   #303b55; --blue-text:   #b3c4eb;
+  --purple: #bba0e6; --purple-bg: #393856; --purple-text: #cfbdee;
 
-  --stat-1: #22d3ee; --stat-1-bg: #11484d; --stat-1-line: #1a6468;
-  --stat-2: #fb923c; --stat-2-bg: #413a25; --stat-2-line: #5b5133;
-  --stat-3: #e879f9; --stat-3-bg: #3c344f; --stat-3-line: #56496c;
-  --stat-4: #a3e635; --stat-4-bg: #2d4c24; --stat-4-line: #416a31;
+  --stat-1: #93abe3; --stat-1-bg: #303b55; --stat-1-line: #475476;
+  --stat-2: #e3b85a; --stat-2-bg: #423e37; --stat-2-line: #5f584d;
+  --stat-3: #ec8fab; --stat-3-bg: #443549; --stat-3-line: #614c65;
+  --stat-4: #bba0e6; --stat-4-bg: #393856; --stat-4-line: #535177;
 
-  --hero-a:   #175a52;
-  --hero-b:   #0f3a3c;
-  --hero-fg:  #e8fbf7;
-  --hero-sub: #b5d6cf;
+  --hero-a:   #445272;
+  --hero-b:   #513c51;
+  --hero-fg:  #f3efe4;
+  --hero-sub: #c4c9d8;
 
-  --sidebar-bg:     #041110;
-  --sidebar-bg-2:   #072a2c;
-  --sidebar-muted:  #75b3aa;
-  --sidebar-faint:  #3f7a73;
+  --sidebar-bg:     #080c18;
+  --sidebar-bg-2:   #111a33;
+  --sidebar-faint:  #4f5a78;
 
-  --bg:      #061614;
-  --surface: #0c211f;
-  --border:  #17352f;
-  --border2: #122c28;
+  --bg:      #0d1220;
+  --surface: #141b2d;
+  --border:  #262f47;
+  --border2: #1e263b;
 
-  --text-1: #e8fbf7;
-  --text-2: #b5d6cf;
-  --text-3: #6f948d;
+  --text-1: #f1ede3;
+  --text-2: #c4c9d8;
+  --text-3: #7c8499;
 
   --shadow-sm: 0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.3);
   --shadow:    0 4px 6px -1px rgba(0,0,0,.5), 0 2px 4px -1px rgba(0,0,0,.3);
   --shadow-lg: 0 10px 25px -3px rgba(0,0,0,.6), 0 4px 10px -2px rgba(0,0,0,.4);
 
-  --row-hover:     #0f2f2c;
-  --danger-border: #78454d;
+  --row-hover:     #1e273c;
+  --danger-border: #784d53;
   --card-gloss:    rgba(255,255,255,.03);
-  --skeleton-1:    #0e2c29;
-  --skeleton-2:    #103632;
+  --skeleton-1:    #1c2438;
+  --skeleton-2:    #232c43;
 }
 
 html, body { height: 100%; }

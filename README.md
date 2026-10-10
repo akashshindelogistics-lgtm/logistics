@@ -246,7 +246,7 @@ npm run test:e2e:demo:hired-vehicles # dispatching on a hired truck
 npm run test:e2e:demo:vendor-payments # paying vendors + hired-transport report
 npm run test:e2e:demo:vehicle-visuals # 3D icons, vehicle types and the 3D vehicle view
 npm run test:e2e:demo:motion         # motion: transitions, lifecycle track, gliding markers
-npm run test:e2e:demo:theme-colors   # Peacock & Marigold colour theme, light and dark
+npm run test:e2e:demo:theme-colors   # Oxford & Claret colour theme, light and dark
 
 # Already have servers on 5173/8080 (e.g. another worktree)? Run a demo on
 # other ports; it starts its own API (PORT) and Vite (API_PROXY_TARGET) there:

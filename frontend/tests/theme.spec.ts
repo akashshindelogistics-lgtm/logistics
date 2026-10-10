@@ -18,19 +18,19 @@ test.describe('Theme toggle', () => {
     await expect(html).toHaveAttribute('data-theme', 'dark');
   });
 
-  test('applies the Peacock & Marigold palette in both themes', async ({ page }) => {
+  test('applies the Oxford & Claret palette in both themes', async ({ page }) => {
     await registerOrg(page, `Theme Palette ${uid()}`);
     await page.goto('/');
 
-    // Teal brand, a teal gradient sidebar and a marigold "Customers" stat card in light mode…
+    // Oxford navy brand, a navy gradient sidebar and a gold "Customers" stat card in light mode…
     const brand = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--brand').trim());
-    expect(await brand()).toBe('#0f766e');
-    await expect(page.locator('.sidebar')).toHaveCSS('background-image', /linear-gradient\(rgb\(8, 51, 47\)/);
-    await expect(page.locator('.card-amber .stat-value')).toHaveCSS('color', 'rgb(194, 65, 12)');
+    expect(await brand()).toBe('#1f3a6b');
+    await expect(page.locator('.sidebar')).toHaveCSS('background-image', /linear-gradient\(rgb\(18, 29, 54\)/);
+    await expect(page.locator('.card-amber .stat-value')).toHaveCSS('color', 'rgb(154, 106, 18)');
 
     // …and their brighter counterparts in dark mode.
     await page.getByRole('button', { name: /switch to dark theme/i }).click();
-    expect(await brand()).toBe('#2dd4bf');
-    await expect(page.locator('.card-amber .stat-value')).toHaveCSS('color', 'rgb(251, 146, 60)');
+    expect(await brand()).toBe('#93abe3');
+    await expect(page.locator('.card-amber .stat-value')).toHaveCSS('color', 'rgb(227, 184, 90)');
   });
 });

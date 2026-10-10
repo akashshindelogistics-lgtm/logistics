@@ -37,7 +37,7 @@
 }
 
 .navbar-links a:hover {
-  background: rgba(94,234,212,.12);
+  background: var(--sidebar-hover);
   color: var(--sidebar-text);
 }
 

@@ -30,7 +30,7 @@
   justify-content: center;
   color: var(--sidebar-bg);
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(45,212,191,.35);
+  box-shadow: 0 4px 12px rgba(212,166,74,.35);
 }
 
 .sidebar-logo-name {
@@ -101,7 +101,7 @@
   position: absolute;
   inset: 0;
   border-radius: 8px;
-  background: rgba(94,234,212,.14);
+  background: var(--sidebar-hover);
   box-shadow: inset 3px 0 0 var(--sidebar-accent);
   z-index: 0;
 }
