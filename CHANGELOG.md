@@ -4,6 +4,18 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.12.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.11.1...v0.12.0) (2026-10-10)
+
+
+### Features
+
+* **ui:** motion - transitions, list animations, lifecycle track, gliding markers, org page ([ae30bcb](https://github.com/akashshindelogistics-lgtm/logistics/commit/ae30bcb0014440e5ff56a3892b82b00b48f23237))
+* **ui:** motion on the org detail page ([73f258c](https://github.com/akashshindelogistics-lgtm/logistics/commit/73f258c97eff3b2a999654596c6003fb61e06321))
+* **ui:** Oxford & Claret colour theme with a richer dashboard ([334faf3](https://github.com/akashshindelogistics-lgtm/logistics/commit/334faf34fd3b4f29621c410b0c62bab0b77dd898))
+* **ui:** Peacock & Marigold colour theme with a richer dashboard ([ad68b85](https://github.com/akashshindelogistics-lgtm/logistics/commit/ad68b85cbf421847a34e5a582f1184d49302ad73))
+* **ui:** switch to the Oxford & Claret heritage palette ([4990837](https://github.com/akashshindelogistics-lgtm/logistics/commit/49908370a516d3a2dfef669eecdcc7bad717f273))
+* **ui:** warm, low-focus rebalance of the Oxford & Claret palette ([8bbc655](https://github.com/akashshindelogistics-lgtm/logistics/commit/8bbc6556bb50717a91d43fc37e9e704b40725b6b))
+
 ## [0.11.1](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.11.0...v0.11.1) (2026-10-10)
 
 
