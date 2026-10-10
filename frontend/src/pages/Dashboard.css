@@ -1,9 +1,20 @@
+/* Greeting banner: a quiet ivory panel with an antique-gold glow in the corner,
+   so it frames the greeting without pulling focus from the figures below */
 .dash-hero {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  padding: 22px 26px;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(90% 140% at 100% 0%, var(--accent-glow), transparent 55%),
+    linear-gradient(120deg, var(--hero-a), var(--hero-b));
+  border: 1px solid var(--hero-line);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
 }
 
 /* Overlapping 3D icon cluster on the right of the greeting */
@@ -32,28 +43,35 @@
 .dash-hero-title {
   font-size: 26px;
   font-weight: 800;
-  color: var(--text-1);
+  color: var(--hero-fg);
   letter-spacing: -.5px;
 }
 
 .dash-hero-sub {
   font-size: 14px;
-  color: var(--text-3);
+  color: var(--hero-sub);
   margin-top: 4px;
 }
 
-/* Colored stat cards */
-.card-blue  { border-top: 3px solid var(--blue); }
-.card-green { border-top: 3px solid var(--green); }
-.card-amber { border-top: 3px solid var(--amber); }
-.card-purple{ border-top: 3px solid var(--purple); }
+/* Colored stat cards: each card is washed in its own --stat-* hue. The
+   class names are shared with Reports, so they map to the stat hues rather
+   than the status colors they're named after. */
+.card-blue   { --card: var(--stat-1); --card-bg: var(--stat-1-bg); --card-line: var(--stat-1-line); }
+.card-amber  { --card: var(--stat-2); --card-bg: var(--stat-2-bg); --card-line: var(--stat-2-line); }
+.card-purple { --card: var(--stat-3); --card-bg: var(--stat-3-bg); --card-line: var(--stat-3-line); }
+.card-green  { --card: var(--stat-4); --card-bg: var(--stat-4-bg); --card-line: var(--stat-4-line); }
 
-.card-blue  .stat-icon { background: var(--blue-bg);   color: var(--blue); }
-.card-green .stat-icon { background: var(--green-bg);  color: var(--green); }
-.card-amber .stat-icon { background: var(--amber-bg);  color: var(--amber); }
-.card-purple .stat-icon{ background: var(--purple-bg); color: var(--purple); }
+.card-blue, .card-amber, .card-purple, .card-green {
+  background: linear-gradient(160deg, var(--card-bg) 0%, var(--surface) 78%);
+  border-color: var(--card-line);
+}
 
-.card-blue  .stat-value { color: var(--blue); }
-.card-green .stat-value { color: var(--green); }
-.card-amber .stat-value { color: var(--amber); }
-.card-purple .stat-value{ color: var(--purple); }
+.card-blue .stat-icon, .card-amber .stat-icon,
+.card-purple .stat-icon, .card-green .stat-icon {
+  background: var(--card);
+  color: var(--surface);
+  box-shadow: 0 4px 12px -2px var(--card-line);
+}
+
+.card-blue .stat-value, .card-amber .stat-value,
+.card-purple .stat-value, .card-green .stat-value { color: var(--card); }
