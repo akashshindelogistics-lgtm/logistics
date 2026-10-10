@@ -1,0 +1,92 @@
+{
+  "org": {
+    "name": "E2E Test Logistics Co",
+    "address": "123 Test Street, Mumbai",
+    "location": { "latitude": 19.076, "longitude": 72.8777 },
+    "planning_density_kg_per_m3": 750
+  },
+  "godowns": [
+    {
+      "name": "Central Warehouse",
+      "address": "Plot 5, MIDC Industrial Area, Pune",
+      "location": { "latitude": 18.5204, "longitude": 73.8567 },
+      "max_capacity": 500000
+    },
+    {
+      "name": "Overflow Warehouse",
+      "address": "Plot 9, MIDC Industrial Area, Pune",
+      "location": { "latitude": 18.5314, "longitude": 73.8446 },
+      "max_capacity": 10000
+    }
+  ],
+  "stock": [
+    { "godown": "Central Warehouse", "description": "Cement Bags", "category": "Building Materials", "volume_in_size": 1, "quantity": 500, "reorder_threshold": 100 },
+    { "godown": "Central Warehouse", "description": "Steel Rods", "category": "General", "volume_in_size": 1, "quantity": 200, "reorder_threshold": 50 },
+    { "godown": "Central Warehouse", "description": "Cable Reels", "category": "Electrical", "volume_in_size": 1, "quantity": 60, "reorder_threshold": 20 },
+    { "godown": "Central Warehouse", "description": "Cement", "category": "Building Materials", "volume_in_size": 5, "quantity": 300, "reorder_threshold": 60 },
+    { "godown": "Central Warehouse", "description": "Office Chairs", "category": "Furniture", "volume_in_size": 1, "quantity": 40, "reorder_threshold": 10 },
+    { "godown": "Central Warehouse", "description": "Fittings", "category": "General", "volume_in_size": 1, "quantity": 100, "reorder_threshold": 25 },
+    { "godown": "Central Warehouse", "description": "AAC Block 600x200x150", "category": "AAC Block", "size_mm": [600, 200, 150], "quantity": 2000, "reorder_threshold": 500, "pieces_per_pallet": 160 },
+    { "godown": "Overflow Warehouse", "description": "Cement Bags", "category": "Building Materials", "volume_in_size": 1, "quantity": 50 },
+    { "godown": "Overflow Warehouse", "description": "Cement", "category": "Building Materials", "volume_in_size": 5, "quantity": 80 }
+  ],
+  "drivers": [
+    { "name": "Ramesh Kulkarni", "license_number": "DL-E2E-0001", "phone": "+91 98200 00000" },
+    { "name": "Trip Driver", "license_number": "DL-E2E-0002", "phone": "+91 98200 00002" },
+    { "name": "Report Driver", "license_number": "DL-E2E-0003", "phone": "+91 98200 00003" },
+    { "name": "Inactive Driver", "license_number": "DL-E2E-0004", "phone": "+91 98200 00004", "is_active": false }
+  ],
+  "vehicles": [
+    {
+      "registration_number": "MH12DM0001",
+      "capacity": 60000,
+      "driver_license": "DL-E2E-0001",
+      "documents": [
+        { "doc_type": "RegistrationCertificate", "document_number": "RC-E2E-0001", "expires_on": "2036-01-15" },
+        { "doc_type": "Insurance", "document_number": "POL-E2E-0001", "issued_on": "2025-10-30", "expires_on": "2026-10-30", "notes": "Expires within 30 days of loading - exercises the compliance alert" },
+        { "doc_type": "PollutionCertificate", "document_number": "PUC-E2E-0001", "expires_on": "2027-04-10" },
+        { "doc_type": "FitnessCertificate", "document_number": "FC-E2E-0001", "expires_on": "2027-06-05" },
+        { "doc_type": "Permit", "document_number": "NP-E2E-0001", "expires_on": "2027-09-30" }
+      ],
+      "maintenance": [
+        { "description": "Full service", "due_at_mileage_km": 50000, "current_mileage_km": 42000, "last_service_on": "2026-06-01" }
+      ]
+    },
+    {
+      "registration_number": "MH12TD0002",
+      "payload_tonnes": 16,
+      "deck_volume_m3": 24,
+      "driver_license": "DL-E2E-0002",
+      "documents": [
+        { "doc_type": "RC", "document_number": "RC-E2E-0002", "expires_on": "2034-07-20" },
+        { "doc_type": "Insurance", "document_number": "POL-E2E-0002", "issued_on": "2026-04-01", "expires_on": "2027-03-31" }
+      ],
+      "maintenance": [
+        { "description": "Oil change", "due_on": "2026-12-15", "due_at_mileage_km": 61000, "current_mileage_km": 55400 }
+      ]
+    },
+    {
+      "registration_number": "MH12RP0003",
+      "capacity": 20000,
+      "driver_license": "DL-E2E-0003",
+      "documents": [
+        { "doc_type": "Insurance", "document_number": "POL-E2E-0003", "expires_on": "2027-08-31" }
+      ]
+    }
+  ],
+  "customers": [
+    { "name": "Sunrise Traders", "address": "221 Market Road, Bengaluru", "location": { "latitude": 12.9716, "longitude": 77.5946 }, "email": "sunrise@example.com" },
+    { "name": "Moonlight Depot", "address": "9 Ring Rd, Bengaluru", "location": { "latitude": 12.99, "longitude": 77.61 } },
+    { "name": "Reachable Retail", "address": "221 Market Road, Bengaluru", "location": { "latitude": 12.9716, "longitude": 77.5946 }, "phone": "+91 90000 12345", "email": "ops@example.com" },
+    { "name": "Market Road Buyer", "address": "9 Market Rd, Pune", "location": { "latitude": 18.52, "longitude": 73.85 } },
+    { "name": "Upload Demo Customer", "address": "1 FC Road, Pune", "location": { "latitude": 18.5204, "longitude": 73.8567 } },
+    { "name": "Trip Stop 1", "address": "1 Market Rd, Mumbai", "location": { "latitude": 19.02, "longitude": 72.8 } },
+    { "name": "Trip Stop 2", "address": "2 Market Rd, Mumbai", "location": { "latitude": 19.04, "longitude": 72.8 } },
+    { "name": "Trip Stop 3", "address": "3 Market Rd, Mumbai", "location": { "latitude": 19.06, "longitude": 72.8 } }
+  ],
+  "users": [
+    { "name": "Dana Dispatcher", "email": "dispatcher@e2e-test.example.com", "role": "Dispatcher" },
+    { "name": "Wes Warehouse", "email": "warehouse@e2e-test.example.com", "role": "Warehouse staff" },
+    { "name": "Ada Admin", "email": "admin@e2e-test.example.com", "role": "Admin" }
+  ]
+}
