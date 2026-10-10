@@ -67,3 +67,28 @@ export function isRunningLate(order: Pick<DispatchOrder, 'status' | 'dispatched_
   const hoursSinceDispatch = (Date.now() / 1000 - order.dispatched_at) / 3600;
   return hoursSinceDispatch > PROMISED_DELIVERY_HOURS;
 }
+
+/** The happy path a dispatch moves along, in order (AWAITING_VEHICLE sits before it). */
+export const LIFECYCLE_STEPS: DispatchStatus[] = ['PENDING', 'CONFIRMED', 'LOADED', 'IN_TRANSIT', 'DELIVERED'];
+
+export interface LifecycleProgress {
+  /** Index into LIFECYCLE_STEPS reached so far; -1 before PENDING. */
+  step: number;
+  /** Set when the dispatch left the happy path. */
+  ended: 'returned' | 'cancelled' | null;
+}
+
+/**
+ * Where a dispatch is on its lifecycle track. A return happens from
+ * IN_TRANSIT, so it shows as reaching that step; a cancellation could come
+ * from anywhere before delivery, so the last step its history reached is used.
+ */
+export function lifecycleProgress(order: Pick<DispatchOrder, 'status' | 'status_history'>): LifecycleProgress {
+  const index = (s: DispatchStatus) => LIFECYCLE_STEPS.indexOf(s);
+  if (order.status === 'RETURNED') return { step: index('IN_TRANSIT'), ended: 'returned' };
+  if (order.status === 'CANCELLED') {
+    const reached = Math.max(-1, ...(order.status_history ?? []).map(e => index(e.status)));
+    return { step: reached, ended: 'cancelled' };
+  }
+  return { step: index(order.status), ended: null };
+}

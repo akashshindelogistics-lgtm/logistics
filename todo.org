@@ -1201,7 +1201,7 @@
    Vitest: vehicleVisuals, webgl, Icon3D, VehicleShowcase, LocationMap image pins, Vehicles/VehicleDetail pages.
    tests/vehicle-visuals.spec.ts (poster mode), a Tipper + 3D check in e2e-full-flow, and the narrated
    tests/vehicle-visuals.demo.ts (npm run test:e2e:demo:vehicle-visuals) with real WebGL.
-* TODO Motion in the UI - animate transitions, list changes, live tracking and feedback so the dashboard feels alive, without slowing anyone down
+* DONE Motion in the UI - animate transitions, list changes, live tracking and feedback so the dashboard feels alive, without slowing anyone down
   Motion is ordinary front-end code (any model or person can write it); the choice is the library, not the LLM.
   Libraries:
   - motion (formerly Framer Motion, motion/react) - entrances, springs, hover/tap, shared-layout moves; use LazyMotion + m to keep it small
@@ -1211,9 +1211,33 @@
   Ground rules: honour prefers-reduced-motion everywhere (skip, don't shorten), 150-300 ms, no looping motion except
   in-transit indicators, never block input; Playwright runs with reducedMotion: 'reduce' so the headless suite stays
   deterministic. Leave OrganizationDetail.tsx until the org-page split lands.
-** TODO Phase 1: cheap wins - auto-animate on fleet/stock/dispatch/customer tables and dispatch line items, sliding sidebar active indicator, CSS button press + badge colour transitions, shared useReducedMotion helper
-** TODO Phase 2: page transitions - React Router viewTransition for list -> detail (vehicle row icon morphs into the VehicleDetail showcase), with a plain fade fallback where the API is missing
-** TODO Phase 3: motion library - add motion (LazyMotion); dashboard stat count-up + staggered card entrance, recent-dispatch rows fade in, toast-style success/error messages, assistant widget open/close spring
-** TODO Phase 4: dispatch lifecycle - animated status badge change and a PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED progress track on dispatch rows and detail
-** TODO Phase 5: live tracking - Leaflet vehicle markers glide between GPS fixes (interpolate over the poll interval, snap if the jump is huge or the tab was hidden), trip route polyline draws stop by stop
-** TODO Phase 6: Vitest for the reduced-motion helper and count-up, Playwright spec with reducedMotion, standalone headed demo flow (test:e2e:demo:motion), README note
+** DONE Phase 1: cheap wins - auto-animate on fleet/stock/dispatch/customer tables and dispatch line items, sliding sidebar active indicator, CSS button press + badge colour transitions, shared useReducedMotion helper
+   lib/motion.ts (prefersReducedMotion/useReducedMotion, useListAnimation over @formkit/auto-animate) on the
+   Vehicles, Customers, Dispatches, Team, Vendors, Organizations and dashboard tables; MotionProvider
+   (LazyMotion domMax + MotionConfig reducedMotion="user"); sliding sidebar highlight via layoutId; button press
+   scale, badge colour transitions; a global CSS reduced-motion kill switch. Later extended to the org page on request:
+   its five tables, godown cards + per-godown stock (animateList ref), dispatch stock lines, header count-up,
+   staggered section entrance, gliding vehicle pins with 10 s refresh.
+** DONE Phase 2: page transitions - React Router viewTransition for list -> detail (vehicle row icon morphs into the VehicleDetail showcase), with a plain fade fallback where the API is missing
+   React Router's viewTransition needs a data router and the app uses <BrowserRouter>, so lib/viewTransition.ts
+   wraps navigate() in document.startViewTransition + flushSync. Sidebar links cross-fade the page (sidebar is its
+   own group, stays put); the fleet row icon morphs into VehicleDetail's header (type passed in link state so the
+   header renders before data loads). Fade-in fallback without the API; off under reduced motion.
+** DONE Phase 3: motion library - add motion (LazyMotion); dashboard stat count-up + staggered card entrance, recent-dispatch rows fade in, toast-style success/error messages, assistant widget open/close spring
+   Dashboard stat cards stagger in (m.create(Link)) and count up (useCountUp); assistant panel springs open/closed
+   (AnimatePresence). Instead of a toast system, the existing inline success/error messages slide in (errors also
+   shake) - moving every page's feedback into a toast queue was a bigger change than this item.
+** DONE Phase 4: dispatch lifecycle - animated status badge change and a PENDING -> CONFIRMED -> LOADED -> IN_TRANSIT -> DELIVERED progress track on dispatch rows and detail
+   lifecycleProgress() + components/LifecycleTrack: five-step track under each status tag, fill animates, current
+   step pulses while IN_TRANSIT, red at the step where a return/cancellation stopped it; accessible progressbar.
+   The status tag re-keys per status so a change pops it in.
+** DONE Phase 5: live tracking - Leaflet vehicle markers glide between GPS fixes (interpolate over the poll interval, snap if the jump is huge or the tab was hidden), trip route polyline draws stop by stop
+   MapPin.id + GlidingMarker eases a moved marker over 1.2 s (snaps with reduced motion, hidden tab or >50 km).
+   Positions now actually refresh: useLivePolling re-reads vehicles every 10 s while visible on /vehicles and on
+   an open trip map. LocationMap route prop draws the stop-to-stop line (pathLength=1 dash animation).
+** DONE Phase 6: Vitest for the reduced-motion helper and count-up, Playwright spec with reducedMotion, standalone headed demo flow (test:e2e:demo:motion), README note
+   Vitest: motion helpers, LifecycleTrack/lifecycleProgress, viewTransition click, LocationMap route + stable
+   markers; unit tests run with reduced motion (matchMedia stub in src/test/setup.ts). Playwright: motion.spec.ts,
+   a lifecycle-track check in e2e-full-flow, headless config sets reducedMotion: 'reduce', and the narrated
+   tests/motion.demo.ts (npm run test:e2e:demo:motion). Ports are now configurable (E2E_BASE_URL, E2E_WEB_PORT,
+   E2E_API_PORT, API_PROXY_TARGET) so a worktree can test beside servers already on 5173/8080.

@@ -7,6 +7,7 @@ import Icon3D, { ICONS_3D } from '../components/Icon3D';
 import type { Customer } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import './page.css';
+import { useListAnimation } from '../lib/motion';
 
 interface CustomerBalance {
   outstanding: number;
@@ -14,6 +15,7 @@ interface CustomerBalance {
 }
 
 export default function Customers() {
+  const rowsRef = useListAnimation();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -198,7 +200,7 @@ export default function Customers() {
               <thead>
                 <tr><th>Customer</th><th>Address</th><th>Location</th><th>Billing</th><th></th></tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef}>
                 {customers.map(c => (
                   <tr key={c.id}>
                     <td>

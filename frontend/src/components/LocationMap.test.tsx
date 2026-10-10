@@ -16,6 +16,9 @@ vi.mock('react-leaflet', () => ({
     </div>
   ),
   Popup: ({ children }: { children: React.ReactNode }) => <div data-testid="popup">{children}</div>,
+  Polyline: ({ positions, pathOptions }: { positions: [number, number][]; pathOptions?: { className?: string } }) => (
+    <div data-testid="route" data-points={positions.length} data-class={pathOptions?.className} />
+  ),
 }));
 
 const pin = (overrides: Partial<MapPin> = {}): MapPin => ({
@@ -61,5 +64,21 @@ describe('LocationMap', () => {
     expect((icon.options.html as HTMLImageElement).getAttribute('src')).toBe('/tanker.png');
     expect(icon.options.iconAnchor).toEqual([23, 40]);
     expect(imagePinIcon('/tanker.png')).toBe(icon);
+  });
+
+  it('draws a self-drawing route only when it has at least two points', () => {
+    const { rerender } = render(<LocationMap pins={[pin()]} route={[[18.5, 73.8]]} />);
+    expect(screen.queryByTestId('route')).not.toBeInTheDocument();
+    rerender(<LocationMap pins={[pin()]} route={[[18.5, 73.8], [18.6, 73.9], [18.7, 73.7]]} />);
+    expect(screen.getByTestId('route')).toHaveAttribute('data-points', '3');
+    expect(screen.getByTestId('route')).toHaveAttribute('data-class', 'map-route');
+  });
+
+  it('keeps a pin with an id as the same marker when its position changes', () => {
+    const { rerender } = render(<LocationMap pins={[pin({ id: 'MH12', label: 'Truck' })]} />);
+    const before = screen.getByTestId('marker');
+    rerender(<LocationMap pins={[pin({ id: 'MH12', label: 'Truck', lat: 19.1, lng: 72.9 })]} />);
+    // Same element: the marker is moved (glided), not torn down and rebuilt.
+    expect(screen.getByTestId('marker')).toBe(before);
   });
 });

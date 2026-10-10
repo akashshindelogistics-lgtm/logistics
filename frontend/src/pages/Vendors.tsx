@@ -7,6 +7,7 @@ import { IconPlus, IconX, IconTrash } from '../components/Icons';
 import Icon3D from '../components/Icon3D';
 import type { HireStatus, VehicleHire, VehicleVendor, VendorInput, VendorPayment } from '../types';
 import './page.css';
+import { useListAnimation } from '../lib/motion';
 
 const HIRE_TAG: Record<HireStatus, string> = {
   REQUESTED: 'tag-amber',
@@ -39,6 +40,8 @@ const toForm = (v: VehicleVendor): FormState => ({
 });
 
 export default function Vendors() {
+  const rowsRef1 = useListAnimation();
+  const rowsRef2 = useListAnimation();
   const [vendors, setVendors] = useState<VehicleVendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -249,7 +252,7 @@ export default function Vendors() {
               <thead>
                 <tr><th>Vendor</th><th>Contact</th><th>Phone</th><th>GSTIN</th><th>Notes</th><th>Outstanding</th><th>Status</th>{canEdit && <th></th>}</tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef1}>
                 {vendors.map(v => (
                   <tr key={v.id}>
                     <td className="entity-name">{v.name}</td>
@@ -311,7 +314,7 @@ export default function Vendors() {
               <thead>
                 <tr><th>Vendor</th><th>Truck</th><th>For</th><th>Status</th><th>Hire cost</th><th>Paid</th><th>Balance</th><th></th></tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef2}>
                 {hires.map(h => (
                   <Fragment key={h.id}>
                     <tr data-testid="hire-row">

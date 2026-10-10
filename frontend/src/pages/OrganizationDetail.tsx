@@ -32,6 +32,8 @@ import type {
 import { VEHICLE_TYPES } from '../types';
 import { ICONS_3D } from '../components/Icon3D';
 import { vehicleVisual } from '../lib/vehicleVisuals';
+import { animateList, useListAnimation, useLivePolling } from '../lib/motion';
+import CountUp from '../components/CountUp';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import { IconBuilding, IconTruck, IconPackage, IconDispatch, IconPlus, IconTrash, IconPin, IconChevron, IconCheck, IconUsers } from '../components/Icons';
 import './page.css';
@@ -102,6 +104,14 @@ const MAINTENANCE_STATUS_META = {
 } as const;
 
 export default function OrganizationDetail() {
+  // Rows and cards slide in/out as they're added or removed (off under reduced motion).
+  const fleetRows = useListAnimation();
+  const driverRows = useListAnimation();
+  const docRows = useListAnimation();
+  const maintRows = useListAnimation();
+  const transferRows = useListAnimation();
+  const godownCards = useListAnimation<HTMLDivElement>();
+  const lineRows = useListAnimation<HTMLDivElement>();
   const { id } = useParams<{ id: string }>();
   const [org, setOrg] = useState<Organization | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -181,6 +191,10 @@ export default function OrganizationDetail() {
       .catch(() => setVendors([]));
 
   useEffect(() => { load(); loadVendors(); }, [id]);
+  // Keep vehicle positions fresh so their map markers glide between GPS fixes.
+  useLivePolling(() => {
+    getOrg(id!).then(r => { if (r.data) setOrg(r.data); }).catch(() => {});
+  });
 
   const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -491,7 +505,7 @@ export default function OrganizationDetail() {
     mapPins.push({ lat: org.location.latitude, lng: org.location.longitude, label: org.name, detail: org.address, iconUrl: ICONS_3D.building });
   org.vehicles.forEach(v => {
     if (v.location)
-      mapPins.push({ lat: v.location.latitude, lng: v.location.longitude, label: v.registration_number, detail: `${v.capacity} ${v.unit}`, iconUrl: vehicleVisual(v.vehicle_type).icon });
+      mapPins.push({ id: v.registration_number, lat: v.location.latitude, lng: v.location.longitude, label: v.registration_number, detail: `${v.capacity} ${v.unit}`, iconUrl: vehicleVisual(v.vehicle_type).icon });
   });
   org.godowns.forEach(g => {
     if (g.location)
@@ -523,11 +537,11 @@ export default function OrganizationDetail() {
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontSize: 13, textAlign: 'center' }}>
-            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--blue)' }}>{org.vehicles.length}</div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--blue)' }}><CountUp value={org.vehicles.length} /></div>
             <div className="muted">Vehicles</div>
           </div>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontSize: 13, textAlign: 'center' }}>
-            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--purple)' }}>{org.godowns.length}</div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--purple)' }}><CountUp value={org.godowns.length} /></div>
             <div className="muted">Godowns</div>
           </div>
         </div>
@@ -544,7 +558,7 @@ export default function OrganizationDetail() {
         </div>
       )}
 
-      <div className="detail-grid">
+      <div className="detail-grid stagger-in">
         {/* Vehicles */}
         <div className="section-card" style={{ gridColumn: '1 / -1' }}>
           <div className="section-card-header">
@@ -564,7 +578,7 @@ export default function OrganizationDetail() {
                 <thead>
                   <tr><th>Registration</th><th>Capacity</th><th>Driver</th><th>Coordinates</th><th>Last Seen</th><th></th></tr>
                 </thead>
-                <tbody>
+                <tbody ref={fleetRows}>
                   {org.vehicles.map(v => (
                     <tr key={v.registration_number}>
                       <td>
@@ -650,7 +664,7 @@ export default function OrganizationDetail() {
                 <thead>
                   <tr><th>Name</th><th>Licence</th><th>Phone</th><th>Status</th><th></th></tr>
                 </thead>
-                <tbody>
+                <tbody ref={driverRows}>
                   {drivers.map(d => (
                     <tr key={d.id}>
                       <td>
@@ -763,7 +777,7 @@ export default function OrganizationDetail() {
                 <thead>
                   <tr><th>Vehicle</th><th>Document</th><th>Number</th><th>Expires</th><th>Status</th><th></th></tr>
                 </thead>
-                <tbody>
+                <tbody ref={docRows}>
                   {vehicleDocuments.map(doc => {
                     const meta = COMPLIANCE_STATUS_META[doc.status];
                     return (
@@ -898,7 +912,7 @@ export default function OrganizationDetail() {
                 <thead>
                   <tr><th>Vehicle</th><th>Item</th><th>Due</th><th>Mileage</th><th>Status</th><th></th></tr>
                 </thead>
-                <tbody>
+                <tbody ref={maintRows}>
                   {vehicleMaintenance.map(item => {
                     const meta = MAINTENANCE_STATUS_META[item.status];
                     return (
@@ -1031,7 +1045,7 @@ export default function OrganizationDetail() {
               <p>Add a godown below, then add stock to it.</p>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px 20px' }}>
+            <div ref={godownCards} style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px 20px' }}>
               {org.godowns.map(g => {
                 const form = stockFormFor(g.id);
                 const submitting = !!stockSubmitting[g.id];
@@ -1057,7 +1071,7 @@ export default function OrganizationDetail() {
                           <thead>
                             <tr><th>Description</th><th>Category</th><th>Quantity</th><th>Volume</th></tr>
                           </thead>
-                          <tbody>
+                          <tbody ref={animateList}>
                             {g.stock.map(s => (
                               <tr key={s.description}>
                                 <td>
@@ -1211,7 +1225,7 @@ export default function OrganizationDetail() {
                 <thead>
                   <tr><th>Item</th><th>From</th><th>To</th><th>Quantity</th><th>When</th></tr>
                 </thead>
-                <tbody>
+                <tbody ref={transferRows}>
                   {transfers.map(t => (
                     <tr key={t.id}>
                       <td><span className="entity-name">{t.description}</span></td>
@@ -1261,6 +1275,7 @@ export default function OrganizationDetail() {
                 </div>
               )}
               <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '4px 0 10px' }}>Stock Lines</p>
+              <div ref={lineRows}>
               {dLineItems.map((li, i) => {
                 const suffix = i === 0 ? '' : ` ${i + 1}`;
                 return (
@@ -1298,6 +1313,7 @@ export default function OrganizationDetail() {
                   </div>
                 );
               })}
+              </div>
               <button type="button" className="btn btn-sm" onClick={addLineItem} style={{ marginBottom: 14 }}>
                 <IconPlus size={13} />Add another line
               </button>

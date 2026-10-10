@@ -277,6 +277,9 @@ test('full logistics workflow: register, login, warehouse, fleet, delivery, bill
 
     await row.getByRole('button', { name: 'Mark In Transit' }).click();
     await expect(row.getByText('IN TRANSIT', { exact: true })).toBeVisible({ timeout: 8000 });
+    // The lifecycle track under the tag has filled to step 4 and pulses while on the road.
+    await expect(row.getByTestId('lifecycle-track')).toHaveAttribute('aria-valuenow', '4');
+    await expect(row.getByTestId('lifecycle-track')).toHaveClass(/is-moving/);
 
     await row.getByRole('button', { name: 'Mark Delivered' }).click();
     const confirmDeliveryBtn = page.getByRole('button', { name: /confirm delivery/i });

@@ -7,10 +7,15 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    // E2E_BASE_URL points the suite at a dev server on another port (e.g. a
+    // second worktree running beside the usual one on 5173).
+    baseURL: process.env.E2E_BASE_URL || 'http://localhost:5173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     headless: true,
+    // The assertion suite runs with "reduce motion" so animations never race
+    // the checks; the headed demos (playwright.demo.config.ts) keep motion on.
+    contextOptions: { reducedMotion: 'reduce' },
   },
   projects: [
     {
