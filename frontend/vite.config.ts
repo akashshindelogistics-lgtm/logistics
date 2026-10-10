@@ -14,7 +14,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        // API_PROXY_TARGET lets a second checkout run its own API on another port.
+        target: process.env.API_PROXY_TARGET || 'http://localhost:8080',
         changeOrigin: true,
       },
     },

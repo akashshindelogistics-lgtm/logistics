@@ -245,7 +245,18 @@ npm run test:e2e:demo:vendors        # vehicle vendors
 npm run test:e2e:demo:hired-vehicles # dispatching on a hired truck
 npm run test:e2e:demo:vendor-payments # paying vendors + hired-transport report
 npm run test:e2e:demo:vehicle-visuals # 3D icons, vehicle types and the 3D vehicle view
+npm run test:e2e:demo:motion         # motion: transitions, lifecycle track, gliding markers
+
+# Already have servers on 5173/8080 (e.g. another worktree)? Run a demo on
+# other ports; it starts its own API (PORT) and Vite (API_PROXY_TARGET) there:
+E2E_WEB_PORT=5174 E2E_API_PORT=8081 npm run test:e2e:demo:motion
+# The headless suite takes the dev server URL the same way:
+E2E_BASE_URL=http://localhost:5174 npm run test:e2e
 ```
+
+Motion follows the OS "reduce motion" setting everywhere (CSS, motion/react,
+auto-animate, page transitions and map gliding), and the headless Playwright
+suite runs with reduced motion so animations never race its assertions.
 
 The vehicle-type icons are still renders of the 3D models in
 `frontend/public/models/vehicles` (Kenney Car Kit, CC0). After changing a model
