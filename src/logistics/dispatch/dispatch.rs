@@ -115,7 +115,9 @@ pub(crate) fn ensure_trip_columns(conn: &mut mysql::PooledConn) -> Result<(), Bo
             params! { "col" => col },
         )?;
         if present.is_none() {
-            conn.query_drop(format!("ALTER TABLE Dispatches ADD COLUMN {col} {ty} DEFAULT NULL"))?;
+            conn.query_drop(format!(
+                "ALTER TABLE Dispatches ADD COLUMN {col} {ty} DEFAULT NULL"
+            ))?;
         }
     }
     Ok(())
@@ -435,12 +437,14 @@ impl DispatchLineItem {
         )?;
         Ok(rows
             .into_iter()
-            .map(|(stock_description, quantity, volume_in_size, category)| DispatchLineItem {
-                stock_description,
-                quantity,
-                volume_in_size,
-                category,
-            })
+            .map(
+                |(stock_description, quantity, volume_in_size, category)| DispatchLineItem {
+                    stock_description,
+                    quantity,
+                    volume_in_size,
+                    category,
+                },
+            )
             .collect())
     }
 }
@@ -904,7 +908,18 @@ impl DispatchOrder {
         status_history: Vec<DispatchStatusEvent>,
         proof_of_delivery: Option<ProofOfDelivery>,
     ) -> Self {
-        let (id, org_id, customer_id, vehicle_reg, status, dispatched_at, trip_id, stop_sequence, source, hire_id) = row;
+        let (
+            id,
+            org_id,
+            customer_id,
+            vehicle_reg,
+            status,
+            dispatched_at,
+            trip_id,
+            stop_sequence,
+            source,
+            hire_id,
+        ) = row;
         DispatchOrder {
             id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
             org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -994,7 +1009,9 @@ mod tests {
     fn in_transit_order_with_godown() -> (Organization, Uuid, DispatchOrder) {
         let org = Organization::create_organization("Return Co", "1 Depot Rd").expect("org");
         let godown = Godown::create(org.id, "Main Godown", "MIDC", None).expect("godown");
-        Stock::new(1, 100, "Cement").add_to_godown(godown.id).expect("stock");
+        Stock::new(1, 100, "Cement")
+            .add_to_godown(godown.id)
+            .expect("stock");
 
         let mut order = DispatchOrder {
             id: Uuid::new_v4(),
@@ -1285,9 +1302,12 @@ mod tests {
     #[test]
     fn test_return_credits_a_new_stock_row_with_the_line_items_category() {
         let _db = TestDb::create();
-        let org = Organization::create_organization("Return Category Co", "1 Depot Rd").expect("org");
+        let org =
+            Organization::create_organization("Return Category Co", "1 Depot Rd").expect("org");
         let godown = Godown::create(org.id, "Main Godown", "MIDC", None).expect("godown");
-        Stock::new(1, 100, "Cement").add_to_godown(godown.id).expect("stock");
+        Stock::new(1, 100, "Cement")
+            .add_to_godown(godown.id)
+            .expect("stock");
 
         let mut order = DispatchOrder {
             id: Uuid::new_v4(),
@@ -1368,7 +1388,9 @@ mod tests {
 
         let results = chunk::search_by_org(org.id, "Acme Corp Cement", 8).expect("search");
         assert!(
-            results.iter().any(|c| c.text.contains("Acme Corp") && c.text.contains("Pending")),
+            results
+                .iter()
+                .any(|c| c.text.contains("Acme Corp") && c.text.contains("Pending")),
             "saving a dispatch should index its narrative: {results:?}"
         );
 
@@ -1379,7 +1401,9 @@ mod tests {
             "advancing status should reindex the narrative with the new status: {results:?}"
         );
         assert!(
-            !results.iter().any(|c| c.text.to_lowercase().contains("current status: pending")),
+            !results
+                .iter()
+                .any(|c| c.text.to_lowercase().contains("current status: pending")),
             "the narrative is regenerated whole, not appended: {results:?}"
         );
     }
@@ -1424,7 +1448,10 @@ mod tests {
         let err = order
             .transition_to(Returned, None, Some(foreign.id))
             .expect_err("a foreign godown is rejected");
-        assert!(err.to_string().contains("organization"), "unexpected: {err}");
+        assert!(
+            err.to_string().contains("organization"),
+            "unexpected: {err}"
+        );
         assert_eq!(order.status, InTransit, "status must not change on failure");
 
         let reloaded = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
@@ -1523,5 +1550,4 @@ mod tests {
         assert_eq!(source, "OWN", "existing rows read as own-fleet");
         assert_eq!(nullable, "YES");
     }
-
 }

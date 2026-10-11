@@ -10,8 +10,8 @@ use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::test_support::TestDb;
 use crate::logistics::vehicle::vehicle::{Unit, Vehicle};
-use mysql::prelude::*;
 use mysql::params;
+use mysql::prelude::*;
 
 /// An org set up so `dispatch_stock_to_customer` will succeed: one located
 /// customer, `vehicle_count` located vehicles each with an active driver and
@@ -23,14 +23,17 @@ struct Fixture {
 
 fn seed(name: &str, vehicle_count: usize) -> Fixture {
     let mut org = Organization::create_organization(name, "1 Depot Rd").expect("org");
-    org.update_location(19.0, 72.0, Some("HQ")).expect("org loc");
+    org.update_location(19.0, 72.0, Some("HQ"))
+        .expect("org loc");
 
     let godown = Godown::create(org.id, "Main", "Dock 1", Some(1_000_000)).expect("godown");
-    Stock::new(1, 100_000, "Widget").add_to_godown(godown.id).expect("stock");
+    Stock::new(1, 100_000, "Widget")
+        .add_to_godown(godown.id)
+        .expect("stock");
 
     for i in 0..vehicle_count {
-        let driver = Driver::create(org.id, &format!("Driver {i}"), &format!("LIC{i}"), "0")
-            .expect("driver");
+        let driver =
+            Driver::create(org.id, format!("Driver {i}"), format!("LIC{i}"), "0").expect("driver");
         let mut v = Vehicle::new(format!("MH00 RP {i:04}"), 1_000_000, Unit::MetricTon);
         v.add_new_vehicle_to_org(&org).expect("vehicle");
         v.update_location(19.0, 72.0, Some("HQ")).expect("v loc");
@@ -38,13 +41,18 @@ fn seed(name: &str, vehicle_count: usize) -> Fixture {
     }
 
     let mut customer = Customer::create_customer(org.id, "Buyer", "Market Rd").expect("customer");
-    customer.update_location(19.1, 72.1, Some("Market")).expect("cust loc");
+    customer
+        .update_location(19.1, 72.1, Some("Market"))
+        .expect("cust loc");
 
     Fixture { org, customer }
 }
 
 fn line(qty: i64) -> DispatchLineItemInput {
-    DispatchLineItemInput { stock_description: "Widget".to_string(), requested_quantity: qty }
+    DispatchLineItemInput {
+        stock_description: "Widget".to_string(),
+        requested_quantity: qty,
+    }
 }
 
 /// Rewrite a dispatch's creation time and every status-history timestamp by
@@ -83,10 +91,18 @@ fn pod() -> Option<ProofOfDeliveryInput> {
 }
 
 fn deliver(order: &mut DispatchOrder) {
-    order.transition_to(DispatchStatus::Confirmed, None, None).unwrap();
-    order.transition_to(DispatchStatus::Loaded, None, None).unwrap();
-    order.transition_to(DispatchStatus::InTransit, None, None).unwrap();
-    order.transition_to(DispatchStatus::Delivered, pod(), None).unwrap();
+    order
+        .transition_to(DispatchStatus::Confirmed, None, None)
+        .unwrap();
+    order
+        .transition_to(DispatchStatus::Loaded, None, None)
+        .unwrap();
+    order
+        .transition_to(DispatchStatus::InTransit, None, None)
+        .unwrap();
+    order
+        .transition_to(DispatchStatus::Delivered, pod(), None)
+        .unwrap();
 }
 
 #[test]
@@ -105,7 +121,10 @@ fn empty_org_reports_all_zeros() {
     assert_eq!(r.dispatch_volume.len(), 14);
     assert!(r.dispatch_volume.iter().all(|p| p.count == 0));
     // Oldest first, and today is the last point.
-    assert_eq!(r.dispatch_volume[13].date, iso_date_from_epoch_day(now_unix().div_euclid(86_400)));
+    assert_eq!(
+        r.dispatch_volume[13].date,
+        iso_date_from_epoch_day(now_unix().div_euclid(86_400))
+    );
 }
 
 #[test]
@@ -114,8 +133,13 @@ fn vehicle_utilization_counts_only_non_terminal_trips() {
     let fx = seed("Util Co", 3);
 
     // One active dispatch (stays PENDING), one delivered (terminal).
-    fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("active");
-    let mut done = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("done");
+    fx.org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("active");
+    let mut done = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("done");
     deliver(&mut done);
 
     let r = OpsReport::for_org(fx.org.id).expect("report");
@@ -130,21 +154,38 @@ fn delivery_performance_averages_and_on_time_rate() {
     let fx = seed("Delivery Co", 3);
 
     // Fast delivery: created and delivered ~now → ~0h, on time.
-    let mut fast = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("fast");
+    let mut fast = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("fast");
     deliver(&mut fast);
 
     // Slow delivery: created 100h ago, delivered 20h ago → 80h, not on time.
-    let mut slow = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("slow");
+    let mut slow = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("slow");
     deliver(&mut slow);
     backdate_dispatch(slow.id, 100 * 3600);
     set_delivered_at(slow.id, 20 * 3600);
 
     // One returned dispatch.
-    let mut returned = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("ret");
-    returned.transition_to(DispatchStatus::Confirmed, None, None).unwrap();
-    returned.transition_to(DispatchStatus::Loaded, None, None).unwrap();
-    returned.transition_to(DispatchStatus::InTransit, None, None).unwrap();
-    returned.transition_to(DispatchStatus::Returned, None, None).unwrap();
+    let mut returned = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("ret");
+    returned
+        .transition_to(DispatchStatus::Confirmed, None, None)
+        .unwrap();
+    returned
+        .transition_to(DispatchStatus::Loaded, None, None)
+        .unwrap();
+    returned
+        .transition_to(DispatchStatus::InTransit, None, None)
+        .unwrap();
+    returned
+        .transition_to(DispatchStatus::Returned, None, None)
+        .unwrap();
 
     let r = OpsReport::for_org(fx.org.id).expect("report");
     assert_eq!(r.delivery_performance.delivered_count, 2);
@@ -162,12 +203,24 @@ fn dispatch_volume_buckets_by_calendar_day() {
     let fx = seed("Volume Co", 5);
 
     // Two today, one 3 days ago, one 20 days ago (outside the 14-day window).
-    let a = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("a");
-    let b = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("b");
+    let a = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("a");
+    let b = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("b");
     let _ = (a, b);
-    let c = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("c");
+    let c = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("c");
     backdate_dispatch(c.id, 3 * 86_400 + 3600);
-    let d = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("d");
+    let d = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("d");
     backdate_dispatch(d.id, 20 * 86_400);
 
     let r = OpsReport::for_org(fx.org.id).expect("report");
@@ -186,19 +239,33 @@ fn godown_inventory_sums_stock_and_computes_capacity_use() {
     let org = Organization::create_organization("Godown Co", "1 St").expect("org");
 
     let capped = Godown::create(org.id, "Capped", "A", Some(1000)).expect("g1");
-    Stock::new(2, 100, "Bolts").add_to_godown(capped.id).expect("s1"); // vol 200
-    Stock::new(5, 40, "Beams").add_to_godown(capped.id).expect("s2"); // vol 200 → 400/1000
+    Stock::new(2, 100, "Bolts")
+        .add_to_godown(capped.id)
+        .expect("s1"); // vol 200
+    Stock::new(5, 40, "Beams")
+        .add_to_godown(capped.id)
+        .expect("s2"); // vol 200 → 400/1000
 
     let uncapped = Godown::create(org.id, "Uncapped", "B", None).expect("g2");
-    Stock::new(1, 10, "Nuts").add_to_godown(uncapped.id).expect("s3");
+    Stock::new(1, 10, "Nuts")
+        .add_to_godown(uncapped.id)
+        .expect("s3");
 
     let r = OpsReport::for_org(org.id).expect("report");
-    let cap = r.godown_inventory.iter().find(|g| g.godown_name == "Capped").unwrap();
+    let cap = r
+        .godown_inventory
+        .iter()
+        .find(|g| g.godown_name == "Capped")
+        .unwrap();
     assert_eq!(cap.units_on_hand, 140);
     assert_eq!(cap.distinct_items, 2);
     assert_eq!(cap.capacity_used_percent, Some(40.0));
 
-    let unc = r.godown_inventory.iter().find(|g| g.godown_name == "Uncapped").unwrap();
+    let unc = r
+        .godown_inventory
+        .iter()
+        .find(|g| g.godown_name == "Uncapped")
+        .unwrap();
     assert_eq!(unc.units_on_hand, 10);
     assert_eq!(unc.capacity_used_percent, None);
 }
@@ -209,16 +276,34 @@ fn godown_inventory_breaks_down_units_by_category_largest_first() {
     let org = Organization::create_organization("Category Co", "1 St").expect("org");
     let godown = Godown::create(org.id, "Main", "A", None).expect("g");
 
-    Stock::new(1, 10, "Nuts").with_category("Hardware").add_to_godown(godown.id).expect("s1");
-    Stock::new(1, 30, "Bolts").with_category("Hardware").add_to_godown(godown.id).expect("s2");
-    Stock::new(1, 20, "Cement").with_category("Building Materials").add_to_godown(godown.id).expect("s3");
-    Stock::new(1, 5, "Misc").add_to_godown(godown.id).expect("s4"); // defaults to "General"
+    Stock::new(1, 10, "Nuts")
+        .with_category("Hardware")
+        .add_to_godown(godown.id)
+        .expect("s1");
+    Stock::new(1, 30, "Bolts")
+        .with_category("Hardware")
+        .add_to_godown(godown.id)
+        .expect("s2");
+    Stock::new(1, 20, "Cement")
+        .with_category("Building Materials")
+        .add_to_godown(godown.id)
+        .expect("s3");
+    Stock::new(1, 5, "Misc")
+        .add_to_godown(godown.id)
+        .expect("s4"); // defaults to "General"
 
     let r = OpsReport::for_org(org.id).expect("report");
-    let inv = r.godown_inventory.iter().find(|g| g.godown_name == "Main").unwrap();
+    let inv = r
+        .godown_inventory
+        .iter()
+        .find(|g| g.godown_name == "Main")
+        .unwrap();
 
     assert_eq!(
-        inv.category_breakdown.iter().map(|c| (c.category.as_str(), c.units)).collect::<Vec<_>>(),
+        inv.category_breakdown
+            .iter()
+            .map(|c| (c.category.as_str(), c.units))
+            .collect::<Vec<_>>(),
         vec![("Hardware", 40), ("Building Materials", 20), ("General", 5)]
     );
 }
@@ -228,14 +313,18 @@ fn units_dispatched_recently_ignores_old_dispatches() {
     let _db = TestDb::create();
     let fx = seed("Recent Co", 3);
 
-    fx.org.dispatch_stock_to_customer(&fx.customer, &[line(30)]).expect("recent");
-    let old = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(70)]).expect("old");
+    fx.org
+        .dispatch_stock_to_customer(&fx.customer, &[line(30)])
+        .expect("recent");
+    let old = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(70)])
+        .expect("old");
     backdate_dispatch(old.id, 40 * 86_400); // older than the 30-day window
 
     let r = OpsReport::for_org(fx.org.id).expect("report");
     assert_eq!(r.units_dispatched_recently, 30);
 }
-
 
 #[test]
 fn hired_transport_reports_share_vendor_spend_and_margin() {
@@ -247,15 +336,26 @@ fn hired_transport_reports_share_vendor_spend_and_margin() {
     let fx = seed("Hired Report Co", 1);
     let vendor = VehicleVendor::create(
         fx.org.id,
-        VendorInput { name: "Sharma Roadlines".into(), phone: "1".into(), ..Default::default() },
+        VendorInput {
+            name: "Sharma Roadlines".into(),
+            phone: "1".into(),
+            ..Default::default()
+        },
     )
     .expect("vendor");
 
     // Two own-fleet dispatches, one of them cancelled (doesn't count).
-    let own = fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("own");
+    let own = fx
+        .org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("own");
     let mut cancelled = own.clone();
-    cancelled.transition_to(DispatchStatus::Cancelled, None, None).expect("cancel");
-    fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("own 2");
+    cancelled
+        .transition_to(DispatchStatus::Cancelled, None, None)
+        .expect("cancel");
+    fx.org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("own 2");
 
     // One hired dispatch with a truck at 9,000 (6,000 advance), invoiced 12,500;
     // one still waiting for its truck.
@@ -263,7 +363,9 @@ fn hired_transport_reports_share_vendor_spend_and_margin() {
         .org
         .dispatch_stock_on_hired_vehicle(&fx.customer, &[line(5)], vendor.id)
         .expect("hired");
-    let mut hire = VehicleHire::get_by_id(hired.hire_id.unwrap()).unwrap().unwrap();
+    let mut hire = VehicleHire::get_by_id(hired.hire_id.unwrap())
+        .unwrap()
+        .unwrap();
     hire.assign(HireAssignment {
         registration_number: "MH12 REP 1".into(),
         capacity: 10,
@@ -280,7 +382,9 @@ fn hired_transport_reports_share_vendor_spend_and_margin() {
         .dispatch_stock_on_hired_vehicle(&fx.customer, &[line(1)], vendor.id)
         .expect("awaiting");
 
-    let h = OpsReport::for_org(fx.org.id).expect("report").hired_transport;
+    let h = OpsReport::for_org(fx.org.id)
+        .expect("report")
+        .hired_transport;
     assert_eq!(h.own_dispatches, 1);
     assert_eq!(h.hired_dispatches, 2);
     assert_eq!(h.hired_share_percent, Some(66.7));
@@ -304,8 +408,12 @@ fn hired_transport_reports_share_vendor_spend_and_margin() {
 fn hired_transport_is_empty_without_hires() {
     let _db = TestDb::create();
     let fx = seed("Own Only Co", 1);
-    fx.org.dispatch_stock_to_customer(&fx.customer, &[line(1)]).expect("own");
-    let h = OpsReport::for_org(fx.org.id).expect("report").hired_transport;
+    fx.org
+        .dispatch_stock_to_customer(&fx.customer, &[line(1)])
+        .expect("own");
+    let h = OpsReport::for_org(fx.org.id)
+        .expect("report")
+        .hired_transport;
     assert_eq!((h.own_dispatches, h.hired_dispatches), (1, 0));
     assert_eq!(h.hired_share_percent, Some(0.0));
     assert!(h.vendors.is_empty() && h.hire_margins.is_empty());

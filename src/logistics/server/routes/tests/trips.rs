@@ -48,17 +48,32 @@ async fn test_create_a_two_stop_trip_and_read_it_back() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/trips", org.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)], optimize_route: false, vehicle_source: VehicleSource::Own, vendor_id: None })
+        .set_json(&CreateTripPayload {
+            stops: vec![trip_stop(c1, 3), trip_stop(c2, 4)],
+            optimize_route: false,
+            vehicle_source: VehicleSource::Own,
+            vendor_id: None,
+        })
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
-    let trip = test::read_body_json::<ApiResponse<Trip>, _>(resp).await.data.unwrap();
+    let trip = test::read_body_json::<ApiResponse<Trip>, _>(resp)
+        .await
+        .data
+        .unwrap();
     assert_eq!(trip.stops.len(), 2);
     assert_eq!(trip.status, TripStatus::Planned);
     let veh = trip.vehicle_registration_number.clone();
-    assert!(trip.stops.iter().all(|s| s.vehicle_registration_number == veh));
+    assert!(
+        trip.stops
+            .iter()
+            .all(|s| s.vehicle_registration_number == veh)
+    );
     assert_eq!(
-        trip.stops.iter().filter_map(|s| s.stop_sequence).collect::<Vec<_>>(),
+        trip.stops
+            .iter()
+            .filter_map(|s| s.stop_sequence)
+            .collect::<Vec<_>>(),
         vec![1, 2]
     );
 
@@ -68,7 +83,9 @@ async fn test_create_a_two_stop_trip_and_read_it_back() {
         .insert_header(("Authorization", auth.clone()))
         .to_request();
     let got = test::read_body_json::<ApiResponse<Trip>, _>(test::call_service(&app, req).await)
-        .await.data.unwrap();
+        .await
+        .data
+        .unwrap();
     assert_eq!(got.id, trip.id);
     assert_eq!(got.stops.len(), 2);
 
@@ -79,17 +96,28 @@ async fn test_create_a_two_stop_trip_and_read_it_back() {
         .to_request();
     let dispatches = test::read_body_json::<ApiResponse<Vec<DispatchOrder>>, _>(
         test::call_service(&app, req).await,
-    ).await.data.unwrap();
-    assert_eq!(dispatches.iter().filter(|d| d.trip_id == Some(trip.id)).count(), 2);
+    )
+    .await
+    .data
+    .unwrap();
+    assert_eq!(
+        dispatches
+            .iter()
+            .filter(|d| d.trip_id == Some(trip.id))
+            .count(),
+        2
+    );
 
     // And on the org's trip list.
     let req = test::TestRequest::get()
         .uri(&format!("/api/orgs/{}/trips", org.id))
         .insert_header(("Authorization", auth))
         .to_request();
-    let trips = test::read_body_json::<ApiResponse<Vec<Trip>>, _>(
-        test::call_service(&app, req).await,
-    ).await.data.unwrap();
+    let trips =
+        test::read_body_json::<ApiResponse<Vec<Trip>>, _>(test::call_service(&app, req).await)
+            .await
+            .data
+            .unwrap();
     assert_eq!(trips.len(), 1);
 }
 
@@ -102,7 +130,9 @@ async fn test_trip_rejects_bad_stops_and_wrong_role() {
         .uri(&format!("/api/dispatches/{}/status", first.id))
         .insert_header(("Authorization", auth.clone()))
         .set_json(&UpdateDispatchStatusPayload {
-            status: DispatchStatus::Cancelled, proof_of_delivery: None, return_to_godown_id: None,
+            status: DispatchStatus::Cancelled,
+            proof_of_delivery: None,
+            return_to_godown_id: None,
         })
         .to_request();
     test::call_service(&app, req).await;
@@ -113,7 +143,12 @@ async fn test_trip_rejects_bad_stops_and_wrong_role() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/trips", org.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1)], optimize_route: false, vehicle_source: VehicleSource::Own, vendor_id: None })
+        .set_json(&CreateTripPayload {
+            stops: vec![trip_stop(c1, 1)],
+            optimize_route: false,
+            vehicle_source: VehicleSource::Own,
+            vendor_id: None,
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -121,17 +156,34 @@ async fn test_trip_rejects_bad_stops_and_wrong_role() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/trips", org.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)], optimize_route: false, vehicle_source: VehicleSource::Own, vendor_id: None })
+        .set_json(&CreateTripPayload {
+            stops: vec![trip_stop(c1, 1), trip_stop(Uuid::new_v4(), 1)],
+            optimize_route: false,
+            vehicle_source: VehicleSource::Own,
+            vendor_id: None,
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
     // Warehouse-staff role -> 403.
-    let wh = add_user_and_login(&app, org.id, &auth, "trip-wh@example.com", OrgRole::WarehouseStaff).await;
+    let wh = add_user_and_login(
+        &app,
+        org.id,
+        &auth,
+        "trip-wh@example.com",
+        OrgRole::WarehouseStaff,
+    )
+    .await;
     let c2 = located_customer(&app, org.id, &auth, "G Stop Two").await;
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/trips", org.id))
         .insert_header(("Authorization", wh))
-        .set_json(&CreateTripPayload { stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)], optimize_route: false, vehicle_source: VehicleSource::Own, vendor_id: None })
+        .set_json(&CreateTripPayload {
+            stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)],
+            optimize_route: false,
+            vehicle_source: VehicleSource::Own,
+            vendor_id: None,
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
 }
@@ -145,7 +197,9 @@ async fn test_trip_optimize_route_reorders_stops_by_proximity_via_the_api() {
         .uri(&format!("/api/dispatches/{}/status", first.id))
         .insert_header(("Authorization", auth.clone()))
         .set_json(&UpdateDispatchStatusPayload {
-            status: DispatchStatus::Cancelled, proof_of_delivery: None, return_to_godown_id: None,
+            status: DispatchStatus::Cancelled,
+            proof_of_delivery: None,
+            return_to_godown_id: None,
         })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
@@ -169,7 +223,10 @@ async fn test_trip_optimize_route_reorders_stops_by_proximity_via_the_api() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
-    let trip = test::read_body_json::<ApiResponse<Trip>, _>(resp).await.data.unwrap();
+    let trip = test::read_body_json::<ApiResponse<Trip>, _>(resp)
+        .await
+        .data
+        .unwrap();
 
     let ordered_customers: Vec<Uuid> = trip.stops.iter().map(|s| s.customer_id).collect();
     assert_eq!(ordered_customers, vec![c1, c_near, c_far]);

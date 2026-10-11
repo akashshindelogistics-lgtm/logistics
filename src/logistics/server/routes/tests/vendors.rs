@@ -9,7 +9,7 @@ async fn test_vendor_crud_and_listing() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vendors", org.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&vendor_payload("Sharma Roadlines"))
+        .set_json(vendor_payload("Sharma Roadlines"))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 201);
@@ -67,9 +67,18 @@ async fn test_add_vendor_rejects_invalid_input_with_400() {
     let (org, auth) = setup_org(&app, "Vendor Validation").await;
 
     for payload in [
-        CreateVendorPayload { name: "  ".to_string(), ..vendor_payload("x") },
-        CreateVendorPayload { phone: "".to_string(), ..vendor_payload("No Phone") },
-        CreateVendorPayload { gstin: Some("123".to_string()), ..vendor_payload("Bad GSTIN") },
+        CreateVendorPayload {
+            name: "  ".to_string(),
+            ..vendor_payload("x")
+        },
+        CreateVendorPayload {
+            phone: "".to_string(),
+            ..vendor_payload("No Phone")
+        },
+        CreateVendorPayload {
+            gstin: Some("123".to_string()),
+            ..vendor_payload("Bad GSTIN")
+        },
     ] {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/vendors", org.id))
@@ -90,7 +99,7 @@ async fn test_vendor_routes_reject_other_org() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vendors", org.id))
         .insert_header(("Authorization", auth))
-        .set_json(&vendor_payload("Owned Vendor"))
+        .set_json(vendor_payload("Owned Vendor"))
         .to_request();
     let body: ApiResponse<VehicleVendor> =
         test::read_body_json(test::call_service(&app, req).await).await;
@@ -116,20 +125,26 @@ async fn test_warehouse_staff_cannot_manage_vendors_but_dispatcher_can() {
     let (org, admin) = setup_org(&app, "Vendor Roles").await;
     let dispatcher =
         add_user_and_login(&app, org.id, &admin, "vd@example.com", OrgRole::Dispatcher).await;
-    let warehouse =
-        add_user_and_login(&app, org.id, &admin, "vw@example.com", OrgRole::WarehouseStaff).await;
+    let warehouse = add_user_and_login(
+        &app,
+        org.id,
+        &admin,
+        "vw@example.com",
+        OrgRole::WarehouseStaff,
+    )
+    .await;
 
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vendors", org.id))
         .insert_header(("Authorization", warehouse.clone()))
-        .set_json(&vendor_payload("Not Allowed"))
+        .set_json(vendor_payload("Not Allowed"))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
 
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vendors", org.id))
         .insert_header(("Authorization", dispatcher))
-        .set_json(&vendor_payload("Dispatcher Vendor"))
+        .set_json(vendor_payload("Dispatcher Vendor"))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
 

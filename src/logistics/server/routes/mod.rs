@@ -25,61 +25,61 @@ use crate::logistics::notification::notification::{
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::reports::{
     CategoryUnits, DeliveryPerformance, DispatchVolumePoint, GodownInventory, HireMargin,
-    HiredTransport, OpsReport, VendorSpend, VehicleUtilization,
+    HiredTransport, OpsReport, VehicleUtilization, VendorSpend,
 };
 use crate::logistics::stock::stock::Stock;
 use crate::logistics::user::user::{OrgRole, OrgUser};
-use crate::logistics::vendor::hire::{HireStatus, VehicleHire, VendorPayment};
-use crate::logistics::vendor::vendor::VehicleVendor;
 use crate::logistics::vehicle::document::{ComplianceDocType, ComplianceStatus, VehicleDocument};
 use crate::logistics::vehicle::maintenance::{MaintenanceStatus, VehicleMaintenance};
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle, VehicleType};
+use crate::logistics::vendor::hire::{HireStatus, VehicleHire, VendorPayment};
+use crate::logistics::vendor::vendor::VehicleVendor;
 use actix_web::web;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
-mod common;
+mod ai;
 mod auth;
-mod health;
-mod orgs;
-mod vehicles;
-mod drivers;
-mod vendors;
-mod hires;
-mod vehicle_documents;
-mod maintenance;
-mod godowns;
+mod billing;
+mod common;
 mod customers;
 mod dispatches;
+mod drivers;
+mod godowns;
+mod health;
+mod hires;
+mod maintenance;
+mod notifications;
+mod orgs;
+mod reports;
 mod trips;
 mod uploads;
-mod ai;
-mod billing;
-mod reports;
-mod notifications;
 mod users;
+mod vehicle_documents;
+mod vehicles;
+mod vendors;
 
-pub use common::*;
+pub use ai::*;
 pub use auth::*;
-pub use health::*;
-pub use orgs::*;
-pub use vehicles::*;
-pub use drivers::*;
-pub use vendors::*;
-pub use hires::*;
-pub use vehicle_documents::*;
-pub use maintenance::*;
-pub use godowns::*;
+pub use billing::*;
+pub use common::*;
 pub use customers::*;
 pub use dispatches::*;
+pub use drivers::*;
+pub use godowns::*;
+pub use health::*;
+pub use hires::*;
+pub use maintenance::*;
+pub use notifications::*;
+pub use orgs::*;
+pub use reports::*;
 pub use trips::*;
 pub use uploads::*;
-pub use ai::*;
-pub use billing::*;
-pub use reports::*;
-pub use notifications::*;
 pub use users::*;
+pub use vehicle_documents::*;
+pub use vehicles::*;
+pub use vendors::*;
 
 struct SecurityAddon;
 
@@ -353,10 +353,7 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(upload_file)
             .service(get_uploaded_file),
     )
-    .service(
-        SwaggerUi::new("/swagger-ui/{_:.*}")
-            .url("/api-docs/openapi.json", ApiDoc::openapi()),
-    );
+    .service(SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", ApiDoc::openapi()));
 }
 
 #[cfg(test)]

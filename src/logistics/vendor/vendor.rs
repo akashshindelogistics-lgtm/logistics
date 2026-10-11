@@ -287,10 +287,16 @@ mod tests {
         .expect("create vendor");
         assert!(v.is_active);
         assert_eq!(v.name, "Sharma Roadlines", "name is trimmed");
-        assert_eq!(v.gstin.as_deref(), Some("27AAPFU0939F1ZV"), "GSTIN upper-cased");
+        assert_eq!(
+            v.gstin.as_deref(),
+            Some("27AAPFU0939F1ZV"),
+            "GSTIN upper-cased"
+        );
         assert_eq!(v.notes, None, "blank notes stored as NULL");
 
-        let fetched = VehicleVendor::get_by_id(v.id).expect("get").expect("exists");
+        let fetched = VehicleVendor::get_by_id(v.id)
+            .expect("get")
+            .expect("exists");
         assert_eq!(fetched.contact_person.as_deref(), Some("Anil Sharma"));
         assert_eq!(fetched.org_id, org.id);
 
@@ -340,7 +346,9 @@ mod tests {
         )
         .expect("update");
 
-        let fetched = VehicleVendor::get_by_id(a.id).expect("get").expect("exists");
+        let fetched = VehicleVendor::get_by_id(a.id)
+            .expect("get")
+            .expect("exists");
         assert_eq!(fetched.name, "Alpha Carriers Pvt");
         assert_eq!(fetched.contact_person.as_deref(), Some("Priya"));
         assert!(!fetched.is_active);

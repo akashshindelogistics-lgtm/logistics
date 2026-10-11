@@ -6,9 +6,9 @@ use crate::logistics::auth::auth::decode_token;
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::user::user::OrgRole;
 use crate::logistics::vehicle::vehicle::{Location, Vehicle};
-use actix_web::{dev::Payload, FromRequest, HttpRequest, HttpResponse};
+use actix_web::{FromRequest, HttpRequest, HttpResponse, dev::Payload};
 use serde::{Deserialize, Serialize};
-use std::future::{ready, Ready};
+use std::future::{Ready, ready};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -63,14 +63,14 @@ impl FromRequest for AuthenticatedOrg {
             None => {
                 return ready(Err(actix_web::error::ErrorUnauthorized(
                     "Missing Authorization header",
-                )))
+                )));
             }
             Some(val) => match val.to_str() {
                 Ok(s) if s.starts_with("Bearer ") => s[7..].to_string(),
                 _ => {
                     return ready(Err(actix_web::error::ErrorUnauthorized(
                         "Invalid Authorization header format",
-                    )))
+                    )));
                 }
             },
         };
@@ -81,7 +81,10 @@ impl FromRequest for AuthenticatedOrg {
                     org_id,
                     org_name: claims.org_name,
                     role: OrgRole::from_str(&claims.role),
-                    user_id: claims.user_id.as_deref().and_then(|u| Uuid::parse_str(u).ok()),
+                    user_id: claims
+                        .user_id
+                        .as_deref()
+                        .and_then(|u| Uuid::parse_str(u).ok()),
                 })),
                 Err(_) => ready(Err(actix_web::error::ErrorUnauthorized(
                     "Invalid org_id in token",

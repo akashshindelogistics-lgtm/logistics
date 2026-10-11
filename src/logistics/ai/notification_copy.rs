@@ -26,10 +26,10 @@ async fn call_claude(prompt: String) -> Result<String, String> {
     // workspace) must name the target workspace explicitly, or the API rejects
     // the call with `workspace_id_required`. Workspace-scoped keys don't need
     // this, so the header is only sent when `ANTHROPIC_WORKSPACE_ID` is set.
-    if let Ok(workspace_id) = std::env::var("ANTHROPIC_WORKSPACE_ID") {
-        if !workspace_id.trim().is_empty() {
-            request = request.header("anthropic-workspace-id", workspace_id);
-        }
+    if let Ok(workspace_id) = std::env::var("ANTHROPIC_WORKSPACE_ID")
+        && !workspace_id.trim().is_empty()
+    {
+        request = request.header("anthropic-workspace-id", workspace_id);
     }
 
     let resp = request
@@ -81,7 +81,10 @@ fn build_dispatch_created_driver_prompt(customer_name: &str, dispatch_short_id: 
     )
 }
 
-fn build_dispatch_delivered_customer_prompt(customer_name: &str, dispatch_short_id: &str) -> String {
+fn build_dispatch_delivered_customer_prompt(
+    customer_name: &str,
+    dispatch_short_id: &str,
+) -> String {
     format!(
         "You are a logistics company texting a customer to confirm their order has just been \
         delivered, and thanking them. Customer name: {customer_name}. Order reference: {dispatch_short_id}. \
@@ -89,7 +92,11 @@ fn build_dispatch_delivered_customer_prompt(customer_name: &str, dispatch_short_
     )
 }
 
-fn build_dispatch_running_late_customer_prompt(customer_name: &str, dispatch_short_id: &str, hours_late: i64) -> String {
+fn build_dispatch_running_late_customer_prompt(
+    customer_name: &str,
+    dispatch_short_id: &str,
+    hours_late: i64,
+) -> String {
     format!(
         "You are a logistics company texting a customer to apologetically let them know their order \
         is running behind schedule and is still on its way. Customer name: {customer_name}. Order \
@@ -99,24 +106,54 @@ fn build_dispatch_running_late_customer_prompt(customer_name: &str, dispatch_sho
 }
 
 /// "Your order is on its way" — for the customer, when a dispatch is created.
-pub async fn generate_dispatch_created_customer_body(customer_name: &str, dispatch_short_id: &str) -> Result<String, String> {
-    call_claude(build_dispatch_created_customer_prompt(customer_name, dispatch_short_id)).await
+pub async fn generate_dispatch_created_customer_body(
+    customer_name: &str,
+    dispatch_short_id: &str,
+) -> Result<String, String> {
+    call_claude(build_dispatch_created_customer_prompt(
+        customer_name,
+        dispatch_short_id,
+    ))
+    .await
 }
 
 /// "New trip assigned" — for the driver, when a dispatch is created.
-pub async fn generate_dispatch_created_driver_body(customer_name: &str, dispatch_short_id: &str) -> Result<String, String> {
-    call_claude(build_dispatch_created_driver_prompt(customer_name, dispatch_short_id)).await
+pub async fn generate_dispatch_created_driver_body(
+    customer_name: &str,
+    dispatch_short_id: &str,
+) -> Result<String, String> {
+    call_claude(build_dispatch_created_driver_prompt(
+        customer_name,
+        dispatch_short_id,
+    ))
+    .await
 }
 
 /// "Your order has been delivered" — for the customer, when a dispatch is delivered.
-pub async fn generate_dispatch_delivered_customer_body(customer_name: &str, dispatch_short_id: &str) -> Result<String, String> {
-    call_claude(build_dispatch_delivered_customer_prompt(customer_name, dispatch_short_id)).await
+pub async fn generate_dispatch_delivered_customer_body(
+    customer_name: &str,
+    dispatch_short_id: &str,
+) -> Result<String, String> {
+    call_claude(build_dispatch_delivered_customer_prompt(
+        customer_name,
+        dispatch_short_id,
+    ))
+    .await
 }
 
 /// "Your order is running behind schedule" — for the customer, when a
 /// dispatch's delay alert fires.
-pub async fn generate_dispatch_running_late_customer_body(customer_name: &str, dispatch_short_id: &str, hours_late: i64) -> Result<String, String> {
-    call_claude(build_dispatch_running_late_customer_prompt(customer_name, dispatch_short_id, hours_late)).await
+pub async fn generate_dispatch_running_late_customer_body(
+    customer_name: &str,
+    dispatch_short_id: &str,
+    hours_late: i64,
+) -> Result<String, String> {
+    call_claude(build_dispatch_running_late_customer_prompt(
+        customer_name,
+        dispatch_short_id,
+        hours_late,
+    ))
+    .await
 }
 
 #[cfg(test)]

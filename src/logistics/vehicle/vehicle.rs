@@ -575,7 +575,8 @@ mod tests {
     #[test]
     fn test_tracker_key_is_generated_and_round_trips() {
         let _db = TestDb::create();
-        let org = Organization::create_organization("Tracker Org", "1 Depot Rd").expect("create org");
+        let org =
+            Organization::create_organization("Tracker Org", "1 Depot Rd").expect("create org");
 
         let vehicle = Vehicle::new("MH14 GP 0001", 40, Unit::MetricTon);
         let key = vehicle.tracker_key;
@@ -586,7 +587,9 @@ mod tests {
         let by_list = Vehicle::list_by_org(org.id).expect("list");
         assert_eq!(by_list[0].tracker_key, key);
 
-        let by_key = Vehicle::by_tracker_key(key).expect("lookup").expect("found");
+        let by_key = Vehicle::by_tracker_key(key)
+            .expect("lookup")
+            .expect("found");
         assert_eq!(by_key.registration_number, "MH14 GP 0001");
 
         let on_org = Organization::get_by_id(org.id)
@@ -606,13 +609,19 @@ mod tests {
         let driver = crate::logistics::driver::driver::Driver::create(org.id, "D", "LIC", "1")
             .expect("driver");
 
-        assert!(Vehicle::by_assigned_driver(driver.id).expect("lookup").is_none());
+        assert!(
+            Vehicle::by_assigned_driver(driver.id)
+                .expect("lookup")
+                .is_none()
+        );
 
         let mut v = Vehicle::new("MH14 GP 0010", 40, Unit::MetricTon);
         v.add_new_vehicle_to_org(&org).expect("add vehicle");
         v.assign_driver(Some(driver.id)).expect("assign");
 
-        let found = Vehicle::by_assigned_driver(driver.id).expect("lookup").expect("found");
+        let found = Vehicle::by_assigned_driver(driver.id)
+            .expect("lookup")
+            .expect("found");
         assert_eq!(found.registration_number, "MH14 GP 0010");
     }
 
@@ -625,7 +634,11 @@ mod tests {
 
         assert!(v.record_fix(18.5, 73.8, 1_700_000_000).expect("fix"));
 
-        let stored = Vehicle::list_by_org(org.id).expect("list").remove(0).location.expect("location");
+        let stored = Vehicle::list_by_org(org.id)
+            .expect("list")
+            .remove(0)
+            .location
+            .expect("location");
         assert_eq!(stored.latitude, 18.5);
         assert_eq!(stored.longitude, 73.8);
         assert_eq!(stored.timestamp, 1_700_000_000);
@@ -644,8 +657,15 @@ mod tests {
         assert!(!v.record_fix(99.0, 99.0, 1_000).expect("older"));
         assert!(!v.record_fix(98.0, 98.0, 2_000).expect("equal"));
 
-        let stored = Vehicle::list_by_org(org.id).expect("list").remove(0).location.expect("location");
-        assert_eq!((stored.latitude, stored.longitude, stored.timestamp), (10.0, 10.0, 2_000));
+        let stored = Vehicle::list_by_org(org.id)
+            .expect("list")
+            .remove(0)
+            .location
+            .expect("location");
+        assert_eq!(
+            (stored.latitude, stored.longitude, stored.timestamp),
+            (10.0, 10.0, 2_000)
+        );
         // The in-memory copy was not advanced by the rejected fixes either.
         assert_eq!(v.location.as_ref().unwrap().timestamp, 2_000);
     }
@@ -656,12 +676,17 @@ mod tests {
         let org = Organization::create_organization("Addr Org", "6 Depot Rd").expect("org");
         let mut v = Vehicle::new("MH14 GP 0013", 40, Unit::MetricTon);
         v.add_new_vehicle_to_org(&org).expect("add vehicle");
-        v.update_location(1.0, 1.0, Some("Old Yard")).expect("manual location");
+        v.update_location(1.0, 1.0, Some("Old Yard"))
+            .expect("manual location");
 
         let far_future = v.location.as_ref().unwrap().timestamp + 60;
         assert!(v.record_fix(2.0, 2.0, far_future).expect("fix"));
 
-        let stored = Vehicle::list_by_org(org.id).expect("list").remove(0).location.expect("location");
+        let stored = Vehicle::list_by_org(org.id)
+            .expect("list")
+            .remove(0)
+            .location
+            .expect("location");
         assert_eq!(stored.address, None);
     }
 
@@ -673,7 +698,11 @@ mod tests {
             .add_new_vehicle_to_org(&org)
             .expect("add vehicle");
 
-        assert!(Vehicle::by_tracker_key(Uuid::new_v4()).expect("lookup").is_none());
+        assert!(
+            Vehicle::by_tracker_key(Uuid::new_v4())
+                .expect("lookup")
+                .is_none()
+        );
     }
 
     #[test]
@@ -689,9 +718,16 @@ mod tests {
         assert_eq!(vehicle.tracker_key, new_key);
 
         // The old key no longer resolves; the new one does.
-        assert!(Vehicle::by_tracker_key(original).expect("lookup old").is_none());
+        assert!(
+            Vehicle::by_tracker_key(original)
+                .expect("lookup old")
+                .is_none()
+        );
         assert_eq!(
-            Vehicle::by_tracker_key(new_key).expect("lookup new").expect("found").registration_number,
+            Vehicle::by_tracker_key(new_key)
+                .expect("lookup new")
+                .expect("found")
+                .registration_number,
             "MH14 GP 0003",
         );
     }
@@ -708,7 +744,10 @@ mod tests {
         let mut editing = Vehicle::new("MH14 GP 0004", 99, Unit::Kg);
         assert_ne!(editing.tracker_key, real_key);
         editing.update_vehicle(99, Unit::Kg).expect("update");
-        assert_eq!(editing.tracker_key, real_key, "update_vehicle must read back the stored key");
+        assert_eq!(
+            editing.tracker_key, real_key,
+            "update_vehicle must read back the stored key"
+        );
     }
 
     #[test]
@@ -746,12 +785,21 @@ mod tests {
         let v = Vehicle::new("MH14 TY 0001", 12, Unit::MetricTon).with_type(VehicleType::Tipper);
         v.add_new_vehicle_to_org(&org).expect("add vehicle");
 
-        assert_eq!(Vehicle::list_by_org(org.id).expect("list")[0].vehicle_type, VehicleType::Tipper);
         assert_eq!(
-            Vehicle::by_tracker_key(v.tracker_key).expect("lookup").expect("found").vehicle_type,
+            Vehicle::list_by_org(org.id).expect("list")[0].vehicle_type,
+            VehicleType::Tipper
+        );
+        assert_eq!(
+            Vehicle::by_tracker_key(v.tracker_key)
+                .expect("lookup")
+                .expect("found")
+                .vehicle_type,
             VehicleType::Tipper,
         );
-        let on_org = Organization::get_by_id(org.id).expect("get").expect("org").vehicles;
+        let on_org = Organization::get_by_id(org.id)
+            .expect("get")
+            .expect("org")
+            .vehicles;
         assert_eq!(on_org[0].vehicle_type, VehicleType::Tipper);
     }
 
@@ -764,7 +812,10 @@ mod tests {
         assert_eq!(v.vehicle_type, VehicleType::Truck);
 
         v.set_vehicle_type(VehicleType::Tanker).expect("set type");
-        assert_eq!(Vehicle::list_by_org(org.id).expect("list")[0].vehicle_type, VehicleType::Tanker);
+        assert_eq!(
+            Vehicle::list_by_org(org.id).expect("list")[0].vehicle_type,
+            VehicleType::Tanker
+        );
 
         // Editing capacity via a freshly built struct (default type) reads
         // the stored type back instead of reporting Truck.
@@ -779,7 +830,8 @@ mod tests {
         let org = Organization::create_organization("Legacy Org", "9 Depot Rd").expect("org");
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection().expect("conn");
-        conn.query_drop("ALTER TABLE Vehicle DROP COLUMN vehicle_type").expect("drop column");
+        conn.query_drop("ALTER TABLE Vehicle DROP COLUMN vehicle_type")
+            .expect("drop column");
         conn.exec_drop(
             "INSERT INTO Vehicle (registration_number, capacity, unit, org_id, tracker_key) VALUES ('OLD 1', 5, 'Kg', :org, UUID())",
             params! { "org" => org.id.to_string() },
@@ -798,7 +850,10 @@ mod tests {
 
         let vehicle = Vehicle::new("MH12 EN 3502", 50, Unit::MetricTon);
         let res = vehicle.add_new_vehicle_to_org(&org);
-        assert!(res.is_ok(), "Failed to add vehicle to organization in database");
+        assert!(
+            res.is_ok(),
+            "Failed to add vehicle to organization in database"
+        );
 
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection
@@ -825,11 +880,14 @@ mod tests {
     #[test]
     fn test_update_vehicle() {
         let _db = TestDb::create();
-        let org = Organization::create_organization("Update Vehicle Org", "Sector 4, Industrial Area")
-            .expect("Failed to create organization for update vehicle test");
+        let org =
+            Organization::create_organization("Update Vehicle Org", "Sector 4, Industrial Area")
+                .expect("Failed to create organization for update vehicle test");
 
         let mut vehicle = Vehicle::new("DL01 AB 1234", 30, Unit::MetricTon);
-        vehicle.add_new_vehicle_to_org(&org).expect("Failed to add vehicle to org");
+        vehicle
+            .add_new_vehicle_to_org(&org)
+            .expect("Failed to add vehicle to org");
 
         let update_res = vehicle.update_vehicle(75, Unit::MetricTon);
         assert!(update_res.is_ok(), "Failed to update vehicle");
@@ -849,7 +907,10 @@ mod tests {
             )
             .expect("Failed to query updated vehicle from database");
 
-        assert!(row.is_some(), "Updated vehicle record not found in database");
+        assert!(
+            row.is_some(),
+            "Updated vehicle record not found in database"
+        );
         let (db_capacity, db_unit) = row.unwrap();
         assert_eq!(db_capacity, 75);
         assert_eq!(db_unit, "MetricTon");
@@ -862,7 +923,9 @@ mod tests {
             .expect("Failed to create organization for location test");
 
         let mut vehicle = Vehicle::new("UP16 AB 5555", 60, Unit::MetricTon);
-        vehicle.add_new_vehicle_to_org(&org).expect("Failed to add vehicle to org");
+        vehicle
+            .add_new_vehicle_to_org(&org)
+            .expect("Failed to add vehicle to org");
 
         let lat = 28.6139;
         let lng = 77.2090;
@@ -891,7 +954,10 @@ mod tests {
             )
             .expect("Failed to query location from database");
 
-        assert!(row.is_some(), "Vehicle location record not found in database");
+        assert!(
+            row.is_some(),
+            "Vehicle location record not found in database"
+        );
         let (db_lat, db_lng, db_ts, db_addr) = row.unwrap();
         assert_eq!(db_lat, Some(lat));
         assert_eq!(db_lng, Some(lng));
@@ -904,35 +970,56 @@ mod tests {
         use crate::logistics::ai::chunk;
         use crate::logistics::driver::driver::Driver;
         let _db = TestDb::create();
-        let org = Organization::create_organization("Fleet Directory Org", "1 Depot Rd").expect("create org");
+        let org = Organization::create_organization("Fleet Directory Org", "1 Depot Rd")
+            .expect("create org");
 
         let mut vehicle = Vehicle::new("MH12AB1234", 10_000, Unit::MetricTon);
         vehicle.add_new_vehicle_to_org(&org).expect("add");
         let results = chunk::search_by_org(org.id, "MH12AB1234", 8).expect("search");
-        assert!(results.iter().any(|c| c.text.contains("MH12AB1234") && c.text.contains("No driver currently assigned.")), "{results:?}");
+        assert!(
+            results.iter().any(|c| c.text.contains("MH12AB1234")
+                && c.text.contains("No driver currently assigned.")),
+            "{results:?}"
+        );
 
-        vehicle.update_vehicle(15_000, Unit::MetricTon).expect("update");
+        vehicle
+            .update_vehicle(15_000, Unit::MetricTon)
+            .expect("update");
         let results = chunk::search_by_org(org.id, "MH12AB1234", 8).expect("search");
-        assert!(results.iter().any(|c| c.text.contains("15000")), "{results:?}");
+        assert!(
+            results.iter().any(|c| c.text.contains("15000")),
+            "{results:?}"
+        );
 
         let driver = Driver::create(org.id, "Ravi Kumar", "LIC-1", "9999999999").expect("driver");
-        vehicle.assign_driver(Some(driver.id)).expect("assign driver");
+        vehicle
+            .assign_driver(Some(driver.id))
+            .expect("assign driver");
         let results = chunk::search_by_org(org.id, "MH12AB1234", 8).expect("search");
-        assert!(results.iter().any(|c| c.text.contains("Ravi Kumar")), "{results:?}");
+        assert!(
+            results.iter().any(|c| c.text.contains("Ravi Kumar")),
+            "{results:?}"
+        );
 
         vehicle.remove_vehicle().expect("remove");
         let results = chunk::search_by_org(org.id, "MH12AB1234", 8).expect("search");
-        assert!(!results.iter().any(|c| c.text.contains("MH12AB1234")), "removing a vehicle should drop its chunk: {results:?}");
+        assert!(
+            !results.iter().any(|c| c.text.contains("MH12AB1234")),
+            "removing a vehicle should drop its chunk: {results:?}"
+        );
     }
 
     #[test]
     fn test_remove_vehicle() {
         let _db = TestDb::create();
-        let org = Organization::create_organization("Remove Vehicle Org", "Sector 9, Transport Hub")
-            .expect("Failed to create organization for remove vehicle test");
+        let org =
+            Organization::create_organization("Remove Vehicle Org", "Sector 9, Transport Hub")
+                .expect("Failed to create organization for remove vehicle test");
 
         let vehicle = Vehicle::new("HR26 CQ 9999", 40, Unit::MetricTon);
-        vehicle.add_new_vehicle_to_org(&org).expect("Failed to add vehicle to org");
+        vehicle
+            .add_new_vehicle_to_org(&org)
+            .expect("Failed to add vehicle to org");
 
         let remove_res = vehicle.remove_vehicle();
         assert!(remove_res.is_ok(), "Failed to remove vehicle");
@@ -951,7 +1038,10 @@ mod tests {
             )
             .expect("Failed to query database for removed vehicle");
 
-        assert!(row.is_none(), "Vehicle record should be deleted from database");
+        assert!(
+            row.is_none(),
+            "Vehicle record should be deleted from database"
+        );
     }
 
     #[test]

@@ -225,10 +225,13 @@ fn hired_transport(
         .iter()
         .filter(|d| d.status != DispatchStatus::Cancelled)
         .collect();
-    let hired_dispatches = live.iter().filter(|d| d.vehicle_source == VehicleSource::Hired).count() as i64;
+    let hired_dispatches = live
+        .iter()
+        .filter(|d| d.vehicle_source == VehicleSource::Hired)
+        .count() as i64;
     let own_dispatches = live.len() as i64 - hired_dispatches;
-    let hired_share_percent = (!live.is_empty())
-        .then(|| round1(hired_dispatches as f64 / live.len() as f64 * 100.0));
+    let hired_share_percent =
+        (!live.is_empty()).then(|| round1(hired_dispatches as f64 / live.len() as f64 * 100.0));
 
     let invoice_by_dispatch: HashMap<Uuid, i64> =
         invoices.iter().map(|i| (i.dispatch_id, i.amount)).collect();
@@ -255,7 +258,11 @@ fn hired_transport(
         v.outstanding += h.balance_due.unwrap_or(0);
     }
     let mut vendors: Vec<VendorSpend> = by_vendor.into_values().collect();
-    vendors.sort_by(|a, b| b.hire_cost.cmp(&a.hire_cost).then_with(|| a.vendor_name.cmp(&b.vendor_name)));
+    vendors.sort_by(|a, b| {
+        b.hire_cost
+            .cmp(&a.hire_cost)
+            .then_with(|| a.vendor_name.cmp(&b.vendor_name))
+    });
 
     let mut hire_margins: Vec<(i64, HireMargin)> = assigned
         .iter()
@@ -284,7 +291,7 @@ fn hired_transport(
             )
         })
         .collect();
-    hire_margins.sort_by(|a, b| b.0.cmp(&a.0));
+    hire_margins.sort_by_key(|h| std::cmp::Reverse(h.0));
 
     HiredTransport {
         own_dispatches,
@@ -293,7 +300,10 @@ fn hired_transport(
         hire_cost_total: assigned.iter().map(|h| h.freight_amount.unwrap_or(0)).sum(),
         paid_to_vendors: assigned.iter().map(|h| h.total_paid).sum(),
         outstanding_to_vendors: assigned.iter().map(|h| h.balance_due.unwrap_or(0)).sum(),
-        awaiting_truck: hires.iter().filter(|h| h.status == HireStatus::Requested).count() as i64,
+        awaiting_truck: hires
+            .iter()
+            .filter(|h| h.status == HireStatus::Requested)
+            .count() as i64,
         vendors,
         hire_margins: hire_margins.into_iter().map(|(_, m)| m).collect(),
     }
@@ -383,9 +393,9 @@ fn godown_inventory(godown: &Godown) -> GodownInventory {
         .iter()
         .map(|s| s.volume_in_size * s.quantity)
         .sum();
-    let capacity_used_percent = godown.max_capacity.and_then(|cap| {
-        (cap > 0).then(|| round1(used_volume as f64 / cap as f64 * 100.0))
-    });
+    let capacity_used_percent = godown
+        .max_capacity
+        .and_then(|cap| (cap > 0).then(|| round1(used_volume as f64 / cap as f64 * 100.0)));
 
     let mut by_category: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     for s in &godown.stock {
@@ -395,8 +405,11 @@ fn godown_inventory(godown: &Godown) -> GodownInventory {
         .into_iter()
         .map(|(category, units)| CategoryUnits { category, units })
         .collect();
-    category_breakdown
-        .sort_by(|a, b| b.units.cmp(&a.units).then_with(|| a.category.cmp(&b.category)));
+    category_breakdown.sort_by(|a, b| {
+        b.units
+            .cmp(&a.units)
+            .then_with(|| a.category.cmp(&b.category))
+    });
 
     GodownInventory {
         godown_id: godown.id,

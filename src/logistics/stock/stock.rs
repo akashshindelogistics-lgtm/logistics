@@ -90,7 +90,9 @@ impl Stock {
             (),
         )?;
         if has_category.is_none() {
-            conn.query_drop("ALTER TABLE Stock ADD COLUMN category VARCHAR(255) NOT NULL DEFAULT 'General'")?;
+            conn.query_drop(
+                "ALTER TABLE Stock ADD COLUMN category VARCHAR(255) NOT NULL DEFAULT 'General'",
+            )?;
         }
         Ok(())
     }
@@ -109,20 +111,21 @@ impl Stock {
         )?;
         Ok(rows
             .into_iter()
-            .map(|(volume_in_size, quantity, description, category, reorder_threshold)| Stock {
-                volume_in_size,
-                quantity,
-                description,
-                category,
-                reorder_threshold,
-                below_threshold: Self::is_below(quantity, reorder_threshold),
-            })
+            .map(
+                |(volume_in_size, quantity, description, category, reorder_threshold)| Stock {
+                    volume_in_size,
+                    quantity,
+                    description,
+                    category,
+                    reorder_threshold,
+                    below_threshold: Self::is_below(quantity, reorder_threshold),
+                },
+            )
             .collect())
     }
 
     pub fn add_to_godown(&self, godown_id: Uuid) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
 
         conn.exec_drop(
@@ -152,8 +155,7 @@ impl Stock {
         category: impl Into<String>,
         reorder_threshold: Option<i64>,
     ) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
         let category = category.into();
 
         conn.exec_drop(
@@ -181,8 +183,7 @@ impl Stock {
     }
 
     pub fn remove_from_godown(&self, godown_id: Uuid) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
 
         conn.exec_drop(
             "DELETE FROM Stock WHERE godown_id = :godown_id AND description = :description",
@@ -207,8 +208,9 @@ mod tests {
     use crate::logistics::test_support::TestDb;
 
     fn make_godown() -> Godown {
-        let org = Organization::create_organization("Stock Warehouse Org", "Sector 18, Logistics Hub")
-            .expect("Failed to create organization for stock test");
+        let org =
+            Organization::create_organization("Stock Warehouse Org", "Sector 18, Logistics Hub")
+                .expect("Failed to create organization for stock test");
         Godown::create(org.id, "Main Godown", "Dock 1", None).expect("Failed to create godown")
     }
 
@@ -218,7 +220,9 @@ mod tests {
         let godown = make_godown();
 
         let stock = Stock::new(100, 500, "Electronic Components");
-        stock.add_to_godown(godown.id).expect("Failed to add stock to godown");
+        stock
+            .add_to_godown(godown.id)
+            .expect("Failed to add stock to godown");
 
         let mut conn = DbConnection::from_env()
             .get_connection()
@@ -247,11 +251,16 @@ mod tests {
         let _db = TestDb::create();
         let godown = make_godown();
 
-        Stock::new(10, 20, "Unlabeled Widget").add_to_godown(godown.id).expect("add");
+        Stock::new(10, 20, "Unlabeled Widget")
+            .add_to_godown(godown.id)
+            .expect("add");
 
         let mut conn = DbConnection::from_env().get_connection().expect("connect");
         let loaded = Stock::list_by_godown(&mut conn, godown.id).expect("list");
-        let widget = loaded.iter().find(|s| s.description == "Unlabeled Widget").unwrap();
+        let widget = loaded
+            .iter()
+            .find(|s| s.description == "Unlabeled Widget")
+            .unwrap();
         assert_eq!(widget.category, "General");
     }
 
@@ -267,7 +276,10 @@ mod tests {
 
         let mut conn = DbConnection::from_env().get_connection().expect("connect");
         let loaded = Stock::list_by_godown(&mut conn, godown.id).expect("list");
-        let rack = loaded.iter().find(|s| s.description == "Server Rack").unwrap();
+        let rack = loaded
+            .iter()
+            .find(|s| s.description == "Server Rack")
+            .unwrap();
         assert_eq!(rack.category, "Electronics");
     }
 
@@ -277,7 +289,9 @@ mod tests {
         let godown = make_godown();
 
         let mut stock = Stock::new(50, 200, "Raw Aluminum Sheets");
-        stock.add_to_godown(godown.id).expect("Failed to add stock to godown");
+        stock
+            .add_to_godown(godown.id)
+            .expect("Failed to add stock to godown");
 
         let update_res = stock.update_in_godown(godown.id, 120, 800, "Metals", None);
         assert!(update_res.is_ok(), "Failed to update stock");
@@ -308,9 +322,13 @@ mod tests {
         let godown = make_godown();
 
         let stock = Stock::new(30, 150, "Steel Rods");
-        stock.add_to_godown(godown.id).expect("Failed to add stock to godown");
+        stock
+            .add_to_godown(godown.id)
+            .expect("Failed to add stock to godown");
 
-        stock.remove_from_godown(godown.id).expect("Failed to remove stock");
+        stock
+            .remove_from_godown(godown.id)
+            .expect("Failed to remove stock");
 
         let mut conn = DbConnection::from_env()
             .get_connection()
@@ -326,7 +344,10 @@ mod tests {
             )
             .expect("Failed to query database for removed stock");
 
-        assert!(row.is_none(), "Stock record should be deleted from database");
+        assert!(
+            row.is_none(),
+            "Stock record should be deleted from database"
+        );
     }
 
     #[test]
@@ -352,11 +373,17 @@ mod tests {
         let mut conn = DbConnection::from_env().get_connection().expect("connect");
         let loaded = Stock::list_by_godown(&mut conn, godown.id).expect("list stock");
 
-        let tape = loaded.iter().find(|s| s.description == "Packing Tape").unwrap();
+        let tape = loaded
+            .iter()
+            .find(|s| s.description == "Packing Tape")
+            .unwrap();
         assert_eq!(tape.reorder_threshold, Some(100));
         assert!(tape.below_threshold, "40 < 100 should flag the item");
 
-        let wrap = loaded.iter().find(|s| s.description == "Shrink Wrap").unwrap();
+        let wrap = loaded
+            .iter()
+            .find(|s| s.description == "Shrink Wrap")
+            .unwrap();
         assert!(!wrap.below_threshold, "500 >= 100 should not flag the item");
 
         let misc = loaded.iter().find(|s| s.description == "Misc").unwrap();
@@ -403,11 +430,15 @@ mod tests {
 
         let results = chunk::search_by_org(godown.org_id, "Pallets", 8).expect("search");
         assert!(
-            results.iter().any(|c| c.text.contains("100 units of Pallets")),
+            results
+                .iter()
+                .any(|c| c.text.contains("100 units of Pallets")),
             "adding stock should index it: {results:?}"
         );
 
-        stock.update_in_godown(godown.id, 1, 5, "General", Some(50)).expect("update");
+        stock
+            .update_in_godown(godown.id, 1, 5, "General", Some(50))
+            .expect("update");
         let results = chunk::search_by_org(godown.org_id, "Pallets", 8).expect("search");
         assert!(
             results.iter().any(|c| c.text.contains("5 units of Pallets")

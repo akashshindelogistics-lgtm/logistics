@@ -222,11 +222,10 @@ impl DbConnection {
             "mysql://{}:{}@{}:{}",
             self.username, self.password, self.host, self.port
         );
-        if let Ok(p) = build_pool(&root_url) {
-            if let Ok(mut conn) = p.get_conn() {
-                let _ =
-                    conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS `{}`", self.db_name));
-            }
+        if let Ok(p) = build_pool(&root_url)
+            && let Ok(mut conn) = p.get_conn()
+        {
+            let _ = conn.query_drop(format!("CREATE DATABASE IF NOT EXISTS `{}`", self.db_name));
         }
 
         let url = format!(

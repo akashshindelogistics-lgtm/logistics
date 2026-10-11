@@ -3,10 +3,8 @@
 //! here.
 
 use super::*;
-use crate::logistics::test_support::TestDb;
-use actix_web::{test, App};
 use crate::logistics::ai::assistant::AssistantAnswer;
-use crate::logistics::auth::auth::{generate_token, OrgSummary};
+use crate::logistics::auth::auth::{OrgSummary, generate_token};
 use crate::logistics::billing::invoice::{CustomerBillingSummary, Invoice, PaymentStatus};
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::{
@@ -22,34 +20,36 @@ use crate::logistics::notification::notification::{
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::reports::OpsReport;
 use crate::logistics::stock::stock::Stock;
+use crate::logistics::test_support::TestDb;
 use crate::logistics::upload::upload::MAX_UPLOAD_BYTES;
 use crate::logistics::user::user::{OrgRole, OrgUser};
-use crate::logistics::vendor::hire::{HireStatus, VehicleHire, VendorPayment};
-use crate::logistics::vendor::vendor::VehicleVendor;
 use crate::logistics::vehicle::document::{ComplianceDocType, ComplianceStatus, VehicleDocument};
 use crate::logistics::vehicle::maintenance::{MaintenanceStatus, VehicleMaintenance};
 use crate::logistics::vehicle::vehicle::{Location, Unit, Vehicle};
+use crate::logistics::vendor::hire::{HireStatus, VehicleHire, VendorPayment};
+use crate::logistics::vendor::vendor::VehicleVendor;
+use actix_web::{App, test};
 use uuid::Uuid;
 
+mod ai;
 mod auth;
-mod health;
-mod orgs;
-mod vehicles;
-mod drivers;
-mod vendors;
-mod hires;
-mod vehicle_documents;
-mod maintenance;
-mod godowns;
+mod billing;
 mod customers;
 mod dispatches;
+mod drivers;
+mod godowns;
+mod health;
+mod hires;
+mod maintenance;
+mod notifications;
+mod orgs;
+mod reports;
 mod trips;
 mod uploads;
-mod ai;
-mod billing;
-mod reports;
-mod notifications;
 mod users;
+mod vehicle_documents;
+mod vehicles;
+mod vendors;
 
 fn make_auth_header(org_id: Uuid, org_name: &str) -> String {
     let token = generate_token(org_id, org_name).expect("Failed to generate test token");
@@ -104,8 +104,7 @@ async fn setup_dispatch(
             phone: "+91 90000 00000".to_string(),
         })
         .to_request();
-    let body: ApiResponse<Driver> =
-        test::read_body_json(test::call_service(app, req).await).await;
+    let body: ApiResponse<Driver> = test::read_body_json(test::call_service(app, req).await).await;
     let driver = body.data.unwrap();
 
     let req = test::TestRequest::put()
@@ -126,8 +125,7 @@ async fn setup_dispatch(
             max_capacity: None,
         })
         .to_request();
-    let body: ApiResponse<Godown> =
-        test::read_body_json(test::call_service(app, req).await).await;
+    let body: ApiResponse<Godown> = test::read_body_json(test::call_service(app, req).await).await;
     let godown = body.data.unwrap();
 
     let req = test::TestRequest::post()
@@ -238,7 +236,11 @@ async fn located_customer_at(
     let req = test::TestRequest::put()
         .uri(&format!("/api/customers/{}/location", customer.id))
         .insert_header(("Authorization", auth.to_string()))
-        .set_json(&LocationPayload { latitude, longitude, address: None })
+        .set_json(&LocationPayload {
+            latitude,
+            longitude,
+            address: None,
+        })
         .to_request();
     assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
     customer.id
@@ -293,7 +295,10 @@ async fn add_user_and_login(
         .to_request();
     let resp = test::call_service(app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
-    let data = test::read_body_json::<ApiResponse<LoginData>, _>(resp).await.data.unwrap();
+    let data = test::read_body_json::<ApiResponse<LoginData>, _>(resp)
+        .await
+        .data
+        .unwrap();
     assert_eq!(data.role, role.as_str());
     format!("Bearer {}", data.token)
 }

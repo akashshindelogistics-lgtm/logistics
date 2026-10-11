@@ -1,13 +1,13 @@
 //! Godowns (warehouses), the stock they hold, and stock transfers between them.
 
+use super::common::*;
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::godown::transfer::{StockTransfer, TransferError};
 use crate::logistics::stock::stock::Stock;
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateStockPayload {
@@ -126,11 +126,13 @@ fn load_owned_godown(godown_id: Uuid, auth_org_id: Uuid) -> Result<Godown, HttpR
             message: "Godown not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch godown: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch godown: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -200,7 +202,12 @@ pub async fn create_godown(
             data: None,
         });
     }
-    match Godown::create(org_id, &payload.name, &payload.address, payload.max_capacity) {
+    match Godown::create(
+        org_id,
+        &payload.name,
+        &payload.address,
+        payload.max_capacity,
+    ) {
         Ok(godown) => HttpResponse::Created().json(ApiResponse {
             success: true,
             message: "Godown created successfully".to_string(),

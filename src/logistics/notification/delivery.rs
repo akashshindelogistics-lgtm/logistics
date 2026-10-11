@@ -45,7 +45,8 @@ fn twilio_credentials() -> Option<(String, String, String)> {
 }
 
 async fn send_sms(to: &str, body: &str) -> Result<(), DeliveryError> {
-    let (account_sid, auth_token, from) = twilio_credentials().ok_or(DeliveryError::NotConfigured)?;
+    let (account_sid, auth_token, from) =
+        twilio_credentials().ok_or(DeliveryError::NotConfigured)?;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -69,7 +70,10 @@ async fn send_sms(to: &str, body: &str) -> Result<(), DeliveryError> {
 /// `RESEND_FROM_EMAIL` is unset or blank.
 fn resend_credentials() -> Option<(String, String)> {
     let non_blank = |key: &str| std::env::var(key).ok().filter(|s| !s.trim().is_empty());
-    Some((non_blank("RESEND_API_KEY")?, non_blank("RESEND_FROM_EMAIL")?))
+    Some((
+        non_blank("RESEND_API_KEY")?,
+        non_blank("RESEND_FROM_EMAIL")?,
+    ))
 }
 
 async fn send_email(to: &str, subject: &str, body: &str) -> Result<(), DeliveryError> {
@@ -98,7 +102,12 @@ async fn send_email(to: &str, subject: &str, body: &str) -> Result<(), DeliveryE
 
 /// Attempt to actually send one notification. `subject` is only used for
 /// [`NotificationChannel::Email`].
-pub async fn deliver(channel: NotificationChannel, to: &str, subject: &str, body: &str) -> Result<(), DeliveryError> {
+pub async fn deliver(
+    channel: NotificationChannel,
+    to: &str,
+    subject: &str,
+    body: &str,
+) -> Result<(), DeliveryError> {
     match channel {
         NotificationChannel::Sms => send_sms(to, body).await,
         NotificationChannel::Email => send_email(to, subject, body).await,
@@ -139,9 +148,14 @@ mod tests {
             std::env::remove_var("RESEND_API_KEY");
             std::env::remove_var("RESEND_FROM_EMAIL");
         }
-        let err = deliver(NotificationChannel::Email, "customer@example.com", "subject", "body")
-            .await
-            .expect_err("should be unconfigured");
+        let err = deliver(
+            NotificationChannel::Email,
+            "customer@example.com",
+            "subject",
+            "body",
+        )
+        .await
+        .expect_err("should be unconfigured");
         assert!(matches!(err, DeliveryError::NotConfigured));
     }
 

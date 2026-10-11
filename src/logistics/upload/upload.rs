@@ -97,7 +97,9 @@ impl UploadedFile {
     /// and `bytes` non-empty and no larger than [`MAX_UPLOAD_BYTES`].
     pub fn store(org_id: Uuid, content_type: &str, bytes: &[u8]) -> Result<Self, UploadError> {
         if !ALLOWED_CONTENT_TYPES.contains(&content_type) {
-            return Err(UploadError::UnsupportedContentType(content_type.to_string()));
+            return Err(UploadError::UnsupportedContentType(
+                content_type.to_string(),
+            ));
         }
         if bytes.is_empty() {
             return Err(UploadError::Empty);
@@ -106,7 +108,9 @@ impl UploadedFile {
             return Err(UploadError::TooLarge(bytes.len()));
         }
 
-        let mut conn = DbConnection::from_env().get_connection().map_err(UploadError::Db)?;
+        let mut conn = DbConnection::from_env()
+            .get_connection()
+            .map_err(UploadError::Db)?;
         Self::ensure_table(&mut conn).map_err(UploadError::Db)?;
 
         let id = Uuid::new_v4();
@@ -157,14 +161,16 @@ impl UploadedFile {
              FROM UploadedFiles WHERE id = :id",
             params! { "id" => id.to_string() },
         )?;
-        Ok(row.map(|(org_id, content_type, byte_size, storage_path, uploaded_at)| UploadedFile {
-            id,
-            org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
-            content_type,
-            byte_size,
-            storage_path,
-            uploaded_at,
-        }))
+        Ok(row.map(
+            |(org_id, content_type, byte_size, storage_path, uploaded_at)| UploadedFile {
+                id,
+                org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
+                content_type,
+                byte_size,
+                storage_path,
+                uploaded_at,
+            },
+        ))
     }
 
     /// Read the stored bytes back off disk.
@@ -218,7 +224,9 @@ mod tests {
         assert!(std::path::Path::new(&file.storage_path).exists());
         assert_eq!(file.read_bytes().expect("read"), bytes);
 
-        let reloaded = UploadedFile::get_by_id(file.id).expect("get").expect("exists");
+        let reloaded = UploadedFile::get_by_id(file.id)
+            .expect("get")
+            .expect("exists");
         assert_eq!(reloaded.id, file.id);
         assert_eq!(reloaded.org_id, org.id);
         assert_eq!(reloaded.content_type, "image/png");
@@ -229,6 +237,10 @@ mod tests {
     #[test]
     fn test_get_by_id_returns_none_for_unknown_id() {
         let _db = TestDb::create();
-        assert!(UploadedFile::get_by_id(Uuid::new_v4()).expect("get").is_none());
+        assert!(
+            UploadedFile::get_by_id(Uuid::new_v4())
+                .expect("get")
+                .is_none()
+        );
     }
 }

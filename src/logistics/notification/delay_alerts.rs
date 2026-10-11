@@ -59,9 +59,13 @@ async fn alert_one(dispatch: &DispatchOrder) -> Result<bool, Box<dyn Error>> {
     };
     let hours_late = dispatch.hours_late().unwrap_or(0);
 
-    let notifs =
-        Notification::record_dispatch_running_late(dispatch.org_id, dispatch.id, &customer, hours_late)
-            .await?;
+    let notifs = Notification::record_dispatch_running_late(
+        dispatch.org_id,
+        dispatch.id,
+        &customer,
+        hours_late,
+    )
+    .await?;
     Notification::deliver_queued_best_effort(&notifs).await;
     Ok(true)
 }
@@ -70,7 +74,9 @@ async fn alert_one(dispatch: &DispatchOrder) -> Result<bool, Box<dyn Error>> {
 mod tests {
     use super::*;
     use crate::logistics::db::connection::DbConnection;
-    use crate::logistics::dispatch::dispatch::{DispatchLineItemInput, DispatchStatus, ProofOfDeliveryInput};
+    use crate::logistics::dispatch::dispatch::{
+        DispatchLineItemInput, DispatchStatus, ProofOfDeliveryInput,
+    };
     use crate::logistics::driver::driver::Driver;
     use crate::logistics::godown::godown::Godown;
     use crate::logistics::notification::notification::NotificationStatus;
@@ -94,30 +100,49 @@ mod tests {
     /// under the test's control.
     fn in_transit_dispatch_hours_ago(hours_ago: i64) -> (Organization, Customer, DispatchOrder) {
         let mut org = Organization::create_organization("Delay Co", "1 Depot Rd").expect("org");
-        org.update_location(19.0, 72.0, Some("HQ")).expect("org loc");
+        org.update_location(19.0, 72.0, Some("HQ"))
+            .expect("org loc");
 
         let driver = Driver::create(org.id, "Driver", "LIC1", "0").expect("driver");
         let mut vehicle = Vehicle::new("MH00 DL 0001".to_string(), 1_000_000, Unit::MetricTon);
         vehicle.add_new_vehicle_to_org(&org).expect("vehicle");
-        vehicle.update_location(19.0, 72.0, Some("HQ")).expect("v loc");
+        vehicle
+            .update_location(19.0, 72.0, Some("HQ"))
+            .expect("v loc");
         vehicle.assign_driver(Some(driver.id)).expect("assign");
 
         let godown = Godown::create(org.id, "Main", "Dock 1", Some(1_000_000)).expect("godown");
-        Stock::new(1, 1000, "Widget").add_to_godown(godown.id).expect("stock");
+        Stock::new(1, 1000, "Widget")
+            .add_to_godown(godown.id)
+            .expect("stock");
 
-        let mut customer = Customer::create_customer(org.id, "Buyer", "Market Rd").expect("customer");
-        customer.update_location(19.1, 72.1, Some("Market")).expect("cust loc");
-        customer.set_contact(None, Some("buyer@example.com".into())).expect("contact");
+        let mut customer =
+            Customer::create_customer(org.id, "Buyer", "Market Rd").expect("customer");
+        customer
+            .update_location(19.1, 72.1, Some("Market"))
+            .expect("cust loc");
+        customer
+            .set_contact(None, Some("buyer@example.com".into()))
+            .expect("contact");
 
         let mut order = org
             .dispatch_stock_to_customer(
                 &customer,
-                &[DispatchLineItemInput { stock_description: "Widget".to_string(), requested_quantity: 5 }],
+                &[DispatchLineItemInput {
+                    stock_description: "Widget".to_string(),
+                    requested_quantity: 5,
+                }],
             )
             .expect("dispatch");
-        order.transition_to(DispatchStatus::Confirmed, None, None).expect("confirmed");
-        order.transition_to(DispatchStatus::Loaded, None, None).expect("loaded");
-        order.transition_to(DispatchStatus::InTransit, None, None).expect("in transit");
+        order
+            .transition_to(DispatchStatus::Confirmed, None, None)
+            .expect("confirmed");
+        order
+            .transition_to(DispatchStatus::Loaded, None, None)
+            .expect("loaded");
+        order
+            .transition_to(DispatchStatus::InTransit, None, None)
+            .expect("in transit");
 
         let backdated = now_unix() - hours_ago * 3600;
         let mut conn = DbConnection::from_env().get_connection().unwrap();
@@ -146,7 +171,11 @@ mod tests {
             .expect("alert recorded");
         assert_eq!(alert.recipient_kind, "customer");
         assert_eq!(alert.status, NotificationStatus::Queued);
-        assert!(alert.body.to_lowercase().contains("behind"), "{}", alert.body);
+        assert!(
+            alert.body.to_lowercase().contains("behind"),
+            "{}",
+            alert.body
+        );
     }
 
     #[actix_web::test]
@@ -159,7 +188,10 @@ mod tests {
 
         let notifs = Notification::list_by_dispatch(order.id).expect("list");
         assert_eq!(
-            notifs.iter().filter(|n| n.event == NotificationEvent::DispatchRunningLate).count(),
+            notifs
+                .iter()
+                .filter(|n| n.event == NotificationEvent::DispatchRunningLate)
+                .count(),
             1,
             "should never double-send: {notifs:?}"
         );
@@ -171,7 +203,11 @@ mod tests {
         let (_, _, order) = in_transit_dispatch_hours_ago(10); // well under 72h
 
         assert_eq!(scan_and_alert().await.expect("scan"), 0);
-        assert!(Notification::list_by_dispatch(order.id).expect("list").is_empty());
+        assert!(
+            Notification::list_by_dispatch(order.id)
+                .expect("list")
+                .is_empty()
+        );
     }
 
     #[actix_web::test]

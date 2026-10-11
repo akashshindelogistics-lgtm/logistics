@@ -1,6 +1,7 @@
 //! Dispatch orders: creating one from godown stock, listing, and moving it
 //! through its status lifecycle (with proof of delivery).
 
+use super::common::*;
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::{
     DispatchLineItemInput, DispatchOrder, DispatchStatus, ProofOfDeliveryInput, VehicleSource,
@@ -8,13 +9,12 @@ use crate::logistics::dispatch::dispatch::{
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::notification::notification::Notification;
 use crate::logistics::orgs::orgs::Organization;
-use crate::logistics::vendor::hire::VehicleHire;
 use crate::logistics::vehicle::vehicle::Vehicle;
-use actix_web::{get, post, put, web, HttpResponse, Responder};
+use crate::logistics::vendor::hire::VehicleHire;
+use actix_web::{HttpResponse, Responder, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct DispatchRequestPayload {
@@ -167,21 +167,21 @@ pub async fn dispatch_stock(
                 success: false,
                 message: "Customer belongs to a different organization".to_string(),
                 data: None,
-            })
+            });
         }
         Ok(None) => {
             return HttpResponse::BadRequest().json(ApiResponse::<String> {
                 success: false,
                 message: "Customer not found".to_string(),
                 data: None,
-            })
+            });
         }
         Err(err) => {
             return HttpResponse::InternalServerError().json(ApiResponse::<String> {
                 success: false,
                 message: format!("Failed to fetch customer: {}", err),
                 data: None,
-            })
+            });
         }
     };
 
@@ -204,7 +204,7 @@ pub async fn dispatch_stock(
                 success: false,
                 message: "vendor_id is required when vehicle_source is HIRED".to_string(),
                 data: None,
-            })
+            });
         }
     };
 
@@ -238,10 +238,15 @@ pub async fn dispatch_stock(
 
 /// Record (and try to send) the dispatch-created notifications for one
 /// dispatch: to its customer, and to whoever drives its truck.
-pub(super) async fn notify_dispatch_created(org_id: Uuid, order: &DispatchOrder, customer: &Customer) {
+pub(super) async fn notify_dispatch_created(
+    org_id: Uuid,
+    order: &DispatchOrder,
+    customer: &Customer,
+) {
     let driver_phone = driver_phone_for_dispatch(order, org_id);
     if let Ok(notifs) =
-        Notification::record_dispatch_created(org_id, order.id, customer, driver_phone.as_deref()).await
+        Notification::record_dispatch_created(org_id, order.id, customer, driver_phone.as_deref())
+            .await
     {
         Notification::deliver_queued_best_effort(&notifs).await;
     }
@@ -252,9 +257,14 @@ pub(super) async fn notify_dispatch_created(org_id: Uuid, order: &DispatchOrder,
 fn driver_phone_for_dispatch(order: &DispatchOrder, org_id: Uuid) -> Option<String> {
     match order.vehicle_source {
         VehicleSource::Hired => {
-            VehicleHire::get_by_id(order.hire_id?).ok().flatten()?.driver_phone
+            VehicleHire::get_by_id(order.hire_id?)
+                .ok()
+                .flatten()?
+                .driver_phone
         }
-        VehicleSource::Own => driver_phone_for_vehicle(order.vehicle_registration_number.as_deref()?, org_id),
+        VehicleSource::Own => {
+            driver_phone_for_vehicle(order.vehicle_registration_number.as_deref()?, org_id)
+        }
     }
 }
 
@@ -307,14 +317,13 @@ pub async fn update_dispatch_status(
 
     match dispatch.transition_to(payload.status, proof, payload.return_to_godown_id) {
         Ok(()) => {
-            if dispatch.status == DispatchStatus::Delivered {
-                if let Ok(Some(customer)) = Customer::get_by_id(dispatch.customer_id) {
-                    if let Ok(notifs) =
-                        Notification::record_dispatch_delivered(auth.org_id, dispatch.id, &customer).await
-                    {
-                        Notification::deliver_queued_best_effort(&notifs).await;
-                    }
-                }
+            if dispatch.status == DispatchStatus::Delivered
+                && let Ok(Some(customer)) = Customer::get_by_id(dispatch.customer_id)
+                && let Ok(notifs) =
+                    Notification::record_dispatch_delivered(auth.org_id, dispatch.id, &customer)
+                        .await
+            {
+                Notification::deliver_queued_best_effort(&notifs).await;
             }
             HttpResponse::Ok().json(ApiResponse {
                 success: true,

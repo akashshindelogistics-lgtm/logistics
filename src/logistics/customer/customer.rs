@@ -54,7 +54,9 @@ fn ensure_contact_columns(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Er
             params! { "col" => col },
         )?;
         if present.is_none() {
-            conn.query_drop(format!("ALTER TABLE Customers ADD COLUMN {col} VARCHAR(255) DEFAULT NULL"))?;
+            conn.query_drop(format!(
+                "ALTER TABLE Customers ADD COLUMN {col} VARCHAR(255) DEFAULT NULL"
+            ))?;
         }
     }
     Ok(())
@@ -282,7 +284,8 @@ mod tests {
         let _db = TestDb::create();
         let org = make_org("Acme Org");
 
-        let customer_res = Customer::create_customer(org.id, "Acme Retail Corp", "100 Market St, Mumbai");
+        let customer_res =
+            Customer::create_customer(org.id, "Acme Retail Corp", "100 Market St, Mumbai");
         assert!(customer_res.is_ok(), "Failed to create customer");
 
         let mut customer = customer_res.unwrap();
@@ -298,7 +301,9 @@ mod tests {
         assert_eq!(loc.latitude, lat);
         assert_eq!(loc.longitude, lng);
 
-        let fetched = Customer::get_by_id(customer.id).expect("get").expect("exists");
+        let fetched = Customer::get_by_id(customer.id)
+            .expect("get")
+            .expect("exists");
         assert_eq!(fetched.name, "Acme Retail Corp");
         assert_eq!(fetched.address, "100 Market St, Mumbai");
         assert_eq!(fetched.org_id, org.id);
@@ -329,15 +334,20 @@ mod tests {
     fn test_set_contact_normalises_and_round_trips() {
         let _db = TestDb::create();
         let org = make_org("Contact Org");
-        let mut customer = Customer::create_customer(org.id, "Reachable Co", "5 St").expect("create");
+        let mut customer =
+            Customer::create_customer(org.id, "Reachable Co", "5 St").expect("create");
         assert_eq!(customer.phone, None);
         assert_eq!(customer.email, None);
 
-        customer.set_contact(Some("  +91 90000 00000 ".into()), Some("  ".into())).expect("set");
+        customer
+            .set_contact(Some("  +91 90000 00000 ".into()), Some("  ".into()))
+            .expect("set");
         assert_eq!(customer.phone.as_deref(), Some("+91 90000 00000"));
         assert_eq!(customer.email, None, "a blank string is stored as None");
 
-        let fetched = Customer::get_by_id(customer.id).expect("get").expect("exists");
+        let fetched = Customer::get_by_id(customer.id)
+            .expect("get")
+            .expect("exists");
         assert_eq!(fetched.phone.as_deref(), Some("+91 90000 00000"));
         assert_eq!(fetched.email, None);
     }
@@ -358,17 +368,31 @@ mod tests {
         let _db = TestDb::create();
         let org = make_org("Directory Org");
 
-        let mut customer = Customer::create_customer(org.id, "Reachable Co", "5 Market St").expect("create");
+        let mut customer =
+            Customer::create_customer(org.id, "Reachable Co", "5 Market St").expect("create");
         let results = chunk::search_by_org(org.id, "Reachable Market", 8).expect("search");
-        assert!(results.iter().any(|c| c.text.contains("Reachable Co") && c.text.contains("5 Market St")), "{results:?}");
+        assert!(
+            results
+                .iter()
+                .any(|c| c.text.contains("Reachable Co") && c.text.contains("5 Market St")),
+            "{results:?}"
+        );
 
-        customer.set_contact(Some("+91 90000 00000".into()), None).expect("set contact");
+        customer
+            .set_contact(Some("+91 90000 00000".into()), None)
+            .expect("set contact");
         let results = chunk::search_by_org(org.id, "Reachable Market", 8).expect("search");
-        assert!(results.iter().any(|c| c.text.contains("+91 90000 00000")), "{results:?}");
+        assert!(
+            results.iter().any(|c| c.text.contains("+91 90000 00000")),
+            "{results:?}"
+        );
 
         customer.delete().expect("delete");
         let results = chunk::search_by_org(org.id, "Reachable Market", 8).expect("search");
-        assert!(!results.iter().any(|c| c.text.contains("Reachable Co")), "deleting a customer should drop its chunk: {results:?}");
+        assert!(
+            !results.iter().any(|c| c.text.contains("Reachable Co")),
+            "deleting a customer should drop its chunk: {results:?}"
+        );
     }
 
     #[test]

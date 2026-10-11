@@ -274,7 +274,10 @@ async fn test_update_org_returns_403_for_different_org() {
     };
     let req = test::TestRequest::put()
         .uri(&format!("/api/orgs/{}", target_org_id))
-        .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(attacker_org_id, "Attacker"),
+        ))
         .set_json(&payload)
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -296,7 +299,10 @@ async fn test_update_org_location_returns_403_for_different_org() {
     };
     let req = test::TestRequest::put()
         .uri(&format!("/api/orgs/{}/location", target_org_id))
-        .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(attacker_org_id, "Attacker"),
+        ))
         .set_json(&payload)
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -313,7 +319,10 @@ async fn test_delete_org_returns_403_for_different_org() {
     let attacker_org_id = Uuid::new_v4();
     let req = test::TestRequest::delete()
         .uri(&format!("/api/orgs/{}", target_org_id))
-        .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(attacker_org_id, "Attacker"),
+        ))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -326,7 +335,8 @@ async fn test_delete_org_requires_admin() {
     let _db = TestDb::create();
     let app = test::init_service(App::new().configure(config_routes)).await;
     let (org, admin) = setup_org(&app, "Delete Guard Org").await;
-    let dispatcher = add_user_and_login(&app, org.id, &admin, "dd@example.com", OrgRole::Dispatcher).await;
+    let dispatcher =
+        add_user_and_login(&app, org.id, &admin, "dd@example.com", OrgRole::Dispatcher).await;
 
     let req = test::TestRequest::delete()
         .uri(&format!("/api/orgs/{}", org.id))
