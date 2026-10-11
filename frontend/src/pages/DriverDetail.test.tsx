@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import DriverDetail from './DriverDetail';
 import * as driversApi from '../api/drivers';
 import type { Driver } from '../types';
 
+const route = vi.hoisted(() => ({ id: 'd1' }));
 vi.mock('react-router-dom', async importOriginal => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
-  return { ...actual, useParams: () => ({ id: 'd1' }) };
+  return { ...actual, useParams: () => ({ id: route.id }) };
 });
 vi.mock('../api/drivers');
 
@@ -42,5 +43,31 @@ describe('DriverDetail page', () => {
 
     expect(driversApi.updateDriver).toHaveBeenCalledWith('d1', 'Ravi K', 'DL-123', '+91 90000', false);
     await waitFor(() => expect(screen.getByText(/driver updated/i)).toBeInTheDocument());
+  });
+
+  it('keeps edits when a stale load from a discarded effect lands late', async () => {
+    const user = userEvent.setup();
+    // In the browser, StrictMode runs the load effect twice and the first
+    // response can land after the form is showing. Reproduce that with a
+    // route change: the load for the previous id is held back until the
+    // user has started typing, then lands.
+    let resolveStale!: (v: ReturnType<typeof ok<Driver[]>>) => void;
+    vi.mocked(driversApi.listDrivers)
+      .mockReturnValueOnce(new Promise(r => { resolveStale = r; }) as never)
+      .mockResolvedValueOnce(ok([driver()]));
+
+    route.id = 'd0';
+    const { rerender } = render(<DriverDetail />, { wrapper: MemoryRouter });
+    route.id = 'd1';
+    rerender(<DriverDetail />);
+
+    const license = await screen.findByLabelText(/licence number/i);
+    expect(license).toHaveValue('DL-123');
+    await user.clear(license);
+    await user.type(license, 'DL-NEW-123');
+
+    await act(async () => resolveStale(ok([driver({ id: 'd0', license_number: 'DL-STALE' })])));
+
+    expect(license).toHaveValue('DL-NEW-123');
   });
 });

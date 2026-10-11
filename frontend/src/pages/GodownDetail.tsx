@@ -17,9 +17,14 @@ export default function GodownDetail() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+  // A load from an effect that has since been cleaned up (StrictMode runs
+  // effects twice in dev, or the id changed) must not land late and reset
+  // fields the user is already editing.
   useEffect(() => {
+    let cancelled = false;
     getGodown(id!)
       .then(res => {
+        if (cancelled) return;
         const g = res.data ?? null;
         setGodown(g);
         if (g) {
@@ -28,8 +33,9 @@ export default function GodownDetail() {
           setMaxCapacity(g.max_capacity != null ? String(g.max_capacity) : '');
         }
       })
-      .catch(() => setGodown(null))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setGodown(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [id]);
 
   const handleSave = async (e: React.FormEvent) => {

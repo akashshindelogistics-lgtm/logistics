@@ -32,9 +32,14 @@ export default function VehicleDetail() {
   const [keyMsg, setKeyMsg] = useState<string | null>(null);
   const [activity, setActivity] = useState<VehicleActivity>('idle');
 
+  // A load from an effect that has since been cleaned up (StrictMode runs
+  // effects twice in dev, or the vehicle changed) must not land late and
+  // reset fields the user is already editing.
   useEffect(() => {
+    let cancelled = false;
     Promise.all([listVehicles(), listDrivers()])
       .then(([vRes, dRes]) => {
+        if (cancelled) return;
         const v = (vRes.data ?? []).find(x => x.registration_number === reg) ?? null;
         setVehicle(v);
         setDrivers(dRes.data ?? []);
@@ -44,7 +49,8 @@ export default function VehicleDetail() {
           setVehicleType(v.vehicle_type ?? 'Truck');
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [reg]);
 
   // What the vehicle is doing, for the 3D view's status ring. Best effort:
