@@ -18,9 +18,14 @@ export default function DriverDetail() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+  // A load from an effect that has since been cleaned up (StrictMode runs
+  // effects twice in dev, or the id changed) must not land late and reset
+  // fields the user is already editing.
   useEffect(() => {
+    let cancelled = false;
     listDrivers()
       .then(res => {
+        if (cancelled) return;
         const d = (res.data ?? []).find(x => x.id === id) ?? null;
         setDriver(d);
         if (d) {
@@ -30,7 +35,8 @@ export default function DriverDetail() {
           setIsActive(d.is_active);
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [id]);
 
   const handleSave = async (e: React.FormEvent) => {
