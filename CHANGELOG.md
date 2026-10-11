@@ -4,6 +4,15 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.12.1](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.0...v0.12.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* resolve clippy warnings so clippy -D warnings passes ([107288a](https://github.com/akashshindelogistics-lgtm/logistics/commit/107288a7c0e52bb51a7ff5dc3d9f9f4689b5d330))
+* **ui:** stop stale loads resetting the driver, godown and vehicle edit forms ([615e4e7](https://github.com/akashshindelogistics-lgtm/logistics/commit/615e4e7b7faa56bfbd27afd80d2c58aa33b4e44b))
+* **ui:** stop stale loads resetting the driver, godown and vehicle edit forms ([cbcc5d2](https://github.com/akashshindelogistics-lgtm/logistics/commit/cbcc5d221b9c260920afad9b2d74ed54a08c0a7f))
+
 ## [0.12.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.11.1...v0.12.0) (2026-10-10)
 
 
