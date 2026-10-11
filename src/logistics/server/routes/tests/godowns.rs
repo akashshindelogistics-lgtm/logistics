@@ -34,8 +34,7 @@ async fn setup_org_with_godown(
             max_capacity: None,
         })
         .to_request();
-    let body: ApiResponse<Godown> =
-        test::read_body_json(test::call_service(app, req).await).await;
+    let body: ApiResponse<Godown> = test::read_body_json(test::call_service(app, req).await).await;
     let godown = body.data.unwrap();
 
     (org, godown, auth_header)
@@ -63,8 +62,7 @@ async fn add_godown(
             max_capacity,
         })
         .to_request();
-    let body: ApiResponse<Godown> =
-        test::read_body_json(test::call_service(app, req).await).await;
+    let body: ApiResponse<Godown> = test::read_body_json(test::call_service(app, req).await).await;
     body.data.unwrap()
 }
 
@@ -190,7 +188,10 @@ async fn test_get_godown_returns_403_for_different_org() {
 
     let req = test::TestRequest::get()
         .uri(&format!("/api/godowns/{}", godown.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -252,7 +253,10 @@ async fn test_update_godown_returns_403_for_different_org() {
     };
     let req = test::TestRequest::put()
         .uri(&format!("/api/godowns/{}", godown.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .set_json(&payload)
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -336,7 +340,10 @@ async fn test_delete_godown_returns_403_for_different_org() {
 
     let req = test::TestRequest::delete()
         .uri(&format!("/api/godowns/{}", godown.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -394,7 +401,10 @@ async fn test_add_godown_stock_returns_403_for_different_org() {
     };
     let req = test::TestRequest::post()
         .uri(&format!("/api/godowns/{}/stock", godown.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .set_json(&payload)
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -459,7 +469,10 @@ async fn test_update_godown_stock_returns_403_for_different_org() {
     };
     let req = test::TestRequest::put()
         .uri(&format!("/api/godowns/{}/stock", godown.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .set_json(&payload)
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -476,7 +489,10 @@ async fn test_delete_godown_stock_endpoint() {
         setup_org_with_godown(&app, "Delete Stock Org", "Delete Stock Godown").await;
 
     let req = test::TestRequest::delete()
-        .uri(&format!("/api/godowns/{}/stock/nonexistent-description", godown.id))
+        .uri(&format!(
+            "/api/godowns/{}/stock/nonexistent-description",
+            godown.id
+        ))
         .insert_header(("Authorization", auth_header))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -495,7 +511,10 @@ async fn test_delete_godown_stock_returns_403_for_different_org() {
 
     let req = test::TestRequest::delete()
         .uri(&format!("/api/godowns/{}/stock/some-item", godown.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -580,9 +599,14 @@ async fn test_transfer_godown_stock_carries_the_sources_category_to_a_new_destin
         .uri(&format!("/api/godowns/{}", to.id))
         .insert_header(("Authorization", auth_header))
         .to_request();
-    let body: ApiResponse<Godown> =
-        test::read_body_json(test::call_service(&app, req).await).await;
-    let dest_cement = body.data.unwrap().stock.into_iter().find(|s| s.description == "Cement").unwrap();
+    let body: ApiResponse<Godown> = test::read_body_json(test::call_service(&app, req).await).await;
+    let dest_cement = body
+        .data
+        .unwrap()
+        .stock
+        .into_iter()
+        .find(|s| s.description == "Cement")
+        .unwrap();
     assert_eq!(dest_cement.category, "Building Materials");
 }
 
@@ -612,8 +636,7 @@ async fn test_transfer_godown_stock_rejects_insufficient_quantity_with_400() {
 async fn test_transfer_godown_stock_over_destination_capacity_returns_409() {
     let _db = TestDb::create();
     let app = test::init_service(App::new().configure(config_routes)).await;
-    let (org, from, auth_header) =
-        setup_org_with_godown(&app, "Cap Transfer Org", "Source").await;
+    let (org, from, auth_header) = setup_org_with_godown(&app, "Cap Transfer Org", "Source").await;
     let to = add_godown(&app, org.id, &auth_header, "Tiny Dest", Some(100)).await;
     seed_stock(&app, from.id, &auth_header, "Tiles", 10, 50).await;
 
@@ -634,10 +657,8 @@ async fn test_transfer_godown_stock_over_destination_capacity_returns_409() {
 async fn test_transfer_godown_stock_returns_403_for_a_foreign_destination() {
     let _db = TestDb::create();
     let app = test::init_service(App::new().configure(config_routes)).await;
-    let (_org_a, from, auth_a) =
-        setup_org_with_godown(&app, "Owner Org", "Owner Source").await;
-    let (_org_b, foreign, _auth_b) =
-        setup_org_with_godown(&app, "Other Org", "Other Godown").await;
+    let (_org_a, from, auth_a) = setup_org_with_godown(&app, "Owner Org", "Owner Source").await;
+    let (_org_b, foreign, _auth_b) = setup_org_with_godown(&app, "Other Org", "Other Godown").await;
     seed_stock(&app, from.id, &auth_a, "Sacks", 1, 20).await;
 
     let req = test::TestRequest::post()
@@ -657,12 +678,14 @@ async fn test_transfer_godown_stock_returns_403_for_a_foreign_destination() {
 async fn test_list_stock_transfers_returns_403_for_a_different_org() {
     let _db = TestDb::create();
     let app = test::init_service(App::new().configure(config_routes)).await;
-    let (org, _from, _auth) =
-        setup_org_with_godown(&app, "Transfers Owner Org", "G").await;
+    let (org, _from, _auth) = setup_org_with_godown(&app, "Transfers Owner Org", "G").await;
 
     let req = test::TestRequest::get()
         .uri(&format!("/api/orgs/{}/stock-transfers", org.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 403);
@@ -753,7 +776,9 @@ async fn test_update_godown_stock_changes_category() {
     let (_org, godown, auth_header) =
         setup_org_with_godown(&app, "Update Category Org", "Update Category Godown").await;
 
-    Stock::new(5, 40, "Bolts").add_to_godown(godown.id).expect("seed stock");
+    Stock::new(5, 40, "Bolts")
+        .add_to_godown(godown.id)
+        .expect("seed stock");
 
     let payload = UpdateStockPayload {
         volume_in_size: 5,
@@ -874,8 +899,7 @@ async fn test_add_godown_stock_reports_below_threshold() {
             reorder_threshold: Some(25),
         })
         .to_request();
-    let body: ApiResponse<Stock> =
-        test::read_body_json(test::call_service(&app, req).await).await;
+    let body: ApiResponse<Stock> = test::read_body_json(test::call_service(&app, req).await).await;
     let stock = body.data.unwrap();
     assert_eq!(stock.reorder_threshold, Some(25));
     assert!(stock.below_threshold);
@@ -885,8 +909,7 @@ async fn test_add_godown_stock_reports_below_threshold() {
         .uri(&format!("/api/godowns/{}", godown.id))
         .insert_header(("Authorization", auth_header))
         .to_request();
-    let body: ApiResponse<Godown> =
-        test::read_body_json(test::call_service(&app, req).await).await;
+    let body: ApiResponse<Godown> = test::read_body_json(test::call_service(&app, req).await).await;
     let reloaded = body.data.unwrap();
     let item = reloaded
         .stock
@@ -909,7 +932,10 @@ async fn test_create_godown_returns_403_for_different_org() {
     };
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/godowns", target_org_id))
-        .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(attacker_org_id, "Attacker"),
+        ))
         .set_json(&payload)
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -924,8 +950,16 @@ async fn test_warehouse_staff_can_add_stock_but_dispatcher_cannot() {
     let app = test::init_service(App::new().configure(config_routes)).await;
     let (org, godown, admin) = setup_org_with_godown(&app, "Role Stock Org", "Shed").await;
 
-    let dispatcher = add_user_and_login(&app, org.id, &admin, "d2@example.com", OrgRole::Dispatcher).await;
-    let warehouse = add_user_and_login(&app, org.id, &admin, "w2@example.com", OrgRole::WarehouseStaff).await;
+    let dispatcher =
+        add_user_and_login(&app, org.id, &admin, "d2@example.com", OrgRole::Dispatcher).await;
+    let warehouse = add_user_and_login(
+        &app,
+        org.id,
+        &admin,
+        "w2@example.com",
+        OrgRole::WarehouseStaff,
+    )
+    .await;
 
     let stock = CreateStockPayload {
         description: "Pallets".to_string(),

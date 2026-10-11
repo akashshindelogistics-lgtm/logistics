@@ -53,7 +53,9 @@ async fn test_ask_assistant_without_token_returns_401() {
     let app = test::init_service(App::new().configure(config_routes)).await;
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/assistant/ask", Uuid::new_v4()))
-        .set_json(&AssistantAskPayload { question: "anything?".to_string() })
+        .set_json(&AssistantAskPayload {
+            question: "anything?".to_string(),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 401);
 }
@@ -68,7 +70,9 @@ async fn test_ask_assistant_returns_403_for_a_different_org() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/assistant/ask", org.id))
         .insert_header(("Authorization", other_auth))
-        .set_json(&AssistantAskPayload { question: "anything?".to_string() })
+        .set_json(&AssistantAskPayload {
+            question: "anything?".to_string(),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
 }
@@ -82,7 +86,9 @@ async fn test_ask_assistant_rejects_an_empty_question_with_400() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/assistant/ask", org.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&AssistantAskPayload { question: "   ".to_string() })
+        .set_json(&AssistantAskPayload {
+            question: "   ".to_string(),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 }
@@ -96,7 +102,9 @@ async fn test_ask_assistant_returns_a_canned_answer_when_nothing_is_indexed() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/assistant/ask", org.id))
         .insert_header(("Authorization", auth))
-        .set_json(&AssistantAskPayload { question: "what happened to my orders?".to_string() })
+        .set_json(&AssistantAskPayload {
+            question: "what happened to my orders?".to_string(),
+        })
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
@@ -192,7 +200,10 @@ async fn test_get_reorder_suggestions_without_token_returns_401() {
     let _db = TestDb::create();
     let app = test::init_service(App::new().configure(config_routes)).await;
     let req = test::TestRequest::get()
-        .uri(&format!("/api/orgs/{}/assistant/reorder-suggestions", Uuid::new_v4()))
+        .uri(&format!(
+            "/api/orgs/{}/assistant/reorder-suggestions",
+            Uuid::new_v4()
+        ))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 401);
 }
@@ -205,7 +216,10 @@ async fn test_get_reorder_suggestions_returns_403_for_a_different_org() {
     let (_other, other_auth) = setup_org(&app, "Reorder Intruder Org").await;
 
     let req = test::TestRequest::get()
-        .uri(&format!("/api/orgs/{}/assistant/reorder-suggestions", org.id))
+        .uri(&format!(
+            "/api/orgs/{}/assistant/reorder-suggestions",
+            org.id
+        ))
         .insert_header(("Authorization", other_auth))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
@@ -218,11 +232,18 @@ async fn test_get_reorder_suggestions_returns_a_canned_answer_when_nothing_is_lo
     let (org, auth) = setup_org(&app, "Reorder Quiet Org").await;
 
     let req = test::TestRequest::get()
-        .uri(&format!("/api/orgs/{}/assistant/reorder-suggestions", org.id))
+        .uri(&format!(
+            "/api/orgs/{}/assistant/reorder-suggestions",
+            org.id
+        ))
         .insert_header(("Authorization", auth))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
     let body: ApiResponse<String> = test::read_body_json(resp).await;
-    assert!(body.data.unwrap().contains("No godowns are below their reorder threshold"));
+    assert!(
+        body.data
+            .unwrap()
+            .contains("No godowns are below their reorder threshold")
+    );
 }

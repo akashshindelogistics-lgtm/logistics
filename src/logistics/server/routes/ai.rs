@@ -1,14 +1,14 @@
 //! Claude-backed endpoints: dispatch status summaries, the "ask your data"
 //! assistant, the daily digest and reorder suggestions.
 
+use super::common::*;
+use super::dispatches::load_owned_dispatch;
 use crate::logistics::ai::assistant::AssistantAnswer;
 use crate::logistics::customer::customer::Customer;
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, post, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
-use super::dispatches::load_owned_dispatch;
 
 /// A natural-language question for the org-scoped "ask your data" assistant.
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -50,10 +50,7 @@ pub struct AssistantReindexResponse {
     )
 )]
 #[get("/dispatches/{id}/summary")]
-pub async fn get_dispatch_summary(
-    path: web::Path<Uuid>,
-    auth: AuthenticatedOrg,
-) -> impl Responder {
+pub async fn get_dispatch_summary(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
     let dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
         Ok(d) => d,
         Err(resp) => return resp,
@@ -66,14 +63,14 @@ pub async fn get_dispatch_summary(
                 success: false,
                 message: "Customer for this dispatch not found".to_string(),
                 data: None,
-            })
+            });
         }
         Err(err) => {
             return HttpResponse::InternalServerError().json(ApiResponse::<String> {
                 success: false,
                 message: format!("Failed to fetch customer: {}", err),
                 data: None,
-            })
+            });
         }
     };
 
@@ -251,13 +248,17 @@ pub async fn get_daily_digest(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> 
     )
 )]
 #[get("/orgs/{id}/assistant/reorder-suggestions")]
-pub async fn get_reorder_suggestions(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+pub async fn get_reorder_suggestions(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
     let org_id = path.into_inner();
     if org_id != auth.org_id {
         return HttpResponse::Forbidden().json(ApiResponse::<String> {
             success: false,
-            message: "Access denied: you can only view reorder suggestions for your own organization"
-                .to_string(),
+            message:
+                "Access denied: you can only view reorder suggestions for your own organization"
+                    .to_string(),
             data: None,
         });
     }

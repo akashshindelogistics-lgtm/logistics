@@ -1,12 +1,12 @@
 //! Notification history for a dispatch or a whole org.
 
+use super::common::*;
+use super::dispatches::load_owned_dispatch;
 use crate::logistics::notification::notification::Notification;
-use actix_web::{get, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
-use super::dispatches::load_owned_dispatch;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct NotificationListResponse {
@@ -64,7 +64,10 @@ pub async fn list_dispatch_notifications(
     )
 )]
 #[get("/orgs/{id}/notifications")]
-pub async fn list_org_notifications(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+pub async fn list_org_notifications(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
     let org_id = path.into_inner();
     if org_id != auth.org_id {
         return HttpResponse::Forbidden().json(ApiResponse::<String> {

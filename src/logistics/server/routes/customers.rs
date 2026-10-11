@@ -1,11 +1,11 @@
 //! Customers (`/api/customers`, `/api/orgs/{id}/customers`).
 
+use super::common::*;
 use crate::logistics::customer::customer::Customer;
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateCustomerPayload {
@@ -47,7 +47,10 @@ pub struct CustomerListResponse {
 /// Load a customer by id and verify it belongs to `auth_org_id`, or build the
 /// 403/404/500 response a handler should return early with. Mirrors
 /// `load_owned_driver`.
-pub(super) fn load_owned_customer(customer_id: Uuid, auth_org_id: Uuid) -> Result<Customer, HttpResponse> {
+pub(super) fn load_owned_customer(
+    customer_id: Uuid,
+    auth_org_id: Uuid,
+) -> Result<Customer, HttpResponse> {
     match Customer::get_by_id(customer_id) {
         Ok(Some(customer)) if customer.org_id == auth_org_id => Ok(customer),
         Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
@@ -60,11 +63,13 @@ pub(super) fn load_owned_customer(customer_id: Uuid, auth_org_id: Uuid) -> Resul
             message: "Customer not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch customer: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch customer: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -138,10 +143,14 @@ pub async fn add_customer(
                 }
             }
             if payload.phone.is_some() || payload.email.is_some() {
-                if let Err(err) = customer.set_contact(payload.phone.clone(), payload.email.clone()) {
+                if let Err(err) = customer.set_contact(payload.phone.clone(), payload.email.clone())
+                {
                     return HttpResponse::InternalServerError().json(ApiResponse::<String> {
                         success: false,
-                        message: format!("Customer created but saving contact details failed: {}", err),
+                        message: format!(
+                            "Customer created but saving contact details failed: {}",
+                            err
+                        ),
                         data: None,
                     });
                 }

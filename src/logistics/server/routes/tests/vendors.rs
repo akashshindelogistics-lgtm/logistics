@@ -67,9 +67,18 @@ async fn test_add_vendor_rejects_invalid_input_with_400() {
     let (org, auth) = setup_org(&app, "Vendor Validation").await;
 
     for payload in [
-        CreateVendorPayload { name: "  ".to_string(), ..vendor_payload("x") },
-        CreateVendorPayload { phone: "".to_string(), ..vendor_payload("No Phone") },
-        CreateVendorPayload { gstin: Some("123".to_string()), ..vendor_payload("Bad GSTIN") },
+        CreateVendorPayload {
+            name: "  ".to_string(),
+            ..vendor_payload("x")
+        },
+        CreateVendorPayload {
+            phone: "".to_string(),
+            ..vendor_payload("No Phone")
+        },
+        CreateVendorPayload {
+            gstin: Some("123".to_string()),
+            ..vendor_payload("Bad GSTIN")
+        },
     ] {
         let req = test::TestRequest::post()
             .uri(&format!("/api/orgs/{}/vendors", org.id))
@@ -116,8 +125,14 @@ async fn test_warehouse_staff_cannot_manage_vendors_but_dispatcher_can() {
     let (org, admin) = setup_org(&app, "Vendor Roles").await;
     let dispatcher =
         add_user_and_login(&app, org.id, &admin, "vd@example.com", OrgRole::Dispatcher).await;
-    let warehouse =
-        add_user_and_login(&app, org.id, &admin, "vw@example.com", OrgRole::WarehouseStaff).await;
+    let warehouse = add_user_and_login(
+        &app,
+        org.id,
+        &admin,
+        "vw@example.com",
+        OrgRole::WarehouseStaff,
+    )
+    .await;
 
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vendors", org.id))

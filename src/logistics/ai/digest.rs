@@ -96,7 +96,12 @@ fn build_digest_prompt(
     } else {
         low_stock
             .iter()
-            .map(|i| format!("{} at {} ({} units left)", i.description, i.godown_name, i.quantity))
+            .map(|i| {
+                format!(
+                    "{} at {} ({} units left)",
+                    i.description, i.godown_name, i.quantity
+                )
+            })
             .collect::<Vec<_>>()
             .join("; ")
     };
@@ -124,26 +129,33 @@ pub async fn generate_daily_digest(org_id: Uuid) -> Result<String, String> {
     let stale_dispatches: Vec<DispatchOrder> = dispatches
         .into_iter()
         .filter(|d| {
-            !d.status.is_terminal()
-                && now - last_status_change_at(d) >= STALE_DISPATCH_HOURS * 3600
+            !d.status.is_terminal() && now - last_status_change_at(d) >= STALE_DISPATCH_HOURS * 3600
         })
         .collect();
 
     let expiring_documents: Vec<VehicleDocument> = VehicleDocument::list_by_org(org_id)
         .map_err(|e| e.to_string())?
         .into_iter()
-        .filter(|d| matches!(d.status, ComplianceStatus::ExpiringSoon | ComplianceStatus::Expired))
+        .filter(|d| {
+            matches!(
+                d.status,
+                ComplianceStatus::ExpiringSoon | ComplianceStatus::Expired
+            )
+        })
         .collect();
 
     let low_stock: Vec<LowStockItem> = Godown::list_by_org(org_id)
         .map_err(|e| e.to_string())?
         .iter()
         .flat_map(|g| {
-            g.stock.iter().filter(|s| s.below_threshold).map(|s| LowStockItem {
-                godown_name: g.name.clone(),
-                description: s.description.clone(),
-                quantity: s.quantity,
-            })
+            g.stock
+                .iter()
+                .filter(|s| s.below_threshold)
+                .map(|s| LowStockItem {
+                    godown_name: g.name.clone(),
+                    description: s.description.clone(),
+                    quantity: s.quantity,
+                })
         })
         .collect();
 
@@ -279,7 +291,8 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn generate_daily_digest_errors_when_the_api_key_is_not_set_but_something_needs_attention() {
+    async fn generate_daily_digest_errors_when_the_api_key_is_not_set_but_something_needs_attention()
+     {
         // SAFETY: no other test in this crate sets or reads ANTHROPIC_API_KEY
         // concurrently with this one — see status.rs's equivalent test for the
         // full rationale.
@@ -289,11 +302,16 @@ mod tests {
         let _db = TestDb::create();
         let org = Organization::create_organization("Busy Ops Co", "1 Depot Rd").expect("org");
 
-        let mut dispatch = sample_dispatch(DispatchStatus::InTransit, now_unix() - STALE_DISPATCH_HOURS * 3600 - 1);
+        let mut dispatch = sample_dispatch(
+            DispatchStatus::InTransit,
+            now_unix() - STALE_DISPATCH_HOURS * 3600 - 1,
+        );
         dispatch.org_id = org.id;
         dispatch.save().expect("save dispatch");
 
-        let err = generate_daily_digest(org.id).await.expect_err("should fail without an API key");
+        let err = generate_daily_digest(org.id)
+            .await
+            .expect_err("should fail without an API key");
         assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
     }
 }

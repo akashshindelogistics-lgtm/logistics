@@ -1,7 +1,7 @@
 //! `GET /api/health` — the unauthenticated liveness probe.
 
-use actix_web::{get, HttpResponse, Responder};
 use super::common::*;
+use actix_web::{HttpResponse, Responder, get};
 
 #[utoipa::path(
     get,

@@ -46,7 +46,11 @@ async fn test_upload_file_stores_it_and_serves_it_back() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(
-        resp.headers().get("content-type").unwrap().to_str().unwrap(),
+        resp.headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap(),
         "image/png"
     );
     let body = test::read_body(resp).await;
@@ -79,7 +83,14 @@ async fn test_upload_file_requires_dispatch_role() {
     let _db = TestDb::create();
     let app = test::init_service(App::new().configure(config_routes)).await;
     let (org, _, auth) = setup_dispatch(&app, "Upload Role Org").await;
-    let wh = add_user_and_login(&app, org.id, &auth, "upload-wh@example.com", OrgRole::WarehouseStaff).await;
+    let wh = add_user_and_login(
+        &app,
+        org.id,
+        &auth,
+        "upload-wh@example.com",
+        OrgRole::WarehouseStaff,
+    )
+    .await;
 
     let req = upload_request(org.id, Some(&wh), "pod.png", "image/png", b"bytes");
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
@@ -91,7 +102,13 @@ async fn test_upload_file_rejects_unsupported_content_type() {
     let app = test::init_service(App::new().configure(config_routes)).await;
     let (org, _, auth) = setup_dispatch(&app, "Upload CT Org").await;
 
-    let req = upload_request(org.id, Some(&auth), "notes.pdf", "application/pdf", b"%PDF-1.4");
+    let req = upload_request(
+        org.id,
+        Some(&auth),
+        "notes.pdf",
+        "application/pdf",
+        b"%PDF-1.4",
+    );
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 }
 

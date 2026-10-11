@@ -171,8 +171,20 @@ fn validate_iso_date(s: &str) -> Result<(), InvoiceError> {
         return Err(invalid());
     }
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let dim = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        [(m - 1) as usize];
+    let dim = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ][(m - 1) as usize];
     if d > dim {
         return Err(invalid());
     }
@@ -195,7 +207,16 @@ fn payment_status(paid_on: &Option<String>, due_on: &str) -> PaymentStatus {
 const SELECT_COLS: &str =
     "id, org_id, dispatch_id, customer_id, amount, issued_on, due_on, paid_on";
 
-type InvoiceRow = (String, String, String, String, i64, String, String, Option<String>);
+type InvoiceRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    Option<String>,
+);
 
 impl Invoice {
     /// Create the `Invoices` table if it does not exist. Kept in sync with
@@ -366,11 +387,7 @@ impl Invoice {
     }
 
     /// Change the amount and/or due date. Rejected once the invoice is paid.
-    pub fn update(
-        &mut self,
-        amount: i64,
-        due_on: impl Into<String>,
-    ) -> Result<(), InvoiceError> {
+    pub fn update(&mut self, amount: i64, due_on: impl Into<String>) -> Result<(), InvoiceError> {
         if self.paid_on.is_some() {
             return Err(InvoiceError::AlreadyPaid);
         }
@@ -439,8 +456,8 @@ mod tests {
 
     fn org_customer_dispatch() -> (Organization, Customer, DispatchOrder) {
         let org = Organization::create_organization("Billing Org", "1 Finance Rd").expect("org");
-        let customer = Customer::create_customer(org.id, "Paying Customer", "9 Market Rd")
-            .expect("customer");
+        let customer =
+            Customer::create_customer(org.id, "Paying Customer", "9 Market Rd").expect("customer");
         let mut dispatch = DispatchOrder {
             id: Uuid::new_v4(),
             org_id: org.id,
@@ -496,8 +513,8 @@ mod tests {
     fn test_overdue_when_due_date_has_passed() {
         let _db = TestDb::create();
         let (org, customer, dispatch) = org_customer_dispatch();
-        let inv = Invoice::create(org.id, dispatch.id, customer.id, 200, iso_offset(-3))
-            .expect("create");
+        let inv =
+            Invoice::create(org.id, dispatch.id, customer.id, 200, iso_offset(-3)).expect("create");
         assert_eq!(inv.status, PaymentStatus::Overdue);
     }
 
@@ -519,8 +536,8 @@ mod tests {
     fn test_mark_paid_is_terminal_and_idempotent() {
         let _db = TestDb::create();
         let (org, customer, dispatch) = org_customer_dispatch();
-        let mut inv = Invoice::create(org.id, dispatch.id, customer.id, 750, iso_offset(-1))
-            .expect("create");
+        let mut inv =
+            Invoice::create(org.id, dispatch.id, customer.id, 750, iso_offset(-1)).expect("create");
         assert_eq!(inv.status, PaymentStatus::Overdue);
 
         inv.mark_paid().expect("pay");
@@ -542,8 +559,8 @@ mod tests {
     fn test_update_changes_amount_and_recomputes_status() {
         let _db = TestDb::create();
         let (org, customer, dispatch) = org_customer_dispatch();
-        let mut inv = Invoice::create(org.id, dispatch.id, customer.id, 100, iso_offset(-2))
-            .expect("create");
+        let mut inv =
+            Invoice::create(org.id, dispatch.id, customer.id, 100, iso_offset(-2)).expect("create");
         assert_eq!(inv.status, PaymentStatus::Overdue);
 
         inv.update(250, iso_offset(20)).expect("update");

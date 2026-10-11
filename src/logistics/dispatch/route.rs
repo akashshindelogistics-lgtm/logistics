@@ -112,9 +112,15 @@ mod tests {
     }
 
     #[test]
-    fn nearest_neighbor_order_never_produces_a_longer_route_than_the_input_order_on_a_scattered_case() {
+    fn nearest_neighbor_order_never_produces_a_longer_route_than_the_input_order_on_a_scattered_case()
+     {
         let start = (18.50, 73.80);
-        let points = [(18.70, 73.60), (18.51, 73.81), (18.90, 73.40), (18.52, 73.79)];
+        let points = [
+            (18.70, 73.60),
+            (18.51, 73.81),
+            (18.90, 73.40),
+            (18.52, 73.79),
+        ];
         let optimized = nearest_neighbor_order(start, &points);
         let optimized_points: Vec<(f64, f64)> = optimized.iter().map(|&i| points[i]).collect();
 

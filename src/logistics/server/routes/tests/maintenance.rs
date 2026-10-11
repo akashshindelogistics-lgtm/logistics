@@ -39,7 +39,9 @@ async fn test_vehicle_maintenance_crud_via_api() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/vehicle-maintenance/{}/mileage", item.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&RecordMileagePayload { current_mileage_km: 50_500 })
+        .set_json(&RecordMileagePayload {
+            current_mileage_km: 50_500,
+        })
         .to_request();
     let recorded: ApiResponse<VehicleMaintenance> =
         test::read_body_json(test::call_service(&app, req).await).await;

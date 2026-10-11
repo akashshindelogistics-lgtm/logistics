@@ -1,11 +1,11 @@
 //! Operational reports (`/api/orgs/{id}/reports/*`).
 
+use super::common::*;
 use crate::logistics::reports::OpsReport;
-use actix_web::{get, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct OpsReportResponse {
@@ -68,7 +68,10 @@ pub async fn get_ops_report(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> im
     )
 )]
 #[get("/orgs/{id}/reports/summary")]
-pub async fn get_ops_report_summary(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+pub async fn get_ops_report_summary(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
     let org_id = path.into_inner();
     if org_id != auth.org_id {
         return HttpResponse::Forbidden().json(ApiResponse::<String> {
@@ -86,7 +89,7 @@ pub async fn get_ops_report_summary(path: web::Path<Uuid>, auth: AuthenticatedOr
                 success: false,
                 message: format!("Failed to build report: {}", err),
                 data: None,
-            })
+            });
         }
     };
 

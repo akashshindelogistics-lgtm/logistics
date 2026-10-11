@@ -1,14 +1,16 @@
 //! Login endpoints (`/api/auth/*`): the public org list, org-owner and
 //! team-member login, and `GET /api/auth/me`.
 
-use crate::logistics::auth::auth::{generate_token, generate_user_token, OrgCredentials, OrgSummary};
+use super::common::*;
+use crate::logistics::auth::auth::{
+    OrgCredentials, OrgSummary, generate_token, generate_user_token,
+};
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::user::user::OrgUser;
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, post, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct LoginPayload {
@@ -85,26 +87,24 @@ pub async fn auth_orgs() -> impl Responder {
 #[post("/auth/login")]
 pub async fn auth_login(payload: web::Json<LoginPayload>) -> impl Responder {
     match OrgCredentials::verify_login(payload.org_id, &payload.password) {
-        Ok(Some(org_name)) => {
-            match generate_token(payload.org_id, &org_name) {
-                Ok(token) => HttpResponse::Ok().json(ApiResponse {
-                    success: true,
-                    message: "Login successful".to_string(),
-                    data: Some(LoginData {
-                        token,
-                        org_id: payload.org_id.to_string(),
-                        org_name,
-                        role: "ADMIN".to_string(),
-                        user_name: None,
-                    }),
+        Ok(Some(org_name)) => match generate_token(payload.org_id, &org_name) {
+            Ok(token) => HttpResponse::Ok().json(ApiResponse {
+                success: true,
+                message: "Login successful".to_string(),
+                data: Some(LoginData {
+                    token,
+                    org_id: payload.org_id.to_string(),
+                    org_name,
+                    role: "ADMIN".to_string(),
+                    user_name: None,
                 }),
-                Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
-                    success: false,
-                    message: format!("Failed to generate token: {}", err),
-                    data: None,
-                }),
-            }
-        }
+            }),
+            Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to generate token: {}", err),
+                data: None,
+            }),
+        },
         Ok(None) => HttpResponse::Unauthorized().json(ApiResponse::<String> {
             success: false,
             message: "Invalid organization ID or password".to_string(),
@@ -137,14 +137,14 @@ pub async fn user_login(payload: web::Json<UserLoginPayload>) -> impl Responder 
                 success: false,
                 message: "Invalid email or password, or the account is inactive".to_string(),
                 data: None,
-            })
+            });
         }
         Err(err) => {
             return HttpResponse::InternalServerError().json(ApiResponse::<String> {
                 success: false,
                 message: format!("Authentication error: {}", err),
                 data: None,
-            })
+            });
         }
     };
 

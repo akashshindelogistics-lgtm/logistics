@@ -48,7 +48,12 @@ pub struct ReorderSuggestion {
 /// `lookback_days` days as of `now`. Pure — takes an already-fetched
 /// dispatch list rather than querying, so it's unit-testable without a
 /// database.
-fn weekly_velocity(dispatches: &[DispatchOrder], description: &str, now: i64, lookback_days: i64) -> f64 {
+fn weekly_velocity(
+    dispatches: &[DispatchOrder],
+    description: &str,
+    now: i64,
+    lookback_days: i64,
+) -> f64 {
     let since = now - lookback_days * SECONDS_PER_DAY;
     let total: i64 = dispatches
         .iter()
@@ -74,7 +79,9 @@ fn suggested_quantity(velocity: f64, quantity_on_hand: i64) -> i64 {
 
 /// Every godown stock item currently below its reorder threshold, each with
 /// a suggested reorder quantity based on recent dispatch velocity.
-pub fn compute_reorder_suggestions(org_id: Uuid) -> Result<Vec<ReorderSuggestion>, Box<dyn std::error::Error>> {
+pub fn compute_reorder_suggestions(
+    org_id: Uuid,
+) -> Result<Vec<ReorderSuggestion>, Box<dyn std::error::Error>> {
     let dispatches = DispatchOrder::list_by_org(org_id)?;
     let now = now_unix();
 
@@ -85,7 +92,8 @@ pub fn compute_reorder_suggestions(org_id: Uuid) -> Result<Vec<ReorderSuggestion
                 .iter()
                 .filter(|s| s.below_threshold)
                 .map(|s| {
-                    let velocity = weekly_velocity(&dispatches, &s.description, now, VELOCITY_LOOKBACK_DAYS);
+                    let velocity =
+                        weekly_velocity(&dispatches, &s.description, now, VELOCITY_LOOKBACK_DAYS);
                     ReorderSuggestion {
                         godown_name: g.name.clone(),
                         description: s.description.clone(),
@@ -240,7 +248,11 @@ mod tests {
     #[test]
     fn weekly_velocity_ignores_dispatches_outside_the_lookback_window() {
         let now = 30 * SECONDS_PER_DAY;
-        let dispatches = vec![dispatch_with_line("Cement", 300, now - 60 * SECONDS_PER_DAY)];
+        let dispatches = vec![dispatch_with_line(
+            "Cement",
+            300,
+            now - 60 * SECONDS_PER_DAY,
+        )];
         assert_eq!(weekly_velocity(&dispatches, "Cement", now, 30), 0.0);
     }
 
@@ -306,13 +318,16 @@ mod tests {
         }
         let _db = TestDb::create();
         let org = Organization::create_organization("Low Stock Co", "1 Depot Rd").expect("org");
-        let godown = Godown::create(org.id, "Chennai Central", "12 Anna Salai", None).expect("godown");
+        let godown =
+            Godown::create(org.id, "Chennai Central", "12 Anna Salai", None).expect("godown");
         Stock::new(1, 5, "Cement")
             .with_reorder_threshold(Some(50))
             .add_to_godown(godown.id)
             .expect("seed low stock");
 
-        let err = generate_reorder_narration(org.id).await.expect_err("should fail without an API key");
+        let err = generate_reorder_narration(org.id)
+            .await
+            .expect_err("should fail without an API key");
         assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
     }
 
@@ -320,9 +335,16 @@ mod tests {
     async fn compute_reorder_suggestions_only_returns_stock_below_its_threshold() {
         let _db = TestDb::create();
         let org = Organization::create_organization("Mixed Stock Co", "1 Depot Rd").expect("org");
-        let godown = Godown::create(org.id, "Chennai Central", "12 Anna Salai", None).expect("godown");
-        Stock::new(1, 5, "Cement").with_reorder_threshold(Some(50)).add_to_godown(godown.id).expect("low stock");
-        Stock::new(1, 200, "Sand").with_reorder_threshold(Some(50)).add_to_godown(godown.id).expect("healthy stock");
+        let godown =
+            Godown::create(org.id, "Chennai Central", "12 Anna Salai", None).expect("godown");
+        Stock::new(1, 5, "Cement")
+            .with_reorder_threshold(Some(50))
+            .add_to_godown(godown.id)
+            .expect("low stock");
+        Stock::new(1, 200, "Sand")
+            .with_reorder_threshold(Some(50))
+            .add_to_godown(godown.id)
+            .expect("healthy stock");
 
         let suggestions = compute_reorder_suggestions(org.id).expect("compute");
         assert_eq!(suggestions.len(), 1);

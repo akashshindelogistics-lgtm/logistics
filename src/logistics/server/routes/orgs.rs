@@ -1,12 +1,12 @@
 //! Organization CRUD (`/api/orgs`, `/api/orgs/{id}`, `/api/orgs/{id}/location`).
 
+use super::common::*;
 use crate::logistics::auth::auth::OrgCredentials;
 use crate::logistics::orgs::orgs::Organization;
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateOrgPayload {

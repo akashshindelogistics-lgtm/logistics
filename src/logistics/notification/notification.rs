@@ -136,7 +136,18 @@ pub struct Notification {
     pub created_at: i64,
 }
 
-type Row = (String, String, String, String, String, String, String, String, String, i64);
+type Row = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+);
 
 const SELECT_COLS: &str =
     "id, org_id, dispatch_id, event, channel, recipient_kind, recipient, body, status, created_at";
@@ -176,7 +187,18 @@ impl Notification {
     }
 
     fn row_to_notification(
-        (id, org_id, dispatch_id, event, channel, recipient_kind, recipient, body, status, created_at): Row,
+        (
+            id,
+            org_id,
+            dispatch_id,
+            event,
+            channel,
+            recipient_kind,
+            recipient,
+            body,
+            status,
+            created_at,
+        ): Row,
     ) -> Self {
         Notification {
             id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -279,26 +301,60 @@ impl Notification {
             .map(|p| (NotificationChannel::Sms, p.to_string()));
 
         let customer_body = if customer_target.is_some() {
-            crate::logistics::ai::notification_copy::generate_dispatch_created_customer_body(&customer.name, short_id)
-                .await
-                .unwrap_or_else(|_| {
-                    format!("Hi {}, your order (ref {short_id}) has been dispatched and is on its way.", customer.name)
-                })
+            crate::logistics::ai::notification_copy::generate_dispatch_created_customer_body(
+                &customer.name,
+                short_id,
+            )
+            .await
+            .unwrap_or_else(|_| {
+                format!(
+                    "Hi {}, your order (ref {short_id}) has been dispatched and is on its way.",
+                    customer.name
+                )
+            })
         } else {
-            format!("Hi {}, your order (ref {short_id}) has been dispatched and is on its way.", customer.name)
+            format!(
+                "Hi {}, your order (ref {short_id}) has been dispatched and is on its way.",
+                customer.name
+            )
         };
 
         let driver_body = if driver_target.is_some() {
-            crate::logistics::ai::notification_copy::generate_dispatch_created_driver_body(&customer.name, short_id)
-                .await
-                .unwrap_or_else(|_| format!("New trip assigned: dispatch {short_id} to {}.", customer.name))
+            crate::logistics::ai::notification_copy::generate_dispatch_created_driver_body(
+                &customer.name,
+                short_id,
+            )
+            .await
+            .unwrap_or_else(|_| {
+                format!(
+                    "New trip assigned: dispatch {short_id} to {}.",
+                    customer.name
+                )
+            })
         } else {
-            format!("New trip assigned: dispatch {short_id} to {}.", customer.name)
+            format!(
+                "New trip assigned: dispatch {short_id} to {}.",
+                customer.name
+            )
         };
 
         let notifs = vec![
-            Self::build(org_id, dispatch_id, NotificationEvent::DispatchCreated, "customer", customer_target, customer_body),
-            Self::build(org_id, dispatch_id, NotificationEvent::DispatchCreated, "driver", driver_target, driver_body),
+            Self::build(
+                org_id,
+                dispatch_id,
+                NotificationEvent::DispatchCreated,
+                "customer",
+                customer_target,
+                customer_body,
+            ),
+            Self::build(
+                org_id,
+                dispatch_id,
+                NotificationEvent::DispatchCreated,
+                "driver",
+                driver_target,
+                driver_body,
+            ),
         ];
         Self::persist(&notifs)?;
         Ok(notifs)
@@ -316,11 +372,22 @@ impl Notification {
         let customer_target = Self::customer_target(customer);
 
         let customer_body = if customer_target.is_some() {
-            crate::logistics::ai::notification_copy::generate_dispatch_delivered_customer_body(&customer.name, short_id)
-                .await
-                .unwrap_or_else(|_| format!("Hi {}, your order (ref {short_id}) has been delivered. Thank you!", customer.name))
+            crate::logistics::ai::notification_copy::generate_dispatch_delivered_customer_body(
+                &customer.name,
+                short_id,
+            )
+            .await
+            .unwrap_or_else(|_| {
+                format!(
+                    "Hi {}, your order (ref {short_id}) has been delivered. Thank you!",
+                    customer.name
+                )
+            })
         } else {
-            format!("Hi {}, your order (ref {short_id}) has been delivered. Thank you!", customer.name)
+            format!(
+                "Hi {}, your order (ref {short_id}) has been delivered. Thank you!",
+                customer.name
+            )
         };
 
         let notifs = vec![Self::build(
@@ -419,18 +486,33 @@ impl Notification {
                 continue;
             }
             let subject = n.event.email_subject();
-            match crate::logistics::notification::delivery::deliver(n.channel, &n.recipient, subject, &n.body).await
+            match crate::logistics::notification::delivery::deliver(
+                n.channel,
+                &n.recipient,
+                subject,
+                &n.body,
+            )
+            .await
             {
                 Ok(()) => {
                     if let Err(e) = Self::update_status(n.id, NotificationStatus::Sent) {
-                        eprintln!("notification delivery: sent {} but failed to update its status: {e}", n.id);
+                        eprintln!(
+                            "notification delivery: sent {} but failed to update its status: {e}",
+                            n.id
+                        );
                     }
                 }
                 Err(crate::logistics::notification::delivery::DeliveryError::NotConfigured) => {}
                 Err(err) => {
-                    eprintln!("notification delivery: failed to send {} to {}: {err}", n.id, n.recipient);
+                    eprintln!(
+                        "notification delivery: failed to send {} to {}: {err}",
+                        n.id, n.recipient
+                    );
                     if let Err(e) = Self::update_status(n.id, NotificationStatus::Failed) {
-                        eprintln!("notification delivery: also failed to mark {} as failed: {e}", n.id);
+                        eprintln!(
+                            "notification delivery: also failed to mark {} as failed: {e}",
+                            n.id
+                        );
                     }
                 }
             }

@@ -1,12 +1,12 @@
 //! Vehicle maintenance schedules and odometer (mileage) readings.
 
+use super::common::*;
+use super::vehicle_documents::ensure_owned_vehicle;
 use crate::logistics::vehicle::maintenance::{VehicleMaintenance, VehicleMaintenanceError};
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
-use super::vehicle_documents::ensure_owned_vehicle;
 
 /// Create or update one preventive-maintenance schedule item. At least one
 /// of `due_on` / `due_at_mileage_km` is required.
@@ -57,7 +57,8 @@ fn load_owned_vehicle_maintenance(
         Ok(Some(item)) if item.org_id == auth_org_id => Ok(item),
         Ok(Some(_)) => Err(HttpResponse::Forbidden().json(ApiResponse::<String> {
             success: false,
-            message: "Access denied: maintenance item belongs to a different organization".to_string(),
+            message: "Access denied: maintenance item belongs to a different organization"
+                .to_string(),
             data: None,
         })),
         Ok(None) => Err(HttpResponse::NotFound().json(ApiResponse::<String> {
@@ -65,11 +66,13 @@ fn load_owned_vehicle_maintenance(
             message: "Vehicle maintenance item not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch vehicle maintenance item: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle maintenance item: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -84,11 +87,13 @@ fn vehicle_maintenance_error_response(err: VehicleMaintenanceError) -> HttpRespo
                 data: None,
             })
         }
-        VehicleMaintenanceError::Db(_) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to save vehicle maintenance item: {}", err),
-            data: None,
-        }),
+        VehicleMaintenanceError::Db(_) => {
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to save vehicle maintenance item: {}", err),
+                data: None,
+            })
+        }
     }
 }
 
@@ -105,7 +110,10 @@ fn vehicle_maintenance_error_response(err: VehicleMaintenanceError) -> HttpRespo
     )
 )]
 #[get("/vehicles/{reg}/maintenance")]
-pub async fn list_vehicle_maintenance(path: web::Path<String>, auth: AuthenticatedOrg) -> impl Responder {
+pub async fn list_vehicle_maintenance(
+    path: web::Path<String>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
     let reg = path.into_inner();
     if let Err(resp) = ensure_owned_vehicle(&reg, auth.org_id) {
         return resp;
@@ -193,7 +201,13 @@ pub async fn update_vehicle_maintenance(
         Err(resp) => return resp,
     };
     let body = payload.into_inner();
-    match item.update(body.description, body.due_on, body.due_at_mileage_km, body.last_service_on, body.notes) {
+    match item.update(
+        body.description,
+        body.due_on,
+        body.due_at_mileage_km,
+        body.last_service_on,
+        body.notes,
+    ) {
         Ok(_) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: "Vehicle maintenance item updated".to_string(),
@@ -255,7 +269,10 @@ pub async fn record_vehicle_maintenance_mileage(
     )
 )]
 #[delete("/vehicle-maintenance/{id}")]
-pub async fn delete_vehicle_maintenance(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+pub async fn delete_vehicle_maintenance(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
     let item = match load_owned_vehicle_maintenance(path.into_inner(), auth.org_id) {
         Ok(i) => i,
         Err(resp) => return resp,
@@ -287,7 +304,10 @@ pub async fn delete_vehicle_maintenance(path: web::Path<Uuid>, auth: Authenticat
     )
 )]
 #[get("/orgs/{id}/vehicle-maintenance")]
-pub async fn list_org_vehicle_maintenance(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+pub async fn list_org_vehicle_maintenance(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
     let org_id = path.into_inner();
     if org_id != auth.org_id {
         return HttpResponse::Forbidden().json(ApiResponse::<String> {

@@ -1,15 +1,15 @@
 //! Multi-stop trips that group several dispatches onto one vehicle run.
 
+use super::common::*;
+use super::dispatches::notify_dispatch_created;
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::dispatch::dispatch::{DispatchLineItemInput, VehicleSource};
 use crate::logistics::dispatch::trip::Trip;
 use crate::logistics::orgs::orgs::Organization;
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, post, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
-use super::dispatches::notify_dispatch_created;
 
 /// One stop on a multi-stop trip: a customer and the stock lines to drop there.
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -92,23 +92,26 @@ pub async fn create_trip(
             Ok(Some(_)) => {
                 return HttpResponse::BadRequest().json(ApiResponse::<String> {
                     success: false,
-                    message: format!("Stop {}: customer belongs to a different organization", i + 1),
+                    message: format!(
+                        "Stop {}: customer belongs to a different organization",
+                        i + 1
+                    ),
                     data: None,
-                })
+                });
             }
             Ok(None) => {
                 return HttpResponse::BadRequest().json(ApiResponse::<String> {
                     success: false,
                     message: format!("Stop {}: customer not found", i + 1),
                     data: None,
-                })
+                });
             }
             Err(err) => {
                 return HttpResponse::InternalServerError().json(ApiResponse::<String> {
                     success: false,
                     message: format!("Failed to fetch customer: {}", err),
                     data: None,
-                })
+                });
             }
         };
         let lines = stop
@@ -134,7 +137,9 @@ pub async fn create_trip(
         resolved.iter().map(|(c, l)| (c, l.as_slice())).collect();
 
     let result = match (payload.vehicle_source, payload.vendor_id) {
-        (VehicleSource::Own, _) => org.dispatch_trip_to_customers(&stops_ref, payload.optimize_route),
+        (VehicleSource::Own, _) => {
+            org.dispatch_trip_to_customers(&stops_ref, payload.optimize_route)
+        }
         (VehicleSource::Hired, Some(vendor_id)) => {
             org.dispatch_trip_on_hired_vehicle(&stops_ref, payload.optimize_route, vendor_id)
         }
@@ -143,7 +148,7 @@ pub async fn create_trip(
                 success: false,
                 message: "vendor_id is required when vehicle_source is HIRED".to_string(),
                 data: None,
-            })
+            });
         }
     };
 
@@ -153,7 +158,9 @@ pub async fn create_trip(
             // its truck is assigned.
             if trip.vehicle_source == VehicleSource::Own {
                 for stop in &trip.stops {
-                    if let Some((customer, _)) = resolved.iter().find(|(c, _)| c.id == stop.customer_id) {
+                    if let Some((customer, _)) =
+                        resolved.iter().find(|(c, _)| c.id == stop.customer_id)
+                    {
                         notify_dispatch_created(org_id, stop, customer).await;
                     }
                 }

@@ -1,14 +1,14 @@
 //! Freight billing: dispatch invoices, payments and per-customer billing
 //! summaries.
 
-use crate::logistics::billing::invoice::{CustomerBillingSummary, Invoice, InvoiceError};
-use actix_web::{get, post, put, web, HttpResponse, Responder};
-use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
-use uuid::Uuid;
 use super::common::*;
 use super::customers::load_owned_customer;
 use super::dispatches::load_owned_dispatch;
+use crate::logistics::billing::invoice::{CustomerBillingSummary, Invoice, InvoiceError};
+use actix_web::{HttpResponse, Responder, get, post, put, web};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 /// Raise or amend a freight invoice.
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -59,11 +59,13 @@ fn load_owned_invoice(invoice_id: Uuid, auth_org_id: Uuid) -> Result<Invoice, Ht
             message: "Invoice not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch invoice: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch invoice: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -152,10 +154,7 @@ pub async fn create_dispatch_invoice(
     )
 )]
 #[get("/dispatches/{id}/invoice")]
-pub async fn get_dispatch_invoice(
-    path: web::Path<Uuid>,
-    auth: AuthenticatedOrg,
-) -> impl Responder {
+pub async fn get_dispatch_invoice(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
     let dispatch = match load_owned_dispatch(path.into_inner(), auth.org_id) {
         Ok(d) => d,
         Err(resp) => return resp,
@@ -304,10 +303,7 @@ pub async fn list_org_invoices(path: web::Path<Uuid>, auth: AuthenticatedOrg) ->
     )
 )]
 #[get("/customers/{id}/billing")]
-pub async fn get_customer_billing(
-    path: web::Path<Uuid>,
-    auth: AuthenticatedOrg,
-) -> impl Responder {
+pub async fn get_customer_billing(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
     let customer = match load_owned_customer(path.into_inner(), auth.org_id) {
         Ok(c) => c,
         Err(resp) => return resp,

@@ -1,13 +1,13 @@
 //! Fleet vehicles: CRUD, location updates, and the tracker-key GPS push
 //! (`POST /api/track/{tracker_key}`).
 
+use super::common::*;
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::vehicle::vehicle::{Unit, Vehicle, VehicleType};
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 /// Body a GPS tracker device sends to `POST /api/track/{tracker_key}`. No
 /// address — a device only knows coordinates; the server stamps the time.
@@ -117,8 +117,8 @@ pub async fn add_vehicle(
         .as_deref()
         .map(VehicleType::from_str)
         .unwrap_or_default();
-    let vehicle = Vehicle::new(&payload.registration_number, payload.capacity, unit)
-        .with_type(vehicle_type);
+    let vehicle =
+        Vehicle::new(&payload.registration_number, payload.capacity, unit).with_type(vehicle_type);
 
     match vehicle.add_new_vehicle_to_org(&org) {
         Ok(_) => HttpResponse::Created().json(ApiResponse {
@@ -149,11 +149,13 @@ fn check_owned_vehicle(reg: &str, auth_org_id: Uuid) -> Result<(), HttpResponse>
             message: "Vehicle not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch vehicle: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -275,14 +277,14 @@ pub async fn track_vehicle_location(
                 success: false,
                 message: "No vehicle has this tracker key".to_string(),
                 data: None,
-            })
+            });
         }
         Err(err) => {
             return HttpResponse::InternalServerError().json(ApiResponse::<String> {
                 success: false,
                 message: format!("Failed to look up tracker key: {}", err),
                 data: None,
-            })
+            });
         }
     };
 
@@ -334,7 +336,7 @@ pub async fn rotate_vehicle_tracker_key(
                     success: false,
                     message: "Vehicle not found".to_string(),
                     data: None,
-                })
+                });
             }
         },
         Err(err) => {
@@ -342,7 +344,7 @@ pub async fn rotate_vehicle_tracker_key(
                 success: false,
                 message: format!("Failed to fetch vehicle: {}", err),
                 data: None,
-            })
+            });
         }
     };
 

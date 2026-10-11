@@ -1,12 +1,12 @@
 //! Vehicle vendors — the third parties an org hires vehicles from.
 
+use super::common::*;
 use crate::logistics::vendor::hire::VehicleHire;
 use crate::logistics::vendor::vendor::{VehicleVendor, VendorError, VendorInput};
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 /// Create a vehicle vendor (transporter / broker the org hires trucks from).
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -65,11 +65,13 @@ fn load_owned_vendor(vendor_id: Uuid, auth_org_id: Uuid) -> Result<VehicleVendor
             message: "Vendor not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch vendor: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vendor: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -251,7 +253,7 @@ pub async fn delete_vendor(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> imp
                     vendor.name
                 ),
                 data: None,
-            })
+            });
         }
         Ok(false) => {}
         Err(err) => {
@@ -259,7 +261,7 @@ pub async fn delete_vendor(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> imp
                 success: false,
                 message: format!("Failed to check vendor hires: {}", err),
                 data: None,
-            })
+            });
         }
     }
     match vendor.delete() {

@@ -1,5 +1,5 @@
-use super::*;
 use super::vehicles::register_vehicle;
+use super::*;
 use crate::logistics::auth::auth::generate_user_token;
 
 async fn create_driver_via_api(
@@ -49,8 +49,7 @@ async fn test_driver_crud_and_listing() {
             is_active: false,
         })
         .to_request();
-    let body: ApiResponse<Driver> =
-        test::read_body_json(test::call_service(&app, req).await).await;
+    let body: ApiResponse<Driver> = test::read_body_json(test::call_service(&app, req).await).await;
     assert_eq!(body.data.as_ref().unwrap().name, "Ravi Kumar");
     assert!(!body.data.unwrap().is_active);
 
@@ -88,7 +87,10 @@ async fn test_update_driver_returns_403_for_different_org() {
 
     let req = test::TestRequest::put()
         .uri(&format!("/api/drivers/{}", driver.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .set_json(&UpdateDriverPayload {
             name: "Hijacked".to_string(),
             license_number: "X".to_string(),
@@ -124,7 +126,9 @@ async fn test_assign_vehicle_driver_rejects_foreign_driver() {
     let req = test::TestRequest::put()
         .uri("/api/vehicles/A-VH-1/driver")
         .insert_header(("Authorization", auth_a.clone()))
-        .set_json(&AssignDriverPayload { driver_id: Some(foreign.id) })
+        .set_json(&AssignDriverPayload {
+            driver_id: Some(foreign.id),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -133,7 +137,9 @@ async fn test_assign_vehicle_driver_rejects_foreign_driver() {
     let req = test::TestRequest::put()
         .uri("/api/vehicles/A-VH-1/driver")
         .insert_header(("Authorization", auth_a.clone()))
-        .set_json(&AssignDriverPayload { driver_id: Some(own.id) })
+        .set_json(&AssignDriverPayload {
+            driver_id: Some(own.id),
+        })
         .to_request();
     let body: ApiResponse<Vehicle> =
         test::read_body_json(test::call_service(&app, req).await).await;
@@ -159,7 +165,13 @@ fn unix_now() -> i64 {
 }
 
 fn fix(latitude: f64, longitude: f64, recorded_at: i64) -> DriverLocationFix {
-    DriverLocationFix { latitude, longitude, recorded_at, accuracy_m: Some(8.0), speed_mps: Some(5.0) }
+    DriverLocationFix {
+        latitude,
+        longitude,
+        recorded_at,
+        accuracy_m: Some(8.0),
+        speed_mps: Some(5.0),
+    }
 }
 
 /// Create a driver, optionally assign it to a fresh vehicle, and pair a
@@ -185,14 +197,20 @@ async fn pair_driver_phone(
         .to_request();
     let resp = test::call_service(app, req).await;
     assert_eq!(resp.status().as_u16(), 201);
-    let driver_id = test::read_body_json::<ApiResponse<Driver>, _>(resp).await.data.unwrap().id;
+    let driver_id = test::read_body_json::<ApiResponse<Driver>, _>(resp)
+        .await
+        .data
+        .unwrap()
+        .id;
 
     if let Some(reg) = vehicle_reg {
         register_vehicle(app, org_id, auth, reg).await;
         let req = test::TestRequest::put()
             .uri(&format!("/api/vehicles/{}/driver", reg))
             .insert_header(("Authorization", auth.to_string()))
-            .set_json(&AssignDriverPayload { driver_id: Some(driver_id) })
+            .set_json(&AssignDriverPayload {
+                driver_id: Some(driver_id),
+            })
             .to_request();
         assert_eq!(test::call_service(app, req).await.status().as_u16(), 200);
     }
@@ -237,7 +255,12 @@ async fn test_driver_location_moves_the_assigned_vehicle_using_only_the_device_t
     let (_driver, token) = pair_driver_phone(&app, org.id, &auth, Some("PH-VH-1")).await;
 
     let t = unix_now() - 30;
-    let resp = post_driver_fixes(&app, Some(&token.to_string()), vec![fix(18.5204, 73.8567, t)]).await;
+    let resp = post_driver_fixes(
+        &app,
+        Some(&token.to_string()),
+        vec![fix(18.5204, 73.8567, t)],
+    )
+    .await;
     assert_eq!(resp.status().as_u16(), 200);
     let body: ApiResponse<DriverLocationResult> = test::read_body_json(resp).await;
     let result = body.data.unwrap();
@@ -252,7 +275,14 @@ async fn test_driver_location_moves_the_assigned_vehicle_using_only_the_device_t
         .to_request();
     let body: ApiResponse<Vec<Vehicle>> =
         test::read_body_json(test::call_service(&app, req).await).await;
-    let loc = body.data.unwrap().into_iter().find(|v| v.registration_number == "PH-VH-1").unwrap().location.unwrap();
+    let loc = body
+        .data
+        .unwrap()
+        .into_iter()
+        .find(|v| v.registration_number == "PH-VH-1")
+        .unwrap()
+        .location
+        .unwrap();
     assert_eq!(loc.latitude, 18.5204);
     assert_eq!(loc.timestamp, t);
 }
@@ -269,11 +299,18 @@ async fn test_driver_location_batch_applies_only_the_newest_fix() {
     let resp = post_driver_fixes(
         &app,
         Some(&token.to_string()),
-        vec![fix(3.0, 3.0, now - 10), fix(1.0, 1.0, now - 50), fix(2.0, 2.0, now - 30)],
+        vec![
+            fix(3.0, 3.0, now - 10),
+            fix(1.0, 1.0, now - 50),
+            fix(2.0, 2.0, now - 30),
+        ],
     )
     .await;
     assert_eq!(resp.status().as_u16(), 200);
-    let result = test::read_body_json::<ApiResponse<DriverLocationResult>, _>(resp).await.data.unwrap();
+    let result = test::read_body_json::<ApiResponse<DriverLocationResult>, _>(resp)
+        .await
+        .data
+        .unwrap();
     assert_eq!(result.accepted, 3);
     let loc = result.location.unwrap();
     assert_eq!((loc.latitude, loc.timestamp), (3.0, now - 10));
@@ -294,7 +331,10 @@ async fn test_driver_location_late_upload_cannot_move_the_vehicle_backwards() {
     // A queued, older batch arrives afterwards.
     let resp = post_driver_fixes(&app, Some(&token), vec![fix(49.0, 20.0, now - 600)]).await;
     assert_eq!(resp.status().as_u16(), 200);
-    let result = test::read_body_json::<ApiResponse<DriverLocationResult>, _>(resp).await.data.unwrap();
+    let result = test::read_body_json::<ApiResponse<DriverLocationResult>, _>(resp)
+        .await
+        .data
+        .unwrap();
     assert!(!result.location_updated);
     let loc = result.location.unwrap();
     assert_eq!((loc.latitude, loc.longitude), (10.0, 10.0));
@@ -313,8 +353,20 @@ async fn test_driver_location_with_unknown_or_malformed_token_is_401() {
     let _db = TestDb::create();
     let app = test::init_service(App::new().configure(config_routes)).await;
     let unknown = Uuid::new_v4().to_string();
-    assert_eq!(post_driver_fixes(&app, Some(&unknown), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 401);
-    assert_eq!(post_driver_fixes(&app, Some("not-a-uuid"), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 401);
+    assert_eq!(
+        post_driver_fixes(&app, Some(&unknown), vec![fix(1.0, 1.0, unix_now())])
+            .await
+            .status()
+            .as_u16(),
+        401
+    );
+    assert_eq!(
+        post_driver_fixes(&app, Some("not-a-uuid"), vec![fix(1.0, 1.0, unix_now())])
+            .await
+            .status()
+            .as_u16(),
+        401
+    );
 }
 
 #[actix_web::test]
@@ -326,7 +378,13 @@ async fn test_driver_location_rejects_an_org_bearer_token() {
 
     // An org JWT is not a device token.
     let jwt = auth.trim_start_matches("Bearer ").to_string();
-    assert_eq!(post_driver_fixes(&app, Some(&jwt), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 401);
+    assert_eq!(
+        post_driver_fixes(&app, Some(&jwt), vec![fix(1.0, 1.0, unix_now())])
+            .await
+            .status()
+            .as_u16(),
+        401
+    );
 }
 
 #[actix_web::test]
@@ -340,16 +398,30 @@ async fn test_driver_location_rotating_the_token_kills_the_old_one() {
         .uri(&format!("/api/drivers/{}/device-token/rotate", driver_id))
         .insert_header(("Authorization", auth))
         .to_request();
-    let new = test::read_body_json::<ApiResponse<DriverDeviceToken>, _>(test::call_service(&app, req).await)
-        .await
-        .data
-        .unwrap()
-        .device_token;
+    let new = test::read_body_json::<ApiResponse<DriverDeviceToken>, _>(
+        test::call_service(&app, req).await,
+    )
+    .await
+    .data
+    .unwrap()
+    .device_token;
     assert_ne!(old, new);
 
     let t = unix_now();
-    assert_eq!(post_driver_fixes(&app, Some(&old.to_string()), vec![fix(1.0, 1.0, t)]).await.status().as_u16(), 401);
-    assert_eq!(post_driver_fixes(&app, Some(&new.to_string()), vec![fix(1.0, 1.0, t)]).await.status().as_u16(), 200);
+    assert_eq!(
+        post_driver_fixes(&app, Some(&old.to_string()), vec![fix(1.0, 1.0, t)])
+            .await
+            .status()
+            .as_u16(),
+        401
+    );
+    assert_eq!(
+        post_driver_fixes(&app, Some(&new.to_string()), vec![fix(1.0, 1.0, t)])
+            .await
+            .status()
+            .as_u16(),
+        200
+    );
 }
 
 #[actix_web::test]
@@ -371,7 +443,17 @@ async fn test_driver_location_from_an_inactive_driver_is_403() {
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
 
-    assert_eq!(post_driver_fixes(&app, Some(&token.to_string()), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 403);
+    assert_eq!(
+        post_driver_fixes(
+            &app,
+            Some(&token.to_string()),
+            vec![fix(1.0, 1.0, unix_now())]
+        )
+        .await
+        .status()
+        .as_u16(),
+        403
+    );
 }
 
 #[actix_web::test]
@@ -381,7 +463,17 @@ async fn test_driver_location_with_no_assigned_vehicle_is_409() {
     let (org, auth) = setup_org(&app, "Phone Unassigned Org").await;
     let (_d, token) = pair_driver_phone(&app, org.id, &auth, None).await;
 
-    assert_eq!(post_driver_fixes(&app, Some(&token.to_string()), vec![fix(1.0, 1.0, unix_now())]).await.status().as_u16(), 409);
+    assert_eq!(
+        post_driver_fixes(
+            &app,
+            Some(&token.to_string()),
+            vec![fix(1.0, 1.0, unix_now())]
+        )
+        .await
+        .status()
+        .as_u16(),
+        409
+    );
 }
 
 #[actix_web::test]
@@ -394,23 +486,73 @@ async fn test_driver_location_validates_the_batch() {
     let now = unix_now();
 
     // Empty batch.
-    assert_eq!(post_driver_fixes(&app, Some(&token), vec![]).await.status().as_u16(), 400);
+    assert_eq!(
+        post_driver_fixes(&app, Some(&token), vec![])
+            .await
+            .status()
+            .as_u16(),
+        400
+    );
     // Oversized batch.
-    let big: Vec<_> = (0..(MAX_DRIVER_FIXES_PER_REQUEST as i64 + 1)).map(|i| fix(1.0, 1.0, now - i)).collect();
-    assert_eq!(post_driver_fixes(&app, Some(&token), big).await.status().as_u16(), 400);
+    let big: Vec<_> = (0..(MAX_DRIVER_FIXES_PER_REQUEST as i64 + 1))
+        .map(|i| fix(1.0, 1.0, now - i))
+        .collect();
+    assert_eq!(
+        post_driver_fixes(&app, Some(&token), big)
+            .await
+            .status()
+            .as_u16(),
+        400
+    );
     // Out-of-range coordinates.
-    assert_eq!(post_driver_fixes(&app, Some(&token), vec![fix(120.0, 10.0, now)]).await.status().as_u16(), 400);
-    assert_eq!(post_driver_fixes(&app, Some(&token), vec![fix(10.0, 190.0, now)]).await.status().as_u16(), 400);
+    assert_eq!(
+        post_driver_fixes(&app, Some(&token), vec![fix(120.0, 10.0, now)])
+            .await
+            .status()
+            .as_u16(),
+        400
+    );
+    assert_eq!(
+        post_driver_fixes(&app, Some(&token), vec![fix(10.0, 190.0, now)])
+            .await
+            .status()
+            .as_u16(),
+        400
+    );
     // Non-positive and far-future timestamps.
-    assert_eq!(post_driver_fixes(&app, Some(&token), vec![fix(1.0, 1.0, 0)]).await.status().as_u16(), 400);
-    assert_eq!(post_driver_fixes(&app, Some(&token), vec![fix(1.0, 1.0, now + 3_600)]).await.status().as_u16(), 400);
+    assert_eq!(
+        post_driver_fixes(&app, Some(&token), vec![fix(1.0, 1.0, 0)])
+            .await
+            .status()
+            .as_u16(),
+        400
+    );
+    assert_eq!(
+        post_driver_fixes(&app, Some(&token), vec![fix(1.0, 1.0, now + 3_600)])
+            .await
+            .status()
+            .as_u16(),
+        400
+    );
     // Negative accuracy / speed.
     let mut bad = fix(1.0, 1.0, now);
     bad.accuracy_m = Some(-1.0);
-    assert_eq!(post_driver_fixes(&app, Some(&token), vec![bad]).await.status().as_u16(), 400);
+    assert_eq!(
+        post_driver_fixes(&app, Some(&token), vec![bad])
+            .await
+            .status()
+            .as_u16(),
+        400
+    );
     let mut bad = fix(1.0, 1.0, now);
     bad.speed_mps = Some(-5.0);
-    assert_eq!(post_driver_fixes(&app, Some(&token), vec![bad]).await.status().as_u16(), 400);
+    assert_eq!(
+        post_driver_fixes(&app, Some(&token), vec![bad])
+            .await
+            .status()
+            .as_u16(),
+        400
+    );
 }
 
 #[actix_web::test]
@@ -436,7 +578,12 @@ async fn test_driver_location_one_bad_fix_rejects_the_whole_batch() {
         .to_request();
     let body: ApiResponse<Vec<Vehicle>> =
         test::read_body_json(test::call_service(&app, req).await).await;
-    let v = body.data.unwrap().into_iter().find(|v| v.registration_number == "PH-VH-8").unwrap();
+    let v = body
+        .data
+        .unwrap()
+        .into_iter()
+        .find(|v| v.registration_number == "PH-VH-8")
+        .unwrap();
     assert!(v.location.is_none());
 }
 
@@ -449,7 +596,17 @@ async fn test_driver_location_does_not_touch_another_orgs_vehicle() {
     let (_da, token_a) = pair_driver_phone(&app, org_a.id, &auth_a, Some("PH-A-1")).await;
     pair_driver_phone(&app, org_b.id, &auth_b, Some("PH-B-1")).await;
 
-    assert_eq!(post_driver_fixes(&app, Some(&token_a.to_string()), vec![fix(7.0, 7.0, unix_now() - 5)]).await.status().as_u16(), 200);
+    assert_eq!(
+        post_driver_fixes(
+            &app,
+            Some(&token_a.to_string()),
+            vec![fix(7.0, 7.0, unix_now() - 5)]
+        )
+        .await
+        .status()
+        .as_u16(),
+        200
+    );
 
     let req = test::TestRequest::get()
         .uri("/api/vehicles")
@@ -457,8 +614,16 @@ async fn test_driver_location_does_not_touch_another_orgs_vehicle() {
         .to_request();
     let body: ApiResponse<Vec<Vehicle>> =
         test::read_body_json(test::call_service(&app, req).await).await;
-    let v = body.data.unwrap().into_iter().find(|v| v.registration_number == "PH-B-1").unwrap();
-    assert!(v.location.is_none(), "org B's vehicle is untouched by org A's driver");
+    let v = body
+        .data
+        .unwrap()
+        .into_iter()
+        .find(|v| v.registration_number == "PH-B-1")
+        .unwrap();
+    assert!(
+        v.location.is_none(),
+        "org B's vehicle is untouched by org A's driver"
+    );
 }
 
 #[actix_web::test]
@@ -483,7 +648,10 @@ async fn test_rotate_driver_device_token_unknown_driver_returns_404() {
     let (_org, auth) = setup_org(&app, "Token Missing Org").await;
 
     let req = test::TestRequest::post()
-        .uri(&format!("/api/drivers/{}/device-token/rotate", Uuid::new_v4()))
+        .uri(&format!(
+            "/api/drivers/{}/device-token/rotate",
+            Uuid::new_v4()
+        ))
         .insert_header(("Authorization", auth))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
@@ -553,7 +721,10 @@ async fn test_driver_me_returns_the_driver_org_and_assigned_vehicle() {
 
     let resp = get_driver_me(&app, Some(&token.to_string())).await;
     assert_eq!(resp.status().as_u16(), 200);
-    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp).await.data.unwrap();
+    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp)
+        .await
+        .data
+        .unwrap();
     assert_eq!(me.driver_id, driver_id);
     assert_eq!(me.name, "Phone Driver");
     assert_eq!(me.org_id, org.id);
@@ -565,12 +736,28 @@ async fn test_driver_me_returns_the_driver_org_and_assigned_vehicle() {
 
     // After a report, the vehicle's position comes back too.
     let t = unix_now() - 10;
-    assert_eq!(post_driver_fixes(&app, Some(&token.to_string()), vec![fix(18.5204, 73.8567, t)]).await.status().as_u16(), 200);
-    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(get_driver_me(&app, Some(&token.to_string())).await)
+    assert_eq!(
+        post_driver_fixes(
+            &app,
+            Some(&token.to_string()),
+            vec![fix(18.5204, 73.8567, t)]
+        )
         .await
-        .data
-        .unwrap();
-    let location = me.vehicle.unwrap().location.expect("a location after reporting");
+        .status()
+        .as_u16(),
+        200
+    );
+    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(
+        get_driver_me(&app, Some(&token.to_string())).await,
+    )
+    .await
+    .data
+    .unwrap();
+    let location = me
+        .vehicle
+        .unwrap()
+        .location
+        .expect("a location after reporting");
     assert_eq!(location.latitude, 18.5204);
     assert_eq!(location.longitude, 73.8567);
     assert_eq!(location.timestamp, t);
@@ -585,7 +772,10 @@ async fn test_driver_me_with_no_assigned_vehicle_is_200_with_no_vehicle() {
 
     let resp = get_driver_me(&app, Some(&token.to_string())).await;
     assert_eq!(resp.status().as_u16(), 200);
-    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp).await.data.unwrap();
+    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp)
+        .await
+        .data
+        .unwrap();
     assert!(me.vehicle.is_none());
 }
 
@@ -610,7 +800,10 @@ async fn test_driver_me_for_an_inactive_driver_is_200_and_says_so() {
 
     let resp = get_driver_me(&app, Some(&token.to_string())).await;
     assert_eq!(resp.status().as_u16(), 200);
-    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp).await.data.unwrap();
+    let me = test::read_body_json::<ApiResponse<DriverMe>, _>(resp)
+        .await
+        .data
+        .unwrap();
     assert!(!me.is_active);
 }
 
@@ -622,8 +815,20 @@ async fn test_driver_me_without_a_valid_device_token_is_401() {
     pair_driver_phone(&app, org.id, &auth, Some("ME-VH-3")).await;
 
     assert_eq!(get_driver_me(&app, None).await.status().as_u16(), 401);
-    assert_eq!(get_driver_me(&app, Some("not-a-uuid")).await.status().as_u16(), 401);
-    assert_eq!(get_driver_me(&app, Some(&Uuid::new_v4().to_string())).await.status().as_u16(), 401);
+    assert_eq!(
+        get_driver_me(&app, Some("not-a-uuid"))
+            .await
+            .status()
+            .as_u16(),
+        401
+    );
+    assert_eq!(
+        get_driver_me(&app, Some(&Uuid::new_v4().to_string()))
+            .await
+            .status()
+            .as_u16(),
+        401
+    );
 }
 
 #[actix_web::test]
@@ -649,14 +854,28 @@ async fn test_driver_me_stops_working_for_a_rotated_token() {
         .uri(&format!("/api/drivers/{}/device-token/rotate", driver_id))
         .insert_header(("Authorization", auth))
         .to_request();
-    let new_token = test::read_body_json::<ApiResponse<DriverDeviceToken>, _>(test::call_service(&app, req).await)
-        .await
-        .data
-        .unwrap()
-        .device_token;
+    let new_token = test::read_body_json::<ApiResponse<DriverDeviceToken>, _>(
+        test::call_service(&app, req).await,
+    )
+    .await
+    .data
+    .unwrap()
+    .device_token;
 
-    assert_eq!(get_driver_me(&app, Some(&old_token.to_string())).await.status().as_u16(), 401);
-    assert_eq!(get_driver_me(&app, Some(&new_token.to_string())).await.status().as_u16(), 200);
+    assert_eq!(
+        get_driver_me(&app, Some(&old_token.to_string()))
+            .await
+            .status()
+            .as_u16(),
+        401
+    );
+    assert_eq!(
+        get_driver_me(&app, Some(&new_token.to_string()))
+            .await
+            .status()
+            .as_u16(),
+        200
+    );
 }
 
 #[actix_web::test]
