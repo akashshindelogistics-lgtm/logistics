@@ -4,6 +4,14 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.12.2](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.1...v0.12.2) (2026-10-11)
+
+
+### Documentation
+
+* **readme:** add release links and a "what's in a release" table ([a61efe8](https://github.com/akashshindelogistics-lgtm/logistics/commit/a61efe8740608c14ccf8d2ecad7bded7ba5e2837))
+* **readme:** add release links and a "what's in a release" table ([374c2f6](https://github.com/akashshindelogistics-lgtm/logistics/commit/374c2f6e210d04e987352431560cb27152fa5365))
+
 ## [0.12.1](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.0...v0.12.1) (2026-10-11)
 
 
