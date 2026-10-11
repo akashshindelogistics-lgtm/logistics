@@ -18,6 +18,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 
 📖 **Live dashboard:** <https://akashshindelogistics-lgtm.github.io/logistics/>
 &nbsp;·&nbsp; **API docs (Swagger UI):** <https://akashshindelogistics-lgtm.github.io/logistics/api-docs/>
+&nbsp;·&nbsp; 🏷️ **Releases:** [latest](https://github.com/akashshindelogistics-lgtm/logistics/releases/latest)
+· [all releases](https://github.com/akashshindelogistics-lgtm/logistics/releases)
+· [changelog](CHANGELOG.md)
 
 ## Features
 
@@ -354,6 +357,19 @@ rolling release PR from the conventional-commit history; merging it tags
 and a GitHub Release — optionally rolling the Oracle VM to that version. See
 [`docs/releasing.md`](docs/releasing.md) and the
 [Releases page](https://github.com/akashshindelogistics-lgtm/logistics/releases).
+
+**What's in a release** (for tag `vX.Y.Z`):
+
+| Artifact | Where | How to use it |
+| --- | --- | --- |
+| API image (arm64) | GHCR, tags `X.Y.Z`, `X.Y`, `latest` | `docker pull ghcr.io/akashshindelogistics-lgtm/logistics-api:X.Y.Z` |
+| Frontend bundle | `frontend-X.Y.Z.tar.gz` on the GitHub Release | Static build with root-relative paths; serve it from any web server |
+| OpenAPI spec | `openapi-X.Y.Z.json` on the GitHub Release | Import into Swagger UI, Postman or a client generator |
+| Release notes | The GitHub Release page and [`CHANGELOG.md`](CHANGELOG.md) | Grouped into features and bug fixes from the conventional commits |
+
+[**→ Latest release**](https://github.com/akashshindelogistics-lgtm/logistics/releases/latest)
+&nbsp;·&nbsp; [All releases](https://github.com/akashshindelogistics-lgtm/logistics/releases)
+&nbsp;·&nbsp; [Changelog](CHANGELOG.md)
 
 ## CI/CD
 
