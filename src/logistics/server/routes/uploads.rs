@@ -65,7 +65,8 @@ pub async fn upload_file(
     let mut bytes: Vec<u8> = Vec::new();
     let mut found_field = false;
 
-    while let Some(item) = payload.next().await {
+    // Exactly one file field is expected; any further fields are ignored.
+    if let Some(item) = payload.next().await {
         let mut field = match item {
             Ok(f) => f,
             Err(err) => {
@@ -99,7 +100,6 @@ pub async fn upload_file(
             }
             bytes.extend_from_slice(&data);
         }
-        break; // exactly one file field is expected
     }
 
     if !found_field {

@@ -757,7 +757,7 @@ async fn test_add_godown_stock_defaults_category_when_omitted_from_the_json_body
     let req = test::TestRequest::post()
         .uri(&format!("/api/godowns/{}/stock", godown.id))
         .insert_header(("Authorization", auth_header))
-        .set_json(&serde_json::json!({
+        .set_json(serde_json::json!({
             "volume_in_size": 5,
             "quantity": 10,
             "description": "Unlabeled Widget"

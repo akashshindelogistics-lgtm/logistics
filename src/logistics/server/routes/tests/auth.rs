@@ -116,7 +116,7 @@ async fn test_auth_orgs_returns_list_without_auth() {
     assert_eq!(resp.status().as_u16(), 200);
     let body: ApiResponse<Vec<OrgSummary>> = test::read_body_json(resp).await;
     assert!(body.success);
-    assert!(body.data.unwrap().len() >= 1);
+    assert!(!body.data.unwrap().is_empty());
 }
 
 #[actix_web::test]

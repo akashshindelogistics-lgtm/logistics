@@ -291,7 +291,7 @@ fn hired_transport(
             )
         })
         .collect();
-    hire_margins.sort_by(|a, b| b.0.cmp(&a.0));
+    hire_margins.sort_by_key(|h| std::cmp::Reverse(h.0));
 
     HiredTransport {
         own_dispatches,

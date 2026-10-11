@@ -23,7 +23,7 @@ async fn setup_hire_org(
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/vendors", org.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&vendor_payload("Route Vendor"))
+        .set_json(vendor_payload("Route Vendor"))
         .to_request();
     let body: ApiResponse<VehicleVendor> =
         test::read_body_json(test::call_service(app, req).await).await;
@@ -65,7 +65,7 @@ async fn test_hired_dispatch_then_assign_over_the_api() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/dispatch", org.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&hired_dispatch_payload(customer.id, None))
+        .set_json(hired_dispatch_payload(customer.id, None))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -73,7 +73,7 @@ async fn test_hired_dispatch_then_assign_over_the_api() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/dispatch", org.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&hired_dispatch_payload(customer.id, Some(vendor.id)))
+        .set_json(hired_dispatch_payload(customer.id, Some(vendor.id)))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
@@ -107,7 +107,7 @@ async fn test_hired_dispatch_then_assign_over_the_api() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&assign_payload("MH12 HR 9", 4))
+        .set_json(assign_payload("MH12 HR 9", 4))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 
@@ -115,7 +115,7 @@ async fn test_hired_dispatch_then_assign_over_the_api() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&assign_payload("MH12 HR 9", 10))
+        .set_json(assign_payload("MH12 HR 9", 10))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
@@ -150,7 +150,7 @@ async fn test_hired_dispatch_then_assign_over_the_api() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&assign_payload("MH12 HR 10", 10))
+        .set_json(assign_payload("MH12 HR 10", 10))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
 
@@ -185,7 +185,7 @@ async fn test_vehicle_hire_routes_enforce_org_and_role() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
         .insert_header(("Authorization", other.clone()))
-        .set_json(&assign_payload("X", 10))
+        .set_json(assign_payload("X", 10))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
     let req = test::TestRequest::get()
@@ -205,14 +205,14 @@ async fn test_vehicle_hire_routes_enforce_org_and_role() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
         .insert_header(("Authorization", warehouse))
-        .set_json(&assign_payload("X", 10))
+        .set_json(assign_payload("X", 10))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
 
     let req = test::TestRequest::put()
         .uri(&format!("/api/vehicle-hires/{}/assign", Uuid::new_v4()))
         .insert_header(("Authorization", auth))
-        .set_json(&assign_payload("X", 10))
+        .set_json(assign_payload("X", 10))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
 }
@@ -263,7 +263,7 @@ async fn test_hired_trip_over_the_api() {
             trip.hire_id.unwrap()
         ))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&assign_payload("MH12 TRIP 9", 4))
+        .set_json(assign_payload("MH12 TRIP 9", 4))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
 
@@ -314,7 +314,7 @@ async fn test_vendor_payments_over_the_api() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&pay(100))
+        .set_json(pay(100))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
 
@@ -322,7 +322,7 @@ async fn test_vendor_payments_over_the_api() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/vehicle-hires/{hire_id}/assign"))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&assign_payload("MH12 PAY 9", 10))
+        .set_json(assign_payload("MH12 PAY 9", 10))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
 
@@ -330,7 +330,7 @@ async fn test_vendor_payments_over_the_api() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&pay(2_001))
+        .set_json(pay(2_001))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
     let warehouse = add_user_and_login(
@@ -344,7 +344,7 @@ async fn test_vendor_payments_over_the_api() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
         .insert_header(("Authorization", warehouse.clone()))
-        .set_json(&pay(100))
+        .set_json(pay(100))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
 
@@ -352,7 +352,7 @@ async fn test_vendor_payments_over_the_api() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/vehicle-hires/{hire_id}/payments"))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&pay(2_000))
+        .set_json(pay(2_000))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 201);

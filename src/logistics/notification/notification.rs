@@ -243,10 +243,12 @@ impl Notification {
     fn customer_target(customer: &Customer) -> Option<(NotificationChannel, String)> {
         if let Some(email) = customer.email.as_deref().filter(|s| !s.is_empty()) {
             Some((NotificationChannel::Email, email.to_string()))
-        } else if let Some(phone) = customer.phone.as_deref().filter(|s| !s.is_empty()) {
-            Some((NotificationChannel::Sms, phone.to_string()))
         } else {
-            None
+            customer
+                .phone
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|phone| (NotificationChannel::Sms, phone.to_string()))
         }
     }
 

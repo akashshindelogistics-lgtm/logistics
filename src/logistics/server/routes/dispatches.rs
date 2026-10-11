@@ -317,15 +317,13 @@ pub async fn update_dispatch_status(
 
     match dispatch.transition_to(payload.status, proof, payload.return_to_godown_id) {
         Ok(()) => {
-            if dispatch.status == DispatchStatus::Delivered {
-                if let Ok(Some(customer)) = Customer::get_by_id(dispatch.customer_id) {
-                    if let Ok(notifs) =
-                        Notification::record_dispatch_delivered(auth.org_id, dispatch.id, &customer)
-                            .await
-                    {
-                        Notification::deliver_queued_best_effort(&notifs).await;
-                    }
-                }
+            if dispatch.status == DispatchStatus::Delivered
+                && let Ok(Some(customer)) = Customer::get_by_id(dispatch.customer_id)
+                && let Ok(notifs) =
+                    Notification::record_dispatch_delivered(auth.org_id, dispatch.id, &customer)
+                        .await
+            {
+                Notification::deliver_queued_best_effort(&notifs).await;
             }
             HttpResponse::Ok().json(ApiResponse {
                 success: true,

@@ -142,18 +142,17 @@ pub async fn add_customer(
                     });
                 }
             }
-            if payload.phone.is_some() || payload.email.is_some() {
-                if let Err(err) = customer.set_contact(payload.phone.clone(), payload.email.clone())
-                {
-                    return HttpResponse::InternalServerError().json(ApiResponse::<String> {
-                        success: false,
-                        message: format!(
-                            "Customer created but saving contact details failed: {}",
-                            err
-                        ),
-                        data: None,
-                    });
-                }
+            if (payload.phone.is_some() || payload.email.is_some())
+                && let Err(err) = customer.set_contact(payload.phone.clone(), payload.email.clone())
+            {
+                return HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                    success: false,
+                    message: format!(
+                        "Customer created but saving contact details failed: {}",
+                        err
+                    ),
+                    data: None,
+                });
             }
             HttpResponse::Created().json(ApiResponse {
                 success: true,

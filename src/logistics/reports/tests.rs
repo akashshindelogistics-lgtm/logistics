@@ -32,8 +32,8 @@ fn seed(name: &str, vehicle_count: usize) -> Fixture {
         .expect("stock");
 
     for i in 0..vehicle_count {
-        let driver = Driver::create(org.id, &format!("Driver {i}"), &format!("LIC{i}"), "0")
-            .expect("driver");
+        let driver =
+            Driver::create(org.id, format!("Driver {i}"), format!("LIC{i}"), "0").expect("driver");
         let mut v = Vehicle::new(format!("MH00 RP {i:04}"), 1_000_000, Unit::MetricTon);
         v.add_new_vehicle_to_org(&org).expect("vehicle");
         v.update_location(19.0, 72.0, Some("HQ")).expect("v loc");
