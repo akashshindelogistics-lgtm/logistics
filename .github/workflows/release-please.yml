@@ -4,12 +4,15 @@ name: release-please
 # frontend/package.json, updates CHANGELOG.md from the conventional-commit
 # history, and — when you merge it — creates the vX.Y.Z tag and GitHub Release.
 #
-# The version tag is what drives `release.yml` (image + artifacts + rollout).
-# GitHub does NOT run workflows for tags pushed with the default GITHUB_TOKEN,
-# so for the tag to trigger `release.yml` automatically, add a repo secret
-# RELEASE_PLEASE_TOKEN (a fine-grained PAT with contents:write + pull-requests:write).
-# Without it, everything still works — just run `release.yml` via "Run workflow"
-# (workflow_dispatch) after merging the release PR.
+# The new release is then built and published by `release.yml` (image +
+# artifacts + rollout). GitHub does NOT run workflows for tags pushed with the
+# default GITHUB_TOKEN, so that tag push alone never fires `release.yml`.
+# GITHUB_TOKEN *can* start a workflow through workflow_dispatch, so when a
+# release is created this job dispatches `release.yml` for the new tag itself.
+#
+# If you add a repo secret RELEASE_PLEASE_TOKEN (a fine-grained PAT with
+# contents:write + pull-requests:write), its tag push triggers `release.yml`
+# directly and the dispatch step is skipped, so the release builds only once.
 
 on:
   push:
@@ -18,13 +21,24 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write # to dispatch release.yml
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    env:
+      HAS_PAT: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - id: rp
+        uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Build and publish the release (release.yml)
+        if: ${{ steps.rp.outputs.release_created == 'true' && env.HAS_PAT != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "${{ github.ref_name }}" -f tag="$TAG"
