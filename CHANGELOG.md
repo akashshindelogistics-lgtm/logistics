@@ -4,6 +4,14 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.12.3](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.2...v0.12.3) (2026-10-12)
+
+
+### Documentation
+
+* **readme:** add the Rust Lint badge and CI entry ([bf95050](https://github.com/akashshindelogistics-lgtm/logistics/commit/bf950500e5420c5c2288f0b643aae8004f7ef016))
+* **readme:** add the Rust Lint badge and CI entry ([bfc4d8a](https://github.com/akashshindelogistics-lgtm/logistics/commit/bfc4d8a301408f04e622ed0f492a2ff6a6cf9a76))
+
 ## [0.12.2](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.1...v0.12.2) (2026-10-11)
 
 
