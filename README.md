@@ -6,6 +6,8 @@
 
 [![Periodic Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml)
 
+[![Rust Lint](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/rust-lint.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/rust-lint.yml)
+
 [![Pages — Deploy Frontend + Swagger UI](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml)
 
 [![Release](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml)
@@ -386,6 +388,10 @@ kept only for fork PRs, which can't fire `push` on this repo):
   MySQL service container.
 - **periodic-tests.yml** — runs the Cargo test suite. Also on a 2-hourly
   schedule.
+- **rust-lint.yml** — checks Rust formatting (`cargo fmt --check`) and runs
+  `cargo clippy --all-targets -- -D warnings`, so any clippy warning fails the
+  build. Only runs when Rust sources, `Cargo.toml`/`Cargo.lock` or
+  `rustfmt.toml` change.
 - **pages.yml** — the *validate the OpenAPI spec* and *build the React
   dashboard* jobs run as CI on every branch; the **deploy to
   [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/)** job
