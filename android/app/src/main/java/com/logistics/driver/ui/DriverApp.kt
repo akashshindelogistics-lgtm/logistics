@@ -18,8 +18,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.logistics.driver.AppContainer
 import com.logistics.driver.data.Pairing
-import com.logistics.driver.data.PairingRepository
 import kotlinx.coroutines.flow.map
 
 /** Not yet known whether the phone is paired (DataStore hasn't loaded). */
@@ -32,7 +32,8 @@ private object Loading
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun DriverApp(repository: PairingRepository) {
+fun DriverApp(container: AppContainer) {
+    val repository = container.pairingRepository
     // Widened to Any? so the not-yet-loaded state can be the Loading marker.
     // Built once: a new Flow on every recomposition would reset collection.
     val pairingFlow = remember(repository) { repository.pairing.map<Pairing?, Any?> { it } }
@@ -53,7 +54,17 @@ fun DriverApp(repository: PairingRepository) {
                 is Pairing -> key(current) {
                     val vm: StatusViewModel = viewModel(
                         key = current.serverUrl + current.deviceToken.hashCode(),
-                        factory = viewModelFactory { initializer { StatusViewModel(repository, current) } },
+                        factory = viewModelFactory {
+                            initializer {
+                                StatusViewModel(
+                                    repository,
+                                    current,
+                                    container.locationReporter,
+                                    container.statusStore,
+                                    container.tracking,
+                                )
+                            }
+                        },
                     )
                     StatusScreen(vm)
                 }
