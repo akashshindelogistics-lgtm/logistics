@@ -80,7 +80,7 @@ All of this is already built and tested. See "Phase 1 as built" in
 
 | Concern | Expo app (`mobile/src/lib/`) | Native app |
 | --- | --- | --- |
-| Fix interval | 30 s / 50 m, balanced accuracy | Same, via `LocationRequest` (`PRIORITY_BALANCED_POWER_ACCURACY`, `setMinUpdateDistanceMeters(50f)`) |
+| Fix interval | 30 s / 50 m, balanced accuracy | 30 s / 50 m via `LocationRequest`, high accuracy (see "Phase 3 as built") |
 | Validation | `validation.ts` | `FixValidator.kt`, same rules and messages, same test cases |
 | Queue cap | 2000, drop oldest | Same, in Room |
 | Batch size | 100 oldest first | Same |
@@ -333,6 +333,64 @@ testing and the demo.
   Lint is clean apart from the `targetSdk` and newer-Gradle notices.
   Instrumented and Compose UI tests are phase 4.
 - **Demo:** `android/scripts/demo-pairing.sh` (see the README).
+
+## Phase 3 as built
+
+- **`LocationService`:** foreground service of type `location`, started only
+  from the status screen (switch, Resume button, or the resume notification
+  opening the app). Its notification is silent and ongoing, opens the app on
+  tap, and has a Stop action that also turns the switch off.
+- **Accuracy (changed from the plan):** `PRIORITY_HIGH_ACCURACY`, not
+  balanced. Checked on the emulator: with balanced priority the fused
+  provider never turns GPS on and relies on Wi-Fi and cell positioning,
+  which on a highway is hundreds of metres off or more. At one fix per 30 s
+  or 50 m the battery cost is modest, and a phone in a truck cab is usually
+  charging. Interval and distance are unchanged.
+- **Queue:** Room table `queued_fix` (`data/FixQueue.kt`). Enqueue and
+  trimming to 2000 run in one transaction; the oldest 100 are sent per
+  request and removed by id only after a `200`.
+- **`LocationReporter`** (`data/`): `ingest` validates a fix with
+  `domain/Fix.kt` (same rules and messages as `validate_driver_fix`) and
+  queues it; `flush` uploads batch after batch until the queue is empty or a
+  batch fails. A failed batch always stays queued. A mutex stops the service,
+  the worker and Sync now from sending the same batch twice.
+- **Outcomes** (`domain/FlushOutcome.kt`): only network errors and 5xx are
+  retried. 401/403/409/400 show a specific message and wait for the next
+  fix or Sync now.
+- **`FlushWorker`:** unique WorkManager job `flush-queue` with a network
+  constraint and exponential backoff from 30 s. Each fix schedules it with
+  `KEEP` (so a fix every 30 s doesn't reset the backoff); Sync now uses
+  `REPLACE`.
+- **Restarts:** `BootReceiver` handles `BOOT_COMPLETED` and
+  `MY_PACKAGE_REPLACED`. If sharing was on it posts "Tap to resume", and it
+  schedules an upload of anything still queued. A sticky restart that
+  Android refuses to run in the foreground does the same. The status screen
+  shows "Sharing is switched on but stopped" with a Resume button whenever
+  the switch is on and the service isn't running.
+- **Permissions:** turning sharing on asks for fine and coarse location
+  ("while using the app") and, on Android 13+, notifications. Only location
+  is required. Refusing shows where to allow it in Settings.
+- **Battery:** the first time sharing starts while the app is
+  battery-optimised, a dialog explains why that matters and opens the
+  optimisation list. While sharing is on and the app is still optimised, a
+  card on the status screen repeats the advice. Both add the steps for
+  the phone's brand (`domain/BatteryAdvice.kt`: Xiaomi/Redmi/Poco,
+  Vivo/iQOO, Oppo/Realme/OnePlus, Samsung, Huawei/Honor).
+- **Status screen:** queued fix count, last fix, last sync and its message
+  (red on failure), and Sync now (enabled when there's something queued).
+- **Unpair** stops the service and discards the queue and sync history:
+  those fixes belong to the old pairing.
+- **Tests:** 43 JVM unit tests. The 24 new ones cover the validator (every
+  case from the Expo app plus exact messages), outcome classification, brand
+  advice, `LocationReporter` against in-memory fakes (cap, batches of 100,
+  stale, failure keeps the batch, reset), and `reportLocation` against
+  MockWebServer. Room DAO, Compose UI and the recorded end-to-end demo are
+  phase 4.
+- **Checked by hand on the API 37 emulator** against `cargo run`: the
+  permission prompts, the battery dialog, `adb emu geo fix` positions moving
+  the vehicle on the backend, offline queueing with the network off and
+  automatic upload when it came back, the resume notification and Resume
+  after reinstalling, and Stop from the notification.
 
 ## Decisions
 

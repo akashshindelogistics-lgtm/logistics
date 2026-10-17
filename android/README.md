@@ -1,7 +1,7 @@
 # Logistics Driver (Android)
 
 A native Kotlin app for the driver's phone. It pairs with a driver using a
-device token and (from phase 3) reports the phone's location, so the driver's
+device token and reports the phone's location, so the driver's
 assigned vehicle moves on the dispatch map without a hardware GPS tracker.
 It replaces the Expo app in `../mobile/`.
 
@@ -10,18 +10,24 @@ Backend contract: [docs/driver-phone-tracking.md](../docs/driver-phone-tracking.
 
 ## Status
 
-Phase 2 (skeleton) is built:
+Phases 2 (skeleton) and 3 (background reporting) are built:
 
 - **Pairing screen:** enter the server address and the device token. The app
   checks them with `GET /api/driver/me` before saving anything.
 - **Status screen:** the driver, organization, active status, assigned
   vehicle and its last position, from `GET /api/driver/me`. It has Refresh,
   Unpair (with confirmation) and the app version.
-- **"Share my location" switch:** a stub that sends nothing yet. It's
-  disabled for an inactive driver or one without a vehicle.
+- **"Share my location":** asks for location (and notification) permission,
+  then starts a foreground service that takes a fix every 30 s or 50 m,
+  queues it in Room and uploads in batches of 100. Fixes queue while offline
+  and upload when the network is back (WorkManager). Queued count, last fix,
+  last sync and Sync now are on the status screen.
+- **Restarts:** after a reboot or an app update, a "Tap to resume"
+  notification; the status screen warns when sharing is on but stopped.
+- **Battery:** a one-time explanation and a card with the phone brand's
+  battery settings steps.
 
-Location reporting (the foreground service, offline queue and uploads) is
-phase 3.
+The phase 4 tests and recorded demo come next.
 
 ## Setup
 
@@ -86,12 +92,14 @@ screenshot in `android/build/demo/paired-status.png`.
 app/src/main/java/com/logistics/driver/
 ├── Config.kt            # constants mirrored from the backend
 ├── DriverApplication.kt, AppContainer.kt, MainActivity.kt
-├── domain/              # pure Kotlin: server address and device token parsing
+├── domain/              # pure Kotlin: input parsing, fix validation, flush outcomes, battery advice
 ├── net/                 # DriverApi (OkHttp + kotlinx.serialization), DTOs, error messages
-├── data/                # PairingRepository, PairingStore (DataStore), TokenCipher (Android Keystore)
+├── data/                # pairing (DataStore + Keystore), Room fix queue, StatusStore, LocationReporter
+├── tracking/            # LocationService, FlushWorker, BootReceiver, notifications
 └── ui/                  # DriverApp (pair vs status), screens, view models, theme
 ```
 
 Versions are pinned in `gradle/libs.versions.toml`: AGP 9.4.1, Gradle 9.6.0,
-Kotlin 2.4.20, Compose BOM 2026.09.00. `compileSdk` is 37, `targetSdk` 36 and
+Kotlin 2.4.20, Compose BOM 2026.09.00, Room 2.8.5 (KSP 2.3.12), WorkManager 2.12.0,
+Play services location 21.4.0. `compileSdk` is 37, `targetSdk` 36 and
 `minSdk` 26.

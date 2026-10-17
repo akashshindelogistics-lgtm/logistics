@@ -3,6 +3,8 @@ package com.logistics.driver.net
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -118,6 +120,60 @@ class OkHttpDriverApiTest {
             fail("expected DriverApiException")
         } catch (e: DriverApiException) {
             assertEquals(DriverApiException.NETWORK_ERROR, e.status)
+        }
+    }
+
+    @Test
+    fun `reportLocation posts the fixes with recorded_at in seconds and parses the result`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """
+                {"success":true,"message":"Location reported","data":{
+                  "accepted":2,"location_updated":true,"vehicle_registration_number":"MH12AB1234",
+                  "location":{"latitude":18.53,"longitude":73.86,"timestamp":1791400030,"address":null}}}
+                """.trimIndent(),
+            ),
+        )
+
+        val result = api.reportLocation(
+            baseUrl(),
+            token,
+            listOf(
+                LocationFixDto(18.52, 73.85, 1791400000, accuracyM = 8.0, speedMps = 5.1),
+                LocationFixDto(18.53, 73.86, 1791400030),
+            ),
+        )
+
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/driver/location", request.path)
+        assertEquals("Bearer $token", request.getHeader("Authorization"))
+        assertTrue(request.getHeader("Content-Type")!!.startsWith("application/json"))
+        val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        val fixes = body["fixes"]!!.jsonArray
+        assertEquals(2, fixes.size)
+        assertEquals("1791400000", fixes[0].jsonObject["recorded_at"].toString())
+        assertEquals("8.0", fixes[0].jsonObject["accuracy_m"].toString())
+        assertEquals("5.1", fixes[0].jsonObject["speed_mps"].toString())
+        assertEquals(2, result.accepted)
+        assertTrue(result.locationUpdated)
+        assertEquals("MH12AB1234", result.vehicleRegistrationNumber)
+        assertEquals(1791400030L, result.location?.timestamp)
+    }
+
+    @Test
+    fun `reportLocation passes on 409 no vehicle`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(409)
+                .setBody("""{"success":false,"message":"No vehicle is assigned to this driver","data":null}"""),
+        )
+
+        try {
+            api.reportLocation(baseUrl(), token, listOf(LocationFixDto(18.52, 73.85, 1791400000)))
+            fail("expected DriverApiException")
+        } catch (e: DriverApiException) {
+            assertEquals(409, e.status)
+            assertEquals("No vehicle is assigned to this driver", e.message)
         }
     }
 

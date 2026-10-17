@@ -2,13 +2,19 @@ package com.logistics.driver.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.logistics.driver.data.LocationReporter
 import com.logistics.driver.data.Pairing
 import com.logistics.driver.data.PairingRepository
+import com.logistics.driver.data.StatusStore
+import com.logistics.driver.data.SyncStatus
 import com.logistics.driver.net.DriverMe
 import com.logistics.driver.net.describeApiError
+import com.logistics.driver.tracking.TrackingControl
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -18,43 +24,92 @@ data class StatusUiState(
     val me: DriverMe? = null,
     val loading: Boolean = false,
     val error: String? = null,
-    /**
-     * Phase 2 stub: the switch only records the driver's choice. Phase 3
-     * starts and stops the location foreground service from it.
-     */
-    val sharingRequested: Boolean = false,
+    /** Reporting state saved by the service and uploads; `sync.sharingOn` is the switch. */
+    val sync: SyncStatus = SyncStatus(),
+    /** The location service is running in this process. */
+    val serviceRunning: Boolean = false,
+    val queuedFixes: Int = 0,
+    val syncing: Boolean = false,
+    /** Why sharing couldn't start (location permission refused). */
+    val sharingError: String? = null,
 )
 
 class StatusViewModel(
     private val repository: PairingRepository,
     private val pairing: Pairing,
+    private val reporter: LocationReporter,
+    private val statusStore: StatusStore,
+    private val tracking: TrackingControl,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(StatusUiState(serverUrl = pairing.serverUrl))
-    val state: StateFlow<StatusUiState> = _state.asStateFlow()
+    private val local = MutableStateFlow(StatusUiState(serverUrl = pairing.serverUrl))
+
+    val state: StateFlow<StatusUiState> =
+        combine(local, statusStore.status, reporter.queueSize, tracking.running) { s, sync, queued, running ->
+            s.copy(sync = sync, queuedFixes = queued, serviceRunning = running)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, local.value)
 
     init {
         refresh()
     }
 
     fun refresh() {
-        if (_state.value.loading) return
-        _state.update { it.copy(loading = true, error = null) }
+        if (local.value.loading) return
+        local.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             try {
                 val me = repository.whoAmI(pairing)
-                _state.update { it.copy(me = me) }
+                local.update { it.copy(me = me) }
             } catch (e: Exception) {
-                _state.update { it.copy(error = describeApiError(e)) }
+                local.update { it.copy(error = describeApiError(e)) }
             } finally {
-                _state.update { it.copy(loading = false) }
+                local.update { it.copy(loading = false) }
             }
         }
     }
 
-    fun onSharingChange(on: Boolean) = _state.update { it.copy(sharingRequested = on) }
+    /**
+     * Turn sharing on and start the service. Call only once location
+     * permission is granted, and from a tap: Android only lets a location
+     * service start while the app is on screen.
+     */
+    fun startSharing() {
+        local.update { it.copy(sharingError = null) }
+        tracking.start()
+        viewModelScope.launch { statusStore.setSharing(true) }
+    }
 
-    /** Forget the pairing; the app returns to the pairing screen. */
+    fun stopSharing() {
+        tracking.stop()
+        viewModelScope.launch { statusStore.setSharing(false) }
+    }
+
+    fun onLocationPermissionDenied() = local.update {
+        it.copy(sharingError = "Location permission is needed to share your location. Allow it when asked, or in the phone's Settings > Apps > Logistics Driver > Permissions.")
+    }
+
+    fun onBatteryPromptShown() {
+        viewModelScope.launch { statusStore.setBatteryPromptShown() }
+    }
+
+    /** Upload the queue now. If the network is the problem, WorkManager carries on when it's back. */
+    fun syncNow() {
+        if (local.value.syncing) return
+        local.update { it.copy(syncing = true) }
+        viewModelScope.launch {
+            try {
+                if (reporter.flush()?.retry == true) tracking.scheduleUpload()
+            } finally {
+                local.update { it.copy(syncing = false) }
+            }
+        }
+    }
+
+    /** Stop sharing, drop the queue (it belongs to this driver) and forget the pairing. */
     fun unpair() {
-        viewModelScope.launch { repository.unpair() }
+        tracking.stop()
+        viewModelScope.launch {
+            reporter.reset()
+            repository.unpair()
+        }
     }
 }
