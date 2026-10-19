@@ -4,6 +4,14 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.12.4](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.3...v0.12.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **deploy:** forward notification + Anthropic workspace env to the API ([37eb457](https://github.com/akashshindelogistics-lgtm/logistics/commit/37eb4576432a789994263b93a24e18ff2cf1491a))
+* **deploy:** forward notification + Anthropic workspace env to the API ([29d6652](https://github.com/akashshindelogistics-lgtm/logistics/commit/29d66521d65c1b85c13ee00ac938c339906e34f1))
+
 ## [0.12.3](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.2...v0.12.3) (2026-10-12)
 
 
