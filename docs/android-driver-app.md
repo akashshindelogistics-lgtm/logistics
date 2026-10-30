@@ -392,6 +392,41 @@ testing and the demo.
   automatic upload when it came back, the resume notification and Resume
   after reinstalling, and Stop from the notification.
 
+## Phase 4 as built
+
+- **JVM unit tests (45):** the testing plan's unit cases were already in
+  phase 3. New: `StatusViewModelTest`, which checks that the status screen
+  asks `GET /api/driver/me` again after an upload that moved the vehicle.
+- **Instrumented tests** (`app/src/androidTest`, run with
+  `./gradlew connectedDebugAndroidTest`):
+  - `FixDaoTest`, 5 tests on the real Room queue (in-memory database): every
+    field round-trips, the cap drops the oldest, oldest-first batches, removal
+    by id spares fixes queued during an upload, and clear.
+  - `PairingFlowTest`, 3 tests on the running app with a MockWebServer on the
+    phone: an empty token and a bad address are rejected without a request; a
+    valid pairing (with a pasted `Bearer ` prefix and upper case) opens the
+    status screen and sends the normalised header; a `401` keeps the pairing
+    screen and stores nothing.
+  - The first test after the emulator boots waits up to 20 s for the app.
+    Its first launch (Keystore key, DataStore, Compose warm-up) took over 5 s
+    on the API 37 emulator.
+- **End to end:** `android/scripts/demo-tracking.sh` runs steps 1-6 of the
+  plan and checks the backend at each one. Two changes from the plan:
+  - It records with the emulator's own recorder (`adb emu screenrecord`,
+    webm on the host), because `adb shell screenrecord` stops at 180 s and
+    the run takes about 3 minutes.
+  - It grants permissions over adb and exempts the app from battery
+    optimisation, so no system dialog interrupts the run. Both prompts were
+    checked by hand in phase 3.
+
+  The shared steps moved from `demo-pairing.sh` to `scripts/lib.sh`, and both
+  demos take `API_PORT` for when another checkout holds 8080.
+- **Bug found by the demo:** after uploads the status screen still said
+  "Last position: No position yet", because `/api/driver/me` was only read
+  when the screen opened. `StatusViewModel` now reads it again after each
+  upload with outcome `OK`.
+- **CI** moves to phase 5 with the release build job.
+
 ## Decisions
 
 - **Distribution: signed APK installed directly (sideloaded).** There's no

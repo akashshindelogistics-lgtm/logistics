@@ -10,7 +10,7 @@ Backend contract: [docs/driver-phone-tracking.md](../docs/driver-phone-tracking.
 
 ## Status
 
-Phases 2 (skeleton) and 3 (background reporting) are built:
+Phases 2 (skeleton), 3 (background reporting) and 4 (tests and demo) are built:
 
 - **Pairing screen:** enter the server address and the device token. The app
   checks them with `GET /api/driver/me` before saving anything.
@@ -27,7 +27,7 @@ Phases 2 (skeleton) and 3 (background reporting) are built:
 - **Battery:** a one-time explanation and a card with the phone brand's
   battery settings steps.
 
-The phase 4 tests and recorded demo come next.
+Phase 5 (signed release APK, icon, driver install guide, CI) comes next.
 
 ## Setup
 
@@ -54,27 +54,39 @@ From the repo root:
 android/gradlew -p android assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 android/gradlew -p android testDebugUnitTest   # JVM unit tests
 android/gradlew -p android lintDebug           # Android lint
+android/gradlew -p android connectedDebugAndroidTest   # on a running emulator or phone
 ```
+
+The instrumented tests (`app/src/androidTest`) cover the Room queue on a real
+SQLite database and the pairing screen in the running app, against a
+MockWebServer on the phone. They unpair the app, so don't run them on a phone
+in use.
 
 Install on a running emulator or USB phone with
 `$ANDROID_HOME/platform-tools/adb install -r android/app/build/outputs/apk/debug/app-debug.apk`.
 
-## Demo
+## Demos
+
+Both open the emulator in a window, start the backend if nothing answers on
+port 8080 (`API_PORT=8081` to use another), seed an org, a vehicle and a
+driver with a device token, install the app and pair it by typing the token
+over adb. Shared steps are in `scripts/lib.sh`.
 
 ```sh
-android/scripts/demo-pairing.sh
+android/scripts/demo-tracking.sh   # phase 4 end to end, about 3 minutes
+android/scripts/demo-pairing.sh    # pairing only, under a minute
 ```
 
-The script:
+`demo-tracking.sh` switches sharing on and drives the emulator along the
+Chakan - Pune road with `adb emu geo fix`, checking `GET /api/vehicles` after
+each position. It then turns the emulator's network off, checks that fixes
+queue on the phone while the backend stays put, and turns the network back
+on to check that the queue uploads. Any check that fails stops the script. Recorded
+to `android/build/demo/tracking-demo.webm`, with a final screenshot in
+`tracking-status.png`.
 
-1. starts the backend if it isn't running;
-2. seeds an org, a vehicle and a driver with a device token;
-3. opens the emulator in a window;
-4. installs the app and pairs it by typing the token over adb;
-5. reports one location fix and taps Refresh.
-
-The run is recorded to `android/build/demo/pairing-demo.mp4`, with a final
-screenshot in `android/build/demo/paired-status.png`.
+`demo-pairing.sh` reports one location fix with curl and taps Refresh.
+Recorded to `android/build/demo/pairing-demo.mp4`.
 
 ## Connecting to a backend
 

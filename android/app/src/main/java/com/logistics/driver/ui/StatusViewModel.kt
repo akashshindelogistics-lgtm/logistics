@@ -7,6 +7,7 @@ import com.logistics.driver.data.Pairing
 import com.logistics.driver.data.PairingRepository
 import com.logistics.driver.data.StatusStore
 import com.logistics.driver.data.SyncStatus
+import com.logistics.driver.domain.FlushOutcome
 import com.logistics.driver.net.DriverMe
 import com.logistics.driver.net.describeApiError
 import com.logistics.driver.tracking.TrackingControl
@@ -14,6 +15,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -50,6 +57,17 @@ class StatusViewModel(
 
     init {
         refresh()
+        // "Last position" comes from GET /api/driver/me, so ask again after
+        // each upload that moved the vehicle; otherwise it says "No position
+        // yet" while the sync row says the position was reported. drop(1)
+        // skips the state stored from before this screen opened.
+        statusStore.status
+            .map { if (it.lastOutcome == FlushOutcome.OK) it.lastSyncAt else null }
+            .distinctUntilChanged()
+            .drop(1)
+            .filterNotNull()
+            .onEach { refresh() }
+            .launchIn(viewModelScope)
     }
 
     fun refresh() {
