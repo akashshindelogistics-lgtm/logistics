@@ -1077,12 +1077,59 @@
    over from the Expo app in a mapping table. Also covers OEM battery
    killers, debug-only cleartext to 10.0.2.2, the testing plan and the
    one-time Android Studio/SDK/emulator setup (Studio is downloaded but not
-   yet extracted; KVM is available). Open questions: sideload vs Play
-   testing, hosted HTTPS backend, a GET /api/driver/me endpoint.
-** TODO Phase 2: project skeleton under android/ - Gradle (Kotlin DSL), pairing screen (token + server URL, stored encrypted), status screen (sharing toggle, queued count, last sync, unpair); ./gradlew assembleDebug builds and the app runs on an emulator
-** TODO Phase 3: background reporting - foreground service with a persistent notification, a fix every 30s/50m, validation, Room queue, batched upload, 401/403/409 keep the queue, "tap to resume" notification after reboot, battery-optimisation guidance
-** TODO Phase 4: tests - JVM unit tests (validation, queue, batching, API client against MockWebServer), a Compose UI test for pairing, an end-to-end run on the emulator against the local backend (10.0.2.2:8080) that moves a vehicle on the dashboard map, plus a recorded demo
-** TODO Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideload APK or Play internal testing), CI job that builds the APK
+   yet extracted; KVM is available). Decided afterwards: drivers install a
+   signed APK directly (no Play Store), and the backend gains
+   GET /api/driver/me for the pairing and status screens (PR #78). Still open: the
+   hosted HTTPS backend a real phone needs.
+** DONE Phase 2: project skeleton under android/ - Gradle (Kotlin DSL), pairing screen (token + server URL, stored encrypted), status screen (sharing toggle, queued count, last sync, unpair); ./gradlew assembleDebug builds and the app runs on an emulator
+   As built: [[file:docs/android-driver-app.md]] ("Phase 2 as built") and
+   [[file:android/README.md]]. AGP 9.4.1 / Gradle 9.6.0 (what this Studio
+   generates), Kotlin 2.4.20, Compose BOM 2026.09.00, compileSdk 37,
+   targetSdk 36, minSdk 26, single :app module, no navigation library or
+   DI framework. Pairing validates the address (https only; debug also
+   http to 10.0.2.2/localhost) and the token (UUID), then saves only after
+   GET /api/driver/me accepts it. Token encrypted with an Android Keystore
+   AES-GCM key in DataStore. Status screen shows name, org, active state,
+   vehicle and last position from /api/driver/me, with refresh, unpair
+   (confirmed) and app version; the sharing switch is a stub until phase 3.
+   19 JVM unit tests (parsing, OkHttp client vs MockWebServer, error
+   messages, repository, pair view model), lint clean.
+   `android/scripts/demo-pairing.sh` seeds a driver on the local backend,
+   pairs on the emulator over adb and records the run.
+** DONE Phase 3: background reporting - foreground service with a persistent notification, a fix every 30s/50m, validation, Room queue, batched upload, 401/403/409 keep the queue, "tap to resume" notification after reboot, battery-optimisation guidance
+   As built: [[file:docs/android-driver-app.md]] ("Phase 3 as built").
+   LocationService (foreground, type location) with a Stop action; fused
+   location at HIGH accuracy (not balanced as planned: balanced never turns
+   GPS on), 30 s / 50 m. Fixes validated with the server's rules, queued in
+   Room (cap 2000), uploaded in batches of 100 by LocationReporter; a failed
+   batch always stays queued. FlushWorker (WorkManager, network constraint,
+   exponential backoff) retries network/5xx only. BootReceiver posts "tap to
+   resume" after a reboot or app update; the status screen warns when sharing
+   is on but stopped. Battery-optimisation dialog (once) and card, with
+   per-brand steps. Unpair discards the queue. 43 JVM unit tests, lint clean.
+   Checked on the emulator against the local backend: permissions, fixes
+   moving the vehicle, offline queueing and automatic upload on reconnect,
+   resume after an app update, Stop from the notification.
+** DONE Phase 4: tests - JVM unit tests (validation, queue, batching, API client against MockWebServer), a Compose UI test for pairing, an end-to-end run on the emulator against the local backend (10.0.2.2:8080) that moves a vehicle on the dashboard map, plus a recorded demo
+   As built: [[file:docs/android-driver-app.md]] ("Phase 4 as built").
+   Instrumented tests in app/src/androidTest: 5 Room DAO tests on a real
+   SQLite queue and 3 Compose tests of the pairing flow against a
+   MockWebServer on the device (connectedDebugAndroidTest). 45 JVM unit
+   tests. `android/scripts/demo-tracking.sh` pairs on the emulator, feeds
+   positions with adb emu geo fix, checks GET /api/vehicles after each, cuts
+   the network to check offline queueing and catch-up upload, and records
+   the run (android/build/demo/tracking-demo.webm). The demo found a bug, now
+   fixed: "Last position" stayed "No position yet" after uploads. CI moved
+   to phase 5.
+** DONE Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideloading the signed APK, "Install unknown apps", Play Protect warning), versionCode bump per release, keystore backed up outside git, CI job that builds the APK
+   As built: [[file:docs/android-driver-app.md]] ("Phase 5 as built") and
+   [[file:docs/android-driver-install.md]]. Release signing from env vars;
+   scripts/make-release-keystore.sh (once, outside the repo) and
+   scripts/build-release.sh (tests, lint, signed APK, certificate checked
+   against android/release-cert.sha256). New icon (white pin and road on
+   black). CI: .github/workflows/android.yml. Still to do by hand: create
+   the real release keystore, back it up, build the first release and commit
+   release-cert.sha256.
 ** TODO Phase 6: retire mobile/ once the native app is verified on a real phone - delete the Expo app, update README, docs/driver-phone-tracking.md and the driver tracking Phase 4 note
 * TODO [#B] New-organisation onboarding flow - guided setup so a new org can reach its first dispatch, instead of landing on empty pages
   Plan written: [[file:docs/onboarding.md]]

@@ -80,7 +80,7 @@ All of this is already built and tested. See "Phase 1 as built" in
 
 | Concern | Expo app (`mobile/src/lib/`) | Native app |
 | --- | --- | --- |
-| Fix interval | 30 s / 50 m, balanced accuracy | Same, via `LocationRequest` (`PRIORITY_BALANCED_POWER_ACCURACY`, `setMinUpdateDistanceMeters(50f)`) |
+| Fix interval | 30 s / 50 m, balanced accuracy | 30 s / 50 m via `LocationRequest`, high accuracy (see "Phase 3 as built") |
 | Validation | `validation.ts` | `FixValidator.kt`, same rules and messages, same test cases |
 | Queue cap | 2000, drop oldest | Same, in Room |
 | Batch size | 100 oldest first | Same |
@@ -107,7 +107,7 @@ comment naming the Rust constant each one mirrors, as `config.ts` does now.
 | Settings / status | Jetpack DataStore | Small key-value state the UI observes as a `Flow` |
 | Token at rest | AES-GCM key in Android Keystore, ciphertext in DataStore | `EncryptedSharedPreferences` (security-crypto) is deprecated |
 | DI | Manual (one `AppContainer`) | Too small for Hilt to pay for itself |
-| SDK levels | `compileSdk` / `targetSdk` 36, `minSdk` 26 (Android 8.0) | Google Play requires target 36 for new apps and updates from 31 Aug 2026; 26 covers practically every phone in use |
+| SDK levels | `targetSdk` 36, `minSdk` 26 (Android 8.0); `compileSdk` 37 (latest installed, as of phase 2) | Google Play requires target 36 for new apps and updates from 31 Aug 2026; 26 covers practically every phone in use |
 | Build | Gradle Kotlin DSL, version catalog `gradle/libs.versions.toml`, single `:app` module | Versions in one place; exact versions are pinned when the skeleton is created in phase 2 |
 | Package id | `com.logistics.driver` (same as the Expo app) | The Expo app was never published, so nothing is lost by reusing it |
 | Location in repo | `android/` at the repo root, next to `frontend/` and `mobile/` | `mobile/` is deleted in phase 6 |
@@ -222,11 +222,13 @@ rules are unit-tested as plain Kotlin, the same split `mobile/src/lib/` uses.
 ## Development setup on this machine
 
 Android Studio is downloaded (`~/Downloads/android-studio-rabbit1-linux.tar.gz`)
-but not yet installed. One-time setup:
+and extracted to `~/Downloads/android-studio` (build 262.9437, bundled JDK 25
+in `jbr/`). Steps 1-3 are done as of phase 2: the SDK at `~/Android/Sdk` has
+platforms 36 and 37, build-tools 36.0.0, and a `Medium_Phone_API_37.0` emulator
+(API 37, Google APIs with Play Store, x86_64).
 
-1. `tar -xzf ~/Downloads/android-studio-rabbit1-linux.tar.gz -C ~` and run
-   `~/android-studio/bin/studio.sh`. On this i3/X desktop, run it with
-   `XDG_SESSION_TYPE=x11 DISPLAY=:0` if it doesn't open.
+1. Run `~/Downloads/android-studio/bin/studio.sh`. On this i3/X desktop, run it
+   with `XDG_SESSION_TYPE=x11 DISPLAY=:0` if it doesn't open.
 2. In the setup wizard, accept the default SDK location (`~/Android/Sdk`).
    Then in SDK Manager install:
    - Android SDK Platform 36;
@@ -243,7 +245,7 @@ but not yet installed. One-time setup:
 
    ```sh
    export ANDROID_HOME=$HOME/Android/Sdk
-   export JAVA_HOME=$HOME/android-studio/jbr   # JDK bundled with Studio
+   export JAVA_HOME=$HOME/Downloads/android-studio/jbr   # JDK bundled with Studio
    export PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
    ```
 
@@ -278,20 +280,227 @@ but not yet installed. One-time setup:
    - update README, [driver-phone-tracking.md](driver-phone-tracking.md) and
      the driver tracking phase 4 note in `todo.org`.
 
+## Phase 2 as built
+
+`android/`; see [android/README.md](../android/README.md) for building,
+testing and the demo.
+
+- **Toolchain:** AGP 9.4.1 and Gradle 9.6.0, the versions this Android Studio
+  release generates (already cached here). AGP 9 compiles Kotlin itself, so
+  there's no `kotlin-android` plugin. Kotlin 2.4.20 drives the Compose
+  compiler and serialization plugins. Library versions are the latest stable
+  as of 8 Oct 2026, pinned in `gradle/libs.versions.toml`. `compileSdk` is 37
+  (installed) and `targetSdk` stays 36. Lint flags 36 as old; revisit after
+  testing the phase 3 location service on the API 37 emulator.
+- **No navigation library:** the pairing state decides the screen. No pairing
+  shows Pairing, a pairing shows Status, and unpairing returns to Pairing.
+- **Pairing:**
+  - The server address is normalised: trimmed, scheme lower-cased, trailing
+    `/` dropped. It must be `https://`, except debug builds also accept
+    `http://`, which their network security config only allows for
+    10.0.2.2, localhost and 127.0.0.1.
+  - The token must be a UUID; a pasted `Bearer ` prefix is tolerated.
+  - Then `GET /api/driver/me` is called, and the pairing is saved only if it
+    succeeds. A typo shows "This device token wasn't recognised" or "Can't
+    reach the server" on the spot.
+- **Storage:** the server address and the token, encrypted with an AES-GCM
+  Android Keystore key, live in Preferences DataStore. A token that no longer
+  decrypts counts as unpaired.
+- **Status screen:**
+  - from `/api/driver/me`: name, org, Active/Inactive, vehicle (or "None
+    assigned" with a hint) and the time of its last position;
+  - Refresh, Unpair (with a confirmation dialog), server address and app
+    version;
+  - "Queued fixes 0" and "Last sync: Not yet" as placeholders for phase 3;
+  - the "Share my location" switch only records the choice for now. It's
+    disabled for an inactive driver or one with no vehicle.
+- **Release-safety settings:** no OkHttp logging (the Authorization header
+  carries the token), `allowBackup="false"` plus data-extraction rules that
+  exclude everything, and the `INTERNET` permission only (location
+  permissions come with phase 3).
+- **UI tags:** test tags are exposed as resource ids (`testTagsAsResourceId`),
+  so UI Automator and the adb-driven demo can find fields.
+- **Tests:** 19 JVM unit tests:
+  - server-address and token parsing;
+  - `OkHttpDriverApi` against MockWebServer (request path and header,
+    parsing including unknown fields, inactive/no-vehicle, 401 with the
+    server's message, non-JSON 502, no server at all);
+  - `describeApiError`;
+  - `PairingRepository` (saves only on success);
+  - `PairViewModel` (field errors never call the server, normalised values
+    saved, server rejection shown and not saved, editing clears the error).
+
+  Lint is clean apart from the `targetSdk` and newer-Gradle notices.
+  Instrumented and Compose UI tests are phase 4.
+- **Demo:** `android/scripts/demo-pairing.sh` (see the README).
+
+## Phase 3 as built
+
+- **`LocationService`:** foreground service of type `location`, started only
+  from the status screen (switch, Resume button, or the resume notification
+  opening the app). Its notification is silent and ongoing, opens the app on
+  tap, and has a Stop action that also turns the switch off.
+- **Accuracy (changed from the plan):** `PRIORITY_HIGH_ACCURACY`, not
+  balanced. Checked on the emulator: with balanced priority the fused
+  provider never turns GPS on and relies on Wi-Fi and cell positioning,
+  which on a highway is hundreds of metres off or more. At one fix per 30 s
+  or 50 m the battery cost is modest, and a phone in a truck cab is usually
+  charging. Interval and distance are unchanged.
+- **Queue:** Room table `queued_fix` (`data/FixQueue.kt`). Enqueue and
+  trimming to 2000 run in one transaction; the oldest 100 are sent per
+  request and removed by id only after a `200`.
+- **`LocationReporter`** (`data/`): `ingest` validates a fix with
+  `domain/Fix.kt` (same rules and messages as `validate_driver_fix`) and
+  queues it; `flush` uploads batch after batch until the queue is empty or a
+  batch fails. A failed batch always stays queued. A mutex stops the service,
+  the worker and Sync now from sending the same batch twice.
+- **Outcomes** (`domain/FlushOutcome.kt`): only network errors and 5xx are
+  retried. 401/403/409/400 show a specific message and wait for the next
+  fix or Sync now.
+- **`FlushWorker`:** unique WorkManager job `flush-queue` with a network
+  constraint and exponential backoff from 30 s. Each fix schedules it with
+  `KEEP` (so a fix every 30 s doesn't reset the backoff); Sync now uses
+  `REPLACE`.
+- **Restarts:** `BootReceiver` handles `BOOT_COMPLETED` and
+  `MY_PACKAGE_REPLACED`. If sharing was on it posts "Tap to resume", and it
+  schedules an upload of anything still queued. A sticky restart that
+  Android refuses to run in the foreground does the same. The status screen
+  shows "Sharing is switched on but stopped" with a Resume button whenever
+  the switch is on and the service isn't running.
+- **Permissions:** turning sharing on asks for fine and coarse location
+  ("while using the app") and, on Android 13+, notifications. Only location
+  is required. Refusing shows where to allow it in Settings.
+- **Battery:** the first time sharing starts while the app is
+  battery-optimised, a dialog explains why that matters and opens the
+  optimisation list. While sharing is on and the app is still optimised, a
+  card on the status screen repeats the advice. Both add the steps for
+  the phone's brand (`domain/BatteryAdvice.kt`: Xiaomi/Redmi/Poco,
+  Vivo/iQOO, Oppo/Realme/OnePlus, Samsung, Huawei/Honor).
+- **Status screen:** queued fix count, last fix, last sync and its message
+  (red on failure), and Sync now (enabled when there's something queued).
+- **Unpair** stops the service and discards the queue and sync history:
+  those fixes belong to the old pairing.
+- **Tests:** 43 JVM unit tests. The 24 new ones cover the validator (every
+  case from the Expo app plus exact messages), outcome classification, brand
+  advice, `LocationReporter` against in-memory fakes (cap, batches of 100,
+  stale, failure keeps the batch, reset), and `reportLocation` against
+  MockWebServer. Room DAO, Compose UI and the recorded end-to-end demo are
+  phase 4.
+- **Checked by hand on the API 37 emulator** against `cargo run`: the
+  permission prompts, the battery dialog, `adb emu geo fix` positions moving
+  the vehicle on the backend, offline queueing with the network off and
+  automatic upload when it came back, the resume notification and Resume
+  after reinstalling, and Stop from the notification.
+
+## Phase 4 as built
+
+- **JVM unit tests (45):** the testing plan's unit cases were already in
+  phase 3. New: `StatusViewModelTest`, which checks that the status screen
+  asks `GET /api/driver/me` again after an upload that moved the vehicle.
+- **Instrumented tests** (`app/src/androidTest`, run with
+  `./gradlew connectedDebugAndroidTest`):
+  - `FixDaoTest`, 5 tests on the real Room queue (in-memory database): every
+    field round-trips, the cap drops the oldest, oldest-first batches, removal
+    by id spares fixes queued during an upload, and clear.
+  - `PairingFlowTest`, 3 tests on the running app with a MockWebServer on the
+    phone: an empty token and a bad address are rejected without a request; a
+    valid pairing (with a pasted `Bearer ` prefix and upper case) opens the
+    status screen and sends the normalised header; a `401` keeps the pairing
+    screen and stores nothing.
+  - The first test after the emulator boots waits up to 20 s for the app.
+    Its first launch (Keystore key, DataStore, Compose warm-up) took over 5 s
+    on the API 37 emulator.
+- **End to end:** `android/scripts/demo-tracking.sh` runs steps 1-6 of the
+  plan and checks the backend at each one. Two changes from the plan:
+  - It records with the emulator's own recorder (`adb emu screenrecord`,
+    webm on the host), because `adb shell screenrecord` stops at 180 s and
+    the run takes about 3 minutes.
+  - It grants permissions over adb and exempts the app from battery
+    optimisation, so no system dialog interrupts the run. Both prompts were
+    checked by hand in phase 3.
+
+  The shared steps moved from `demo-pairing.sh` to `scripts/lib.sh`, and both
+  demos take `API_PORT` for when another checkout holds 8080.
+- **Checked at each layer:** after each position the demo compares the API
+  (`GET /api/vehicles`) and the `Vehicle` row in MySQL, during the offline
+  stretch too. At the end, a headed Playwright demo
+  (`frontend/tests/driver-tracking.demo.ts`, also runnable on its own) signs
+  in as the seeded org and finds the final position on the fleet map, in the
+  Vehicles table and on the vehicle's page.
+- **Bug found by the demo:** after uploads the status screen still said
+  "Last position: No position yet", because `/api/driver/me` was only read
+  when the screen opened. `StatusViewModel` now reads it again after each
+  upload with outcome `OK`.
+- **CI** moves to phase 5 with the release build job.
+
+## Phase 5 as built
+
+- **Signing:** `app/build.gradle.kts` signs release builds from
+  `DRIVER_KEYSTORE`, `DRIVER_KEYSTORE_PASSWORD` and optional `DRIVER_KEY_ALIAS`
+  / `DRIVER_KEY_PASSWORD`. Without them `assembleRelease` builds unsigned (CI).
+- **`scripts/make-release-keystore.sh`:** creates the key once (PKCS12, RSA
+  4096, 30 years, alias `driver`), by default at
+  `~/.config/logistics-driver/release.jks`. It refuses to overwrite a keystore
+  or to put one inside the repo, and reminds you to back it up.
+- **`scripts/build-release.sh`:** unit tests, `lintRelease`, signed
+  `assembleRelease` (without the configuration cache, so passwords aren't
+  cached), `apksigner verify`, then a check of the certificate against
+  `android/release-cert.sha256`. That file is written and committed with the
+  first real release; after that, an APK signed with any other key fails the
+  build, since drivers couldn't install it as an update. Output:
+  `android/build/release/logistics-driver-<versionName>.apk` and its SHA-256.
+  Tested with throwaway keys: first release, same key, and a different key
+  (refused). No real key has been made yet.
+- **Release build checked on the emulator:** with R8 on, the release APK
+  installs and opens the pairing screen. It can't pair with `cargo run`, since
+  release builds refuse `http://`, so the shrunk JSON and Room code is first
+  used for real with the hosted backend (open question below).
+- **Icon:** a white location pin on a stretch of road, on black. The
+  black-on-white pin was hard to find among the mostly white icons of a
+  launcher. The name stays "Logistics Driver" (shortened to "Logistics Dri…"
+  in the Pixel launcher), because the battery steps tell drivers to look for
+  that exact name in Settings.
+- **Install guide:** [android-driver-install.md](android-driver-install.md),
+  for the office and the driver: issuing a device token, sideloading, Play
+  Protect, pairing, permissions, per-brand battery settings, what the sync
+  messages mean, updating, and building a release. Until the dashboard has a
+  pairing panel, the office issues tokens with `curl`.
+- **CI:** `.github/workflows/android.yml` runs `testDebugUnitTest lintDebug
+  assembleDebug assembleRelease` on JDK 21 when `android/**` changes, and
+  uploads the debug APK. Not yet seen running on GitHub.
+
+## Decisions
+
+- **Distribution: signed APK installed directly (sideloaded).** There's no
+  Play Store listing and no Play developer account. What follows from that:
+  - **Signing key:** the release keystore must never be lost. Android
+    installs an update over the old app only if it's signed with the same
+    key; with a new key every driver would have to uninstall first, losing
+    the pairing and any queued fixes. Keep the keystore and its passwords
+    outside git, with a backup.
+  - **Updates are manual:** a driver installs a newer APK over the old one.
+    `versionCode` must go up on every release, and the status screen shows
+    the app version so the office can tell who is out of date.
+  - **The install guide** covers allowing "Install unknown apps" for the
+    browser or file manager used, and what to do if Play Protect warns about
+    an app from outside the Play Store.
+  - Since Play policy no longer applies, the "no `ACCESS_BACKGROUND_LOCATION`"
+    decision above rests on keeping driver setup simple, not on Play review.
+- **`GET /api/driver/me` is added to the backend.** It's authenticated by the
+  device token, like `POST /api/driver/location`, and returns the driver's
+  name and their assigned vehicle (or none). The app uses it:
+  - on the pairing screen, to check the token and server address before
+    saving them, then show "Paired as <name>";
+  - on the status screen, to show the driver and vehicle before the first
+    upload, and to show "No vehicle assigned" up front instead of only after
+    a `409`.
+
 ## Open questions
 
-- **Distribution:** sideload a signed APK (no review, fastest for one fleet),
-  or Google Play internal or closed testing (auto-updates, but needs a Play
-  developer account)? The plan assumes sideloading first.
 - **Hosted backend:** a real phone needs a public HTTPS server address. This
   waits on the "deploy frontend and backend on hosted platform" item in
   `todo.org`. Until then, real-phone testing runs over USB with
   `adb reverse tcp:8080 tcp:8080` (the phone then uses
   `http://localhost:8080`, allowed in debug builds).
-- **Who-am-I endpoint:** the status screen learns the vehicle only after the
-  first upload. A `GET /api/driver/me` authenticated by the device token
-  would show the driver's name and vehicle straight after pairing. It's a
-  small backend addition, worth doing with phase 2 or the dashboard pairing
-  panel.
 - **Shift hours:** should sharing switch itself off after a set time (for
   example 14 h) in case the driver forgets? Not in v1.

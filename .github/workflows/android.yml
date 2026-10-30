@@ -1,0 +1,75 @@
+name: Android Driver App
+
+# Builds and tests the driver app in android/ when it changes. Like the other
+# workflows, it runs on a push to any branch; the pull_request trigger is kept
+# only for forks, which can't trigger `push` on this repo. Instrumented tests
+# and the emulator demo stay local (android/README.md): emulators on hosted
+# runners are slow and flaky.
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Unit tests, lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The runner's SDK may not have platform 37 yet; AGP doesn't always
+      # fetch it on its own.
+      - name: Install Android SDK platform
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;36.0.0" >/dev/null
+
+      # Without DRIVER_KEYSTORE the release APK is built unsigned; this checks
+      # that R8 shrinking still succeeds. Signed releases are built locally
+      # with scripts/build-release.sh, so the key never leaves that machine.
+      - name: Unit tests, lint and build
+        run: ./gradlew --console=plain testDebugUnitTest lintDebug assembleDebug assembleRelease
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: logistics-driver-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      - name: Upload test and lint reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          path: |
+            android/app/build/reports/
+            android/app/build/test-results/
+          retention-days: 7

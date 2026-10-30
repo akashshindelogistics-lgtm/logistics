@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A location pin over a stretch of road, in the 108dp adaptive-icon canvas
+     (the inner 66dp, 21-87, is the safe zone every launcher mask keeps). White
+     on the black background, so it stands out on a home screen of mostly
+     white icons; the same shape is the monochrome (themed) icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Road: a band narrowing towards the horizon, with a centre dash. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.45"
+        android:pathData="M30,82L43,64L65,64L78,82Z" />
+    <path
+        android:fillColor="#111111"
+        android:pathData="M52.6,68h2.8v4h-2.8zM52,75h4v5h-4z" />
+    <!-- Pin, its tip on the road. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,24C45.2,24 38,31.2 38,40C38,52 54,68 54,68C54,68 70,52 70,40C70,31.2 62.8,24 54,24ZM54,46.5C50.4,46.5 47.5,43.6 47.5,40C47.5,36.4 50.4,33.5 54,33.5C57.6,33.5 60.5,36.4 60.5,40C60.5,43.6 57.6,46.5 54,46.5Z" />
+</vector>
