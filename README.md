@@ -8,6 +8,8 @@
 
 [![Rust Lint](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/rust-lint.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/rust-lint.yml)
 
+[![Android Driver App](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/android.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/android.yml)
+
 [![Pages — Deploy Frontend + Swagger UI](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml)
 
 [![Release](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml)
