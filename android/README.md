@@ -1,5 +1,7 @@
 # Logistics Driver (Android)
 
+[![Android Driver App](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/android.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/android.yml)
+
 A native Kotlin app for the driver's phone. It pairs with a driver using a
 device token and reports the phone's location, so the driver's
 assigned vehicle moves on the dispatch map without a hardware GPS tracker.
