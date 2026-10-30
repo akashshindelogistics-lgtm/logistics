@@ -28,7 +28,9 @@ json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
 # ── Backend ──────────────────────────────────────────────────────────────────
 BACKEND_PID=""
-cleanup_backend() { [ -n "$BACKEND_PID" ] && kill "$BACKEND_PID" 2>/dev/null || true; }
+# The whole process group: killing only `cargo run` would leave the server
+# it started running, holding the port.
+cleanup_backend() { [ -n "$BACKEND_PID" ] && kill -- -"$BACKEND_PID" 2>/dev/null || true; }
 
 # Use the backend on $API_PORT, or start this checkout's if nothing answers.
 start_backend() {
@@ -41,7 +43,8 @@ start_backend() {
         return
     fi
     echo "Not running; starting it with cargo run (first build can take a few minutes)"
-    (cd "$ROOT" && PORT=$API_PORT cargo run --bin logistics-system >"$OUT/backend.log" 2>&1) &
+    # In its own process group, so cleanup_backend can stop cargo and the server.
+    (cd "$ROOT" && PORT=$API_PORT exec setsid cargo run --bin logistics-system >"$OUT/backend.log" 2>&1) &
     BACKEND_PID=$!
     for _ in $(seq 1 300); do curl -sf "$API/api/health" >/dev/null && break; sleep 1; done
     curl -sf "$API/api/health" >/dev/null || { echo "Backend didn't start; see $OUT/backend.log"; exit 1; }
