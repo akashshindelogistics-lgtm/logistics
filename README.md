@@ -44,7 +44,10 @@ operations, live location maps, and AI-generated dispatch summaries.
 - **Drivers** — keep driver records (name, licence number, phone) per
   organization and assign one to a vehicle from the dashboard. A vehicle
   needs an **active** assigned driver, spare capacity, and no trip already
-  in progress before it can be selected for a dispatch.
+  in progress before it can be selected for a dispatch. Each driver's page
+  also hands out the Android driver app (`android/`): a download link and QR
+  code served by this backend, plus the server address to pair with; the app
+  offers newer releases itself.
 - **Vehicle vendors and hired trucks** — keep a directory of the transporters
   and brokers an organization phones to hire a truck when it has none of its
   own free (name, contact, phone, GSTIN, notes, active flag). A dispatch or
@@ -195,6 +198,11 @@ export RESEND_FROM_EMAIL="dispatch@yourdomain.com"
 # on disk — see docs/file-uploads.md. Defaults to ./uploads.
 export UPLOAD_DIR="./uploads"
 
+# Optional: where the published Android driver app release is kept (latest.json
+# + the APK, written by android/scripts/publish-apk.sh). Defaults to
+# $UPLOAD_DIR/driver-app.
+export DRIVER_APP_DIR="./uploads/driver-app"
+
 cargo run
 ```
 
@@ -311,6 +319,8 @@ All routes are served under the `/api` prefix.
 | PUT/DELETE | `/api/drivers/{id}` | Update (incl. active flag) or remove a driver |
 | POST | `/api/drivers/{id}/device-token/rotate` | Pair (or re-pair) a driver's phone: issue a device token, shown once; the previous one stops working (Admin/Dispatcher) |
 | POST | `/api/driver/location` | Driver phone push, authenticated by the device token (`Authorization: Bearer <token>`, not an org login): batched `{fixes: [{latitude, longitude, recorded_at, accuracy_m?, speed_mps?}]}` moves the driver's assigned vehicle to the newest fix; older fixes never move it backwards |
+| GET | `/api/driver-app/latest` | The Android driver app release published on this server (version, size, SHA-256, download path), or `404` if none — no login; the app checks it to offer updates |
+| GET | `/api/driver-app/download` | The published driver app APK — no login; the same link for every release, so a QR code handed to drivers never goes stale |
 | GET | `/api/driver/me` | Who the phone is paired as, authenticated by the device token: driver name, organization, `is_active` and the assigned vehicle with its last position (`null` if none). `200` even for an inactive or unassigned driver, so the app can say why reports would be refused |
 | GET/POST | `/api/orgs/{id}/vendors` | List / add vehicle vendors (transporters the org hires trucks from) |
 | PUT/DELETE | `/api/vendors/{id}` | Update (incl. active flag) or remove a vehicle vendor (409 once it has hire history) |

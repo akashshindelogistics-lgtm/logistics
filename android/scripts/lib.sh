@@ -75,12 +75,13 @@ seed_driver() {
 }
 
 # ── App and emulator ─────────────────────────────────────────────────────────
+# Extra arguments go to Gradle, e.g. -Pdriver.versionCode=2.
 build_apk() {
-    step "Building the debug APK"
+    step "Building the debug APK${*:+ ($*)}"
     # No Gradle or Kotlin daemon left running afterwards: on a 16 GB machine
     # the emulator needs that memory, and starving it makes its watchdog kill it.
     "$ROOT/android/gradlew" -p "$ROOT/android" assembleDebug --console=plain -q \
-        --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+        --no-daemon -Pkotlin.compiler.execution.strategy=in-process "$@"
 }
 
 # Boot $AVD in a visible window unless a device is already attached.
@@ -110,10 +111,12 @@ boot_emulator() {
     "$ADB" shell input keyevent 82 >/dev/null 2>&1 || true   # wake / dismiss lock screen
 }
 
-# Install the APK just built and wipe the app's data, so it starts unpaired.
+# Install the APK just built, unpaired. Uninstalling first also clears the
+# way for a lower versionCode or another signature (a release build) left by
+# an earlier run.
 install_fresh() {
-    "$ADB" install -r "$ROOT/android/app/build/outputs/apk/debug/app-debug.apk" >/dev/null
-    "$ADB" shell pm clear "$PKG" >/dev/null
+    "$ADB" uninstall "$PKG" >/dev/null 2>&1 || true
+    "$ADB" install "$ROOT/android/app/build/outputs/apk/debug/app-debug.apk" >/dev/null
 }
 
 # ── Driving the UI over adb ──────────────────────────────────────────────────
@@ -134,6 +137,24 @@ print((x1 + x2) // 2, (y1 + y2) // 2)") || {
         echo "Screenshot of the screen at that moment: $OUT/failed-$1.png"
         return 1
     }
+    "$ADB" shell input tap $center
+}
+
+# Tap the first element whose text is exactly one of the arguments, for
+# screens that aren't ours (no test tags). Fails if none is on screen.
+tap_text() {
+    "$ADB" shell uiautomator dump /sdcard/ui.xml >/dev/null
+    local center
+    center=$("$ADB" shell cat /sdcard/ui.xml | python3 -c "
+import sys, re, xml.etree.ElementTree as ET
+wanted = sys.argv[1:]
+for node in ET.fromstring(sys.stdin.read()).iter('node'):
+    if node.get('text') in wanted:
+        x1, y1, x2, y2 = map(int, re.findall(r'\d+', node.get('bounds')))
+        print((x1 + x2) // 2, (y1 + y2) // 2)
+        break
+else:
+    sys.exit(1)" "$@") || return 1
     "$ADB" shell input tap $center
 }
 

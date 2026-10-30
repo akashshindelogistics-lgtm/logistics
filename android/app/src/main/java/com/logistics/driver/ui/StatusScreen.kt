@@ -1,7 +1,10 @@
 package com.logistics.driver.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -37,7 +40,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.logistics.driver.BuildConfig
+import com.logistics.driver.domain.AppUpdate
 import com.logistics.driver.domain.brandBatterySteps
+import com.logistics.driver.domain.formatMegabytes
 import com.logistics.driver.net.DriverMe
 import com.logistics.driver.tracking.LocationService
 import com.logistics.driver.tracking.batterySettingsIntent
@@ -63,6 +68,8 @@ fun StatusScreen(vm: StatusViewModel) {
     var batteryOptimised by remember { mutableStateOf(isBatteryOptimised(context)) }
     LifecycleResumeEffect(Unit) {
         batteryOptimised = isBatteryOptimised(context)
+        // Drivers leave the app running for days, so look again on each return.
+        vm.checkForUpdate()
         onPauseOrDispose { }
     }
 
@@ -107,6 +114,18 @@ fun StatusScreen(vm: StatusViewModel) {
 
         state.error?.let { ErrorCard(it, Modifier.testTag("status-error")) }
 
+        state.update?.let { update ->
+            UpdateCard(update, onDownload = {
+                // The browser downloads the APK and offers to install it over
+                // this one; pairing and queued fixes are kept.
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.downloadUrl)))
+                } catch (_: ActivityNotFoundException) {
+                    vm.onNoBrowser()
+                }
+            })
+        }
+
         me?.let { DriverCard(it) }
 
         SharingCard(
@@ -133,7 +152,10 @@ fun StatusScreen(vm: StatusViewModel) {
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
-                onClick = vm::refresh,
+                onClick = {
+                    vm.refresh()
+                    vm.checkForUpdate()
+                },
                 enabled = !state.loading,
                 modifier = Modifier.weight(1f).testTag("refresh-button"),
             ) { Text("Refresh") }
@@ -246,6 +268,24 @@ private fun BatteryCard(onOpenSettings: () -> Unit) {
             Text("Battery saver may stop sharing", style = MaterialTheme.typography.titleSmall)
             Text(batteryAdvice(), style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = onOpenSettings) { Text("Open battery settings") }
+        }
+    }
+}
+
+@Composable
+private fun UpdateCard(update: AppUpdate, onDownload: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth().testTag("update-card"),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Update available: version ${update.versionName}", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "You have ${BuildConfig.VERSION_NAME}. Download it (${formatMegabytes(update.sizeBytes)}) and " +
+                    "install it over this app; you stay paired and nothing queued is lost.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(onClick = onDownload, modifier = Modifier.testTag("download-update")) { Text("Download update") }
         }
     }
 }

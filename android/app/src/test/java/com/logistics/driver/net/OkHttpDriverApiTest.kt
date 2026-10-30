@@ -184,4 +184,39 @@ class OkHttpDriverApiTest {
         assertTrue(describeApiError(DriverApiException(404, "x")).contains("doesn't look like the logistics server"))
         assertEquals("The server returned an error (500): boom", describeApiError(DriverApiException(500, "boom")))
     }
+
+    @Test
+    fun `latestRelease needs no token and parses the release`() = runTest {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """
+                {"success":true,"message":"Driver app 0.2.0","data":{
+                  "version_code":2,"version_name":"0.2.0","sha256":"${"0f".repeat(32)}",
+                  "size_bytes":12345678,"released_at":1793000000,
+                  "file_name":"logistics-driver-0.2.0.apk","download_path":"/api/driver-app/download"}}
+                """.trimIndent(),
+            ),
+        )
+
+        val release = api.latestRelease(baseUrl())
+
+        assertEquals(AppRelease(2, "0.2.0", 12345678, "/api/driver-app/download"), release)
+        val request = server.takeRequest()
+        assertEquals("/api/driver-app/latest", request.path)
+        assertNull(request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `latestRelease is null when nothing is published, and throws on other errors`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{"success":false,"message":"No release","data":null}"""))
+        assertNull(api.latestRelease(baseUrl()))
+
+        server.enqueue(MockResponse().setResponseCode(500).setBody("""{"success":false,"message":"bad manifest","data":null}"""))
+        try {
+            api.latestRelease(baseUrl())
+            fail("expected DriverApiException")
+        } catch (e: DriverApiException) {
+            assertEquals(500, e.status)
+        }
+    }
 }

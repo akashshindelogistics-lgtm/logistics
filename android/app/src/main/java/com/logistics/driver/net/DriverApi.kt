@@ -73,6 +73,18 @@ data class LocationReportResult(
 )
 
 /**
+ * `GET /api/driver-app/latest`: the app release published on the server.
+ * [downloadPath] is the same for every release, relative to the server address.
+ */
+@Serializable
+data class AppRelease(
+    @SerialName("version_code") val versionCode: Int,
+    @SerialName("version_name") val versionName: String,
+    @SerialName("size_bytes") val sizeBytes: Long,
+    @SerialName("download_path") val downloadPath: String,
+)
+
+/**
  * A failed API call. [status] is the HTTP status, or [NETWORK_ERROR] when no
  * response arrived at all (offline, DNS, TLS, timeout).
  */
@@ -82,12 +94,15 @@ class DriverApiException(val status: Int, message: String) : Exception(message) 
     }
 }
 
-/** The backend calls the app makes, all authenticated by the device token. */
+/** The backend calls the app makes; all but [latestRelease] are authenticated by the device token. */
 interface DriverApi {
     suspend fun me(baseUrl: String, deviceToken: String): DriverMe
 
     /** Upload 1-[com.logistics.driver.Config.MAX_FIXES_PER_REQUEST] fixes, oldest first. */
     suspend fun reportLocation(baseUrl: String, deviceToken: String, fixes: List<LocationFixDto>): LocationReportResult
+
+    /** The app release published on the server, or `null` if there is none (`404`). */
+    suspend fun latestRelease(baseUrl: String): AppRelease?
 }
 
 class OkHttpDriverApi(
@@ -108,9 +123,16 @@ class OkHttpDriverApi(
         return call(Request.Builder().url("$baseUrl/api/driver/location").post(body), deviceToken)
     }
 
-    /** Send [builder] with the device token and unwrap the `{ success, message, data }` envelope. */
-    private suspend inline fun <reified T> call(builder: Request.Builder, deviceToken: String): T = withContext(io) {
-        val request = builder.header("Authorization", "Bearer $deviceToken").build()
+    override suspend fun latestRelease(baseUrl: String): AppRelease? = try {
+        call(Request.Builder().url("$baseUrl/api/driver-app/latest").get(), deviceToken = null)
+    } catch (e: DriverApiException) {
+        if (e.status == 404) null else throw e
+    }
+
+    /** Send [builder] with the device token, if any, and unwrap the `{ success, message, data }` envelope. */
+    private suspend inline fun <reified T> call(builder: Request.Builder, deviceToken: String?): T = withContext(io) {
+        deviceToken?.let { builder.header("Authorization", "Bearer $it") }
+        val request = builder.build()
 
         val (status, body) = try {
             client.newCall(request).execute().use { it.code to it.body.string() }

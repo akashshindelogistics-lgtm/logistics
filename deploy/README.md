@@ -109,8 +109,10 @@ After the first release publishes the image, either:
 
 MySQL data lives in the `db-data` Docker volume on the VM; uploaded files
 (e.g. proof-of-delivery photos — see `docs/file-uploads.md`) live in
-`uploads-data`, mounted at `/app/uploads` in the `api` container. A minimal
-daily dump of the database:
+`uploads-data`, mounted at `/app/uploads` in the `api` container. So does the
+published Android driver app (`/app/uploads/driver-app`: the APK and
+`latest.json`; see "Building a release" in `docs/android-driver-install.md`).
+A minimal daily dump of the database:
 ```bash
 mkdir -p ~/backups
 ( crontab -l 2>/dev/null; echo '15 2 * * * cd ~/logistics-deploy && docker compose --env-file .env exec -T db sh -c "mysqldump -uroot -p\$MYSQL_ROOT_PASSWORD \$MYSQL_DATABASE" | gzip > ~/backups/logistics-$(date +\%F).sql.gz && find ~/backups -name "*.sql.gz" -mtime +14 -delete' ) | crontab -

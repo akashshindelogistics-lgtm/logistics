@@ -1,5 +1,6 @@
 package com.logistics.driver.data
 
+import com.logistics.driver.net.AppRelease
 import com.logistics.driver.net.DriverApi
 import com.logistics.driver.net.DriverMe
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +25,9 @@ class PairingRepository(
 
     /** Who the saved pairing belongs to, fresh from the server. */
     suspend fun whoAmI(pairing: Pairing): DriverMe = api.me(pairing.serverUrl, pairing.deviceToken)
+
+    /** The app release published on the paired server, or `null` if none. */
+    suspend fun latestRelease(pairing: Pairing): AppRelease? = api.latestRelease(pairing.serverUrl)
 
     suspend fun unpair() = store.clear()
 }

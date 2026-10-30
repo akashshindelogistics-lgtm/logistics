@@ -6,7 +6,10 @@ import com.logistics.driver.data.LocationReporter
 import com.logistics.driver.data.Pairing
 import com.logistics.driver.data.PairingRepository
 import com.logistics.driver.data.StatusStore
+import com.logistics.driver.BuildConfig
 import com.logistics.driver.data.SyncStatus
+import com.logistics.driver.domain.AppUpdate
+import com.logistics.driver.domain.appUpdate
 import com.logistics.driver.domain.FlushOutcome
 import com.logistics.driver.net.DriverMe
 import com.logistics.driver.net.describeApiError
@@ -39,6 +42,8 @@ data class StatusUiState(
     val syncing: Boolean = false,
     /** Why sharing couldn't start (location permission refused). */
     val sharingError: String? = null,
+    /** A newer app release published on the server. */
+    val update: AppUpdate? = null,
 )
 
 class StatusViewModel(
@@ -47,6 +52,7 @@ class StatusViewModel(
     private val reporter: LocationReporter,
     private val statusStore: StatusStore,
     private val tracking: TrackingControl,
+    private val installedVersionCode: Int = BuildConfig.VERSION_CODE,
 ) : ViewModel() {
     private val local = MutableStateFlow(StatusUiState(serverUrl = pairing.serverUrl))
 
@@ -57,6 +63,7 @@ class StatusViewModel(
 
     init {
         refresh()
+        checkForUpdate()
         // "Last position" comes from GET /api/driver/me, so ask again after
         // each upload that moved the vehicle; otherwise it says "No position
         // yet" while the sync row says the position was reported. drop(1)
@@ -86,6 +93,18 @@ class StatusViewModel(
     }
 
     /**
+     * Look for a newer app release on the server. Quietly does nothing on
+     * failure: an older server without the endpoint, or no network, mustn't
+     * get in the way of sharing.
+     */
+    fun checkForUpdate() {
+        viewModelScope.launch {
+            val release = runCatching { repository.latestRelease(pairing) }.getOrNull()
+            local.update { it.copy(update = appUpdate(release, installedVersionCode, pairing.serverUrl)) }
+        }
+    }
+
+    /**
      * Turn sharing on and start the service. Call only once location
      * permission is granted, and from a tap: Android only lets a location
      * service start while the app is on screen.
@@ -99,6 +118,10 @@ class StatusViewModel(
     fun stopSharing() {
         tracking.stop()
         viewModelScope.launch { statusStore.setSharing(false) }
+    }
+
+    fun onNoBrowser() = local.update {
+        it.copy(error = "No browser to download the update with. Open ${it.update?.downloadUrl} on this phone.")
     }
 
     fun onLocationPermissionDenied() = local.update {

@@ -500,6 +500,24 @@ impl Drop for TestDb {
     }
 }
 
+/// A fresh directory under the system temp dir, removed when dropped. For
+/// tests of code that reads files, like the driver app release directory.
+pub struct TempDir(pub std::path::PathBuf);
+
+impl TempDir {
+    pub fn create() -> Self {
+        let dir = std::env::temp_dir().join(format!("logistics-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        TempDir(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

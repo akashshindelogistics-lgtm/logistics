@@ -36,6 +36,7 @@ mod auth;
 mod billing;
 mod customers;
 mod dispatches;
+mod driver_app;
 mod drivers;
 mod godowns;
 mod health;

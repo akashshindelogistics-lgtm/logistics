@@ -8,6 +8,7 @@ import com.logistics.driver.data.StatusStore
 import com.logistics.driver.data.SyncStatus
 import com.logistics.driver.domain.Fix
 import com.logistics.driver.domain.FlushOutcome
+import com.logistics.driver.net.AppRelease
 import com.logistics.driver.net.DriverApi
 import com.logistics.driver.net.DriverMe
 import com.logistics.driver.net.LocationFixDto
@@ -32,7 +33,7 @@ class FakePairingStore : PairingStore {
 /**
  * Answers `me` with [result], or throws [error] if set; records each call.
  * `reportLocation` takes its answers from [reportResults], one per call, and
- * records each batch in [reported].
+ * records each batch in [reported]. `latestRelease` answers [release].
  */
 class FakeDriverApi(
     var result: DriverMe = driverMe(),
@@ -51,6 +52,17 @@ class FakeDriverApi(
     override suspend fun reportLocation(baseUrl: String, deviceToken: String, fixes: List<LocationFixDto>): LocationReportResult {
         reported += fixes
         return reportResults.removeFirstOrNull()?.getOrThrow() ?: reportOk()
+    }
+
+    /** What `latestRelease` answers; [releaseError] is thrown instead if set. */
+    var release: AppRelease? = null
+    var releaseError: Exception? = null
+    var releaseChecks = 0
+
+    override suspend fun latestRelease(baseUrl: String): AppRelease? {
+        releaseChecks++
+        releaseError?.let { throw it }
+        return release
     }
 }
 
