@@ -8,8 +8,14 @@
 #   4. cut the emulator's network: new fixes queue on the phone, and the
 #      backend keeps the last position it had
 #   5. bring the network back: the queue uploads and the backend catches up
-# The run is recorded to android/build/demo/tracking-demo.webm. It takes about
-# three minutes, because the app asks for a fix only every 30 s.
+#   6. open the dashboard in a browser (frontend/tests/driver-tracking.demo.ts)
+#      and check the final position on the Vehicles page and the vehicle page
+# At each step the position is checked through the API (GET /api/vehicles)
+# and in the database (the Vehicle row in MySQL, with the backend's MYSQL_*
+# settings and defaults). The phone run is recorded to
+# android/build/demo/tracking-demo.webm, the dashboard to
+# frontend/test-results/. It takes about four minutes, because the app asks
+# for a fix only every 30 s.
 #
 # Location and notification permissions are granted over adb, and the app is
 # exempted from battery optimisation, so no system dialog interrupts the run
@@ -55,17 +61,30 @@ loc = vehicle.get('location')
 print('%.4f %.4f' % (loc['latitude'], loc['longitude']) if loc else 'none')"
 }
 
-# Wait (up to $2 s) until the backend has the vehicle at point $1 of ROUTE.
-# The fix for a new position comes on the app's next 30 s tick.
+# The vehicle's row in the database as "lat lon" (4 decimals), or "none".
+db_position() {
+    mysql -h "${MYSQL_HOST:-localhost}" -P "${MYSQL_PORT:-3306}" -u "${MYSQL_USER:-root}" \
+        -p"${MYSQL_PASSWORD:-password}" "${MYSQL_DATABASE:-logistics}" -N -B 2>/dev/null -e \
+        "SELECT IFNULL(CONCAT(CAST(latitude AS DECIMAL(10,4)), ' ', CAST(longitude AS DECIMAL(10,4))), 'none') FROM Vehicle WHERE registration_number = '$REG'"
+}
+command -v mysql >/dev/null || { echo "The demo checks the database with the mysql client; install it first."; exit 1; }
+
+# Wait (up to $2 s) until the backend has the vehicle at point $1 of ROUTE,
+# then check the database row says the same. The fix for a new position comes
+# on the app's next 30 s tick.
 wait_backend_at() {
-    local want got
+    local want got db
     want=$(printf '%.4f %.4f' ${ROUTE[$1]})
     for _ in $(seq 1 "${2:-75}"); do
         got=$(backend_position)
-        [ "$got" = "$want" ] && { echo "Backend has the vehicle at $got"; return 0; }
+        [ "$got" = "$want" ] && break
         sleep 1
     done
-    echo "Backend has the vehicle at $got, expected $want"; return 1
+    [ "$got" = "$want" ] || { echo "Backend has the vehicle at $got, expected $want"; return 1; }
+    echo "API:      vehicle at $got"
+    db=$(db_position)
+    [ "$db" = "$want" ] || { echo "Database: Vehicle row at ${db:-<no row>}, expected $want"; return 1; }
+    echo "Database: Vehicle row at $db"
 }
 
 # The number on the status screen's "Queued fixes" row.
@@ -131,9 +150,10 @@ move_to 2
 wait_queued 1
 move_to 3
 wait_queued 2
-[ "$(backend_position)" = "$(printf '%.4f %.4f' ${ROUTE[1]})" ] \
+BEFORE=$(printf '%.4f %.4f' ${ROUTE[1]})
+[ "$(backend_position)" = "$BEFORE" ] && [ "$(db_position)" = "$BEFORE" ] \
     || { echo "The backend moved while the phone was offline"; exit 1; }
-echo "Backend still has the last position sent before the network went off"
+echo "API and database still have the last position sent before the network went off"
 sleep "$PAUSE"
 
 step "Network back: the queue uploads"
@@ -149,4 +169,16 @@ RECORDING=""
 sleep 2
 echo "Video:      $OUT/tracking-demo.webm"
 echo "Screenshot: $OUT/tracking-status.png"
+
+step "Dashboard: the vehicle where the phone left it"
+if [ "$API_PORT" != 8080 ]; then
+    # The Vite dev server proxies /api to 8080 only.
+    echo "Skipped: the dashboard dev server talks to port 8080, and this run used $API_PORT"
+else
+    read -r LAT LON <<<"${ROUTE[3]}"
+    (cd "$ROOT/frontend" && DRIVER_DEMO_ORG_NAME="$ORG_NAME" DRIVER_DEMO_ORG_PASSWORD="$ORG_PASSWORD" \
+        DRIVER_DEMO_REG="$REG" DRIVER_DEMO_LAT="$LAT" DRIVER_DEMO_LON="$LON" \
+        DISPLAY=${DISPLAY:-:0} XDG_SESSION_TYPE=x11 npm run --silent test:e2e:demo:driver-tracking)
+    echo "Dashboard video: $(ls -t "$ROOT"/frontend/test-results/driver-tracking*/video.webm 2>/dev/null | head -n 1)"
+fi
 echo "The emulator is left running, still sharing; switch it off in the app or uninstall."

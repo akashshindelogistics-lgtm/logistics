@@ -51,18 +51,18 @@ start_backend() {
 }
 
 # Create an org, a vehicle and a driver assigned to it, and rotate the
-# driver's device token. Sets ORG_NAME, AUTH, REG, DRIVER_ID and TOKEN.
+# driver's device token. Sets ORG_NAME, ORG_PASSWORD, AUTH, REG, DRIVER_ID and TOKEN.
 seed_driver() {
     step "Seeding an org, vehicle and driver"
-    local suffix password org_id
+    local suffix org_id
     suffix=$(date +%s)
     ORG_NAME="Mauli Demo $suffix"
-    password="demo-pass-$suffix"
+    ORG_PASSWORD="demo-pass-$suffix"
     REG="MH12DM${suffix: -4}"
     org_id=$(curl -sf "$API/api/orgs" -H 'Content-Type: application/json' \
-        -d "{\"name\":\"$ORG_NAME\",\"address\":\"Chakan MIDC, Pune\",\"password\":\"$password\"}" | json "['data']['id']")
+        -d "{\"name\":\"$ORG_NAME\",\"address\":\"Chakan MIDC, Pune\",\"password\":\"$ORG_PASSWORD\"}" | json "['data']['id']")
     AUTH="Bearer $(curl -sf "$API/api/auth/login" -H 'Content-Type: application/json' \
-        -d "{\"org_id\":\"$org_id\",\"password\":\"$password\"}" | json "['data']['token']")"
+        -d "{\"org_id\":\"$org_id\",\"password\":\"$ORG_PASSWORD\"}" | json "['data']['token']")"
     curl -sf "$API/api/orgs/$org_id/vehicles" -H "Authorization: $AUTH" -H 'Content-Type: application/json' \
         -d "{\"registration_number\":\"$REG\",\"capacity\":20,\"unit\":\"MetricTon\"}" >/dev/null
     DRIVER_ID=$(curl -sf "$API/api/orgs/$org_id/drivers" -H "Authorization: $AUTH" -H 'Content-Type: application/json' \

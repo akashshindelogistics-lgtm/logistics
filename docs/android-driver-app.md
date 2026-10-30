@@ -421,6 +421,12 @@ testing and the demo.
 
   The shared steps moved from `demo-pairing.sh` to `scripts/lib.sh`, and both
   demos take `API_PORT` for when another checkout holds 8080.
+- **Checked at each layer:** after each position the demo compares the API
+  (`GET /api/vehicles`) and the `Vehicle` row in MySQL, during the offline
+  stretch too. At the end, a headed Playwright demo
+  (`frontend/tests/driver-tracking.demo.ts`, also runnable on its own) signs
+  in as the seeded org and finds the final position on the fleet map, in the
+  Vehicles table and on the vehicle's page.
 - **Bug found by the demo:** after uploads the status screen still said
   "Last position: No position yet", because `/api/driver/me` was only read
   when the screen opened. `StatusViewModel` now reads it again after each

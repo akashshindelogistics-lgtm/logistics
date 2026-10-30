@@ -79,12 +79,21 @@ android/scripts/demo-pairing.sh    # pairing only, under a minute
 ```
 
 `demo-tracking.sh` switches sharing on and drives the emulator along the
-Chakan - Pune road with `adb emu geo fix`, checking `GET /api/vehicles` after
-each position. It then turns the emulator's network off, checks that fixes
-queue on the phone while the backend stays put, and turns the network back
-on to check that the queue uploads. Any check that fails stops the script. Recorded
-to `android/build/demo/tracking-demo.webm`, with a final screenshot in
-`tracking-status.png`.
+Chakan - Pune road with `adb emu geo fix`. After each position it checks the
+vehicle through `GET /api/vehicles` and in the database (the `Vehicle` row in
+MySQL, with the backend's `MYSQL_*` settings; needs the `mysql` client). It
+then turns the emulator's network off, checks that fixes queue on the phone
+while the API and database stay put, and turns the network back on to check
+that the queue uploads. Last, it opens the dashboard in Chromium
+(`frontend/tests/driver-tracking.demo.ts`), signs in as the seeded org and
+checks the final position on the Vehicles page (fleet map pin and
+coordinates) and on the vehicle's page. Any check that fails stops the
+script. The phone run is recorded to `android/build/demo/tracking-demo.webm`
+(final screenshot `tracking-status.png`), the dashboard to
+`frontend/test-results/driver-tracking*/video.webm`. The dashboard step
+needs `API_PORT` 8080, because the Vite dev server proxies there. On its own,
+`npm run test:e2e:demo:driver-tracking` (from `frontend/`) seeds a driver and
+sends a fix the way the phone does.
 
 `demo-pairing.sh` reports one location fix with curl and taps Refresh.
 Recorded to `android/build/demo/pairing-demo.mp4`.
