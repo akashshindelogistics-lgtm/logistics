@@ -90,8 +90,8 @@ checks the final position on the Vehicles page (fleet map pin and
 coordinates) and on the vehicle's page. Any check that fails stops the
 script. The phone run is recorded to `android/build/demo/tracking-demo.webm`
 (final screenshot `tracking-status.png`), the dashboard to
-`frontend/test-results/driver-tracking*/video.webm`. The dashboard step
-needs `API_PORT` 8080, because the Vite dev server proxies there. On its own,
+`frontend/test-results/driver-tracking*/video.webm`. With `API_PORT`
+other than 8080, the dashboard runs on its own Vite at 5174 (`WEB_PORT`). On its own,
 `npm run test:e2e:demo:driver-tracking` (from `frontend/`) seeds a driver and
 sends a fix the way the phone does.
 

@@ -171,14 +171,13 @@ echo "Video:      $OUT/tracking-demo.webm"
 echo "Screenshot: $OUT/tracking-status.png"
 
 step "Dashboard: the vehicle where the phone left it"
-if [ "$API_PORT" != 8080 ]; then
-    # The Vite dev server proxies /api to 8080 only.
-    echo "Skipped: the dashboard dev server talks to port 8080, and this run used $API_PORT"
-else
-    read -r LAT LON <<<"${ROUTE[3]}"
-    (cd "$ROOT/frontend" && DRIVER_DEMO_ORG_NAME="$ORG_NAME" DRIVER_DEMO_ORG_PASSWORD="$ORG_PASSWORD" \
-        DRIVER_DEMO_REG="$REG" DRIVER_DEMO_LAT="$LAT" DRIVER_DEMO_LON="$LON" \
-        DISPLAY=${DISPLAY:-:0} XDG_SESSION_TYPE=x11 npm run --silent test:e2e:demo:driver-tracking)
-    echo "Dashboard video: $(ls -t "$ROOT"/frontend/test-results/driver-tracking*/video.webm 2>/dev/null | head -n 1)"
-fi
+read -r LAT LON <<<"${ROUTE[3]}"
+# Vite on 5173 proxies to 8080; with another API port, use a Vite of our own
+# so the dashboard reads the same backend as the phone.
+WEB_PORT=${WEB_PORT:-$([ "$API_PORT" = 8080 ] && echo 5173 || echo 5174)}
+(cd "$ROOT/frontend" && DRIVER_DEMO_ORG_NAME="$ORG_NAME" DRIVER_DEMO_ORG_PASSWORD="$ORG_PASSWORD" \
+    DRIVER_DEMO_REG="$REG" DRIVER_DEMO_LAT="$LAT" DRIVER_DEMO_LON="$LON" \
+    E2E_API_PORT="$API_PORT" E2E_WEB_PORT="$WEB_PORT" \
+    DISPLAY=${DISPLAY:-:0} XDG_SESSION_TYPE=x11 npm run --silent test:e2e:demo:driver-tracking)
+echo "Dashboard video: $(ls -t "$ROOT"/frontend/test-results/driver-tracking*/video.webm 2>/dev/null | head -n 1)"
 echo "The emulator is left running, still sharing; switch it off in the app or uninstall."
