@@ -4,12 +4,21 @@ import { listOrgs } from '../api/orgs';
 import { listVehicles } from '../api/vehicles';
 import { listCustomers } from '../api/customers';
 import { listDispatches } from '../api/dispatches';
-import { IconBuilding, IconTruck, IconUsers, IconDispatch } from '../components/Icons';
+import Icon3D, { type Icon3DName } from '../components/Icon3D';
 import type { DispatchOrder } from '../types';
 import './page.css';
 import './Dashboard.css';
+import { m } from 'motion/react';
+import { DURATION, EASE_OUT, useListAnimation } from '../lib/motion';
+import CountUp from '../components/CountUp';
+import { STATUS_TAG_CLASS, formatStatus } from '../lib/dispatchLifecycle';
+
+// Stat cards are links that fade up one after another on first paint.
+const MotionLink = m.create(Link);
+
 
 export default function Dashboard() {
+  const rowsRef = useListAnimation();
   const [counts, setCounts] = useState({ orgs: 0, vehicles: 0, customers: 0, dispatches: 0 });
   const [recent, setRecent] = useState<DispatchOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,11 +38,11 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const cards = [
-    { label: 'Organizations', value: counts.orgs, to: '/orgs', Icon: IconBuilding, cls: 'card-blue' },
-    { label: 'Fleet Vehicles', value: counts.vehicles, to: '/vehicles', Icon: IconTruck, cls: 'card-green' },
-    { label: 'Customers', value: counts.customers, to: '/customers', Icon: IconUsers, cls: 'card-amber' },
-    { label: 'Dispatches', value: counts.dispatches, to: '/dispatches', Icon: IconDispatch, cls: 'card-purple' },
+  const cards: { label: string; value: number; to: string; icon: Icon3DName; cls: string }[] = [
+    { label: 'Organizations', value: counts.orgs, to: '/orgs', icon: 'building', cls: 'card-blue' },
+    { label: 'Fleet Vehicles', value: counts.vehicles, to: '/vehicles', icon: 'truck', cls: 'card-green' },
+    { label: 'Customers', value: counts.customers, to: '/customers', icon: 'store', cls: 'card-amber' },
+    { label: 'Dispatches', value: counts.dispatches, to: '/dispatches', icon: 'package', cls: 'card-purple' },
   ];
 
   return (
@@ -43,24 +52,36 @@ export default function Dashboard() {
           <h1 className="dash-hero-title">Good morning 👋</h1>
           <p className="dash-hero-sub">Here's what's happening across your logistics network today.</p>
         </div>
+        <div className="dash-hero-art" aria-hidden="true">
+          <Icon3D name="map" size={64} className="dash-hero-art-back" />
+          <Icon3D name="lorry" size={88} className="dash-hero-art-main" float />
+          <Icon3D name="package" size={52} className="dash-hero-art-front" />
+        </div>
       </div>
 
       <div className="stat-grid">
-        {cards.map(({ label, value, to, Icon, cls }) => (
-          <Link key={to} to={to} className={`stat-card ${cls}`}>
+        {cards.map(({ label, value, to, icon, cls }, i) => (
+          <MotionLink
+            key={to}
+            to={to}
+            className={`stat-card ${cls}`}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: i * 0.07, duration: DURATION.slow, ease: EASE_OUT } }}
+            whileHover={{ y: -2, transition: { duration: DURATION.fast } }}
+          >
             <div className="stat-card-top">
-              <div className="stat-icon">
-                <Icon size={20} />
+              <div className="stat-icon stat-icon-3d">
+                <Icon3D name={icon} size={36} float />
               </div>
             </div>
             <div>
               {loading
                 ? <div className="skeleton" style={{ width: 60, height: 36, marginBottom: 6 }} />
-                : <div className="stat-value">{value.toLocaleString()}</div>
+                : <div className="stat-value"><CountUp value={value} /></div>
               }
               <div className="stat-label">{label}</div>
             </div>
-          </Link>
+          </MotionLink>
         ))}
       </div>
 
@@ -75,7 +96,7 @@ export default function Dashboard() {
           </div>
         ) : recent.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconDispatch size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="outbox" size={48} /></div>
             <h3>No dispatches yet</h3>
             <p>Dispatch orders will appear here once you send stock to customers.</p>
           </div>
@@ -87,7 +108,7 @@ export default function Dashboard() {
                   <th>Order ID</th><th>Vehicle</th><th>Stock</th><th>Qty</th><th>Status</th><th>Time</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef}>
                 {recent.map(o => (
                   <tr key={o.id}>
                     <td><span className="mono">{o.id.slice(0, 8)}…</span></td>
@@ -98,7 +119,7 @@ export default function Dashboard() {
                         : `${o.line_items.length} items`}
                     </td>
                     <td><strong>{o.line_items.reduce((sum, li) => sum + li.quantity, 0)}</strong></td>
-                    <td><span className="status-tag tag-green">{o.status}</span></td>
+                    <td><span className={`status-tag ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span></td>
                     <td className="muted">{new Date(o.dispatched_at * 1000).toLocaleString()}</td>
                   </tr>
                 ))}

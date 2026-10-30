@@ -1,0 +1,55 @@
+.lifecycle-track {
+  --track: var(--blue, #3b82f6);
+  position: relative;
+  width: 112px;
+  height: 10px;
+  margin-top: 7px;
+}
+.lifecycle-track.is-returned,
+.lifecycle-track.is-cancelled { --track: var(--red, #ef4444); }
+
+.lifecycle-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.lifecycle-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--track);
+  transform-origin: left center;
+  transition: transform .5s cubic-bezier(.22, 1, .36, 1);
+}
+
+.lifecycle-dot {
+  position: absolute;
+  top: 1px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  transition: background-color .3s ease .15s, border-color .3s ease .15s, transform .3s ease .15s;
+}
+.lifecycle-dot.is-done { background: var(--track); border-color: var(--track); }
+.lifecycle-dot.is-current { transform: scale(1.25); }
+
+/* The truck is on the road: its current step breathes. */
+.lifecycle-track.is-moving .lifecycle-dot.is-current {
+  animation: lifecycle-pulse 1.4s ease-in-out infinite;
+}
+@keyframes lifecycle-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--track) 45%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, var(--track) 0%, transparent); }
+}
+
+/* A status change pops the tag in (Dispatches re-keys it per status). */
+.status-tag-pop { display: inline-block; animation: status-pop .32s cubic-bezier(.34, 1.56, .64, 1) both; }
+@keyframes status-pop { from { opacity: 0; transform: scale(.82); } }

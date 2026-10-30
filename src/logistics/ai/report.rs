@@ -113,10 +113,10 @@ pub async fn generate_report_summary(report: &OpsReport) -> Result<String, Strin
     // workspace) must name the target workspace explicitly, or the API rejects
     // the call with `workspace_id_required`. Workspace-scoped keys don't need
     // this, so the header is only sent when `ANTHROPIC_WORKSPACE_ID` is set.
-    if let Ok(workspace_id) = std::env::var("ANTHROPIC_WORKSPACE_ID") {
-        if !workspace_id.trim().is_empty() {
-            request = request.header("anthropic-workspace-id", workspace_id);
-        }
+    if let Ok(workspace_id) = std::env::var("ANTHROPIC_WORKSPACE_ID")
+        && !workspace_id.trim().is_empty()
+    {
+        request = request.header("anthropic-workspace-id", workspace_id);
     }
 
     let resp = request
@@ -149,7 +149,8 @@ pub async fn generate_report_summary(report: &OpsReport) -> Result<String, Strin
 mod tests {
     use super::*;
     use crate::logistics::reports::{
-        CategoryUnits, DeliveryPerformance, DispatchVolumePoint, GodownInventory, VehicleUtilization,
+        CategoryUnits, DeliveryPerformance, DispatchVolumePoint, GodownInventory,
+        VehicleUtilization,
     };
     use uuid::Uuid;
 
@@ -179,8 +180,14 @@ mod tests {
                 }],
             }],
             dispatch_volume: vec![
-                DispatchVolumePoint { date: "2026-09-10".to_string(), count: 2 },
-                DispatchVolumePoint { date: "2026-09-11".to_string(), count: 5 },
+                DispatchVolumePoint {
+                    date: "2026-09-10".to_string(),
+                    count: 2,
+                },
+                DispatchVolumePoint {
+                    date: "2026-09-11".to_string(),
+                    count: 5,
+                },
             ],
             hired_transport: Default::default(),
         }
@@ -195,7 +202,11 @@ mod tests {
         assert!(prompt.contains("18.5 hours"));
         assert!(prompt.contains("80%"));
         assert!(prompt.contains("340"));
-        assert!(prompt.contains("Chennai Central holds 120 units across 3 item(s) (92% of capacity used)"));
+        assert!(
+            prompt.contains(
+                "Chennai Central holds 120 units across 3 item(s) (92% of capacity used)"
+            )
+        );
         assert!(prompt.contains("2026-09-10: 2"));
         assert!(prompt.contains("2026-09-11: 5"));
     }
@@ -243,14 +254,19 @@ mod tests {
     #[test]
     fn build_report_prompt_mentions_hired_trucks_only_when_used() {
         let mut report = sample_report();
-        assert!(build_report_prompt(&report).contains("No dispatches have gone out on hired trucks"));
+        assert!(
+            build_report_prompt(&report).contains("No dispatches have gone out on hired trucks")
+        );
         report.hired_transport.own_dispatches = 3;
         report.hired_transport.hired_dispatches = 1;
         report.hired_transport.hired_share_percent = Some(25.0);
         report.hired_transport.hire_cost_total = 9000;
         report.hired_transport.outstanding_to_vendors = 2000;
         let prompt = build_report_prompt(&report);
-        assert!(prompt.contains("Hired trucks: 1 of 4 dispatches (25%)"), "{prompt}");
+        assert!(
+            prompt.contains("Hired trucks: 1 of 4 dispatches (25%)"),
+            "{prompt}"
+        );
         assert!(prompt.contains("2000 is still owed"), "{prompt}");
     }
 }

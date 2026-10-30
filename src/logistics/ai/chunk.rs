@@ -166,7 +166,11 @@ pub fn delete_by_source_best_effort(kind: ChunkKind, source_id: &str) {
 /// The org's chunks that lexically match `query`, most relevant first.
 /// `org_id` is the tenant-isolation boundary here — the same role it plays
 /// in every other `list_by_org`.
-pub fn search_by_org(org_id: Uuid, query: &str, limit: u32) -> Result<Vec<AiChunk>, Box<dyn Error>> {
+pub fn search_by_org(
+    org_id: Uuid,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<AiChunk>, Box<dyn Error>> {
     let mut conn = DbConnection::from_env().get_connection()?;
     ensure_table(&mut conn)?;
 
@@ -225,7 +229,9 @@ pub fn vehicle_document_chunk_text(d: &VehicleDocument) -> String {
 }
 
 /// The narrative text for a [`VehicleMaintenance`] chunk.
-pub fn vehicle_maintenance_chunk_text(m: &crate::logistics::vehicle::maintenance::VehicleMaintenance) -> String {
+pub fn vehicle_maintenance_chunk_text(
+    m: &crate::logistics::vehicle::maintenance::VehicleMaintenance,
+) -> String {
     let due_part = match (&m.due_on, m.due_at_mileage_km) {
         (Some(on), Some(km)) => format!("due on {on} or at {km}km"),
         (Some(on), None) => format!("due on {on}"),
@@ -299,7 +305,12 @@ pub fn stock_snapshot_text(godown: &Godown, stock: &Stock) -> String {
     };
     format!(
         "Godown '{}' ({}) holds {} units of {} (category: {}){}.",
-        godown.name, godown.address, stock.quantity, stock.description, stock.category, threshold_note
+        godown.name,
+        godown.address,
+        stock.quantity,
+        stock.description,
+        stock.category,
+        threshold_note
     )
 }
 
@@ -371,7 +382,10 @@ pub fn customer_directory_text(c: &Customer) -> String {
         (None, Some(e)) => format!(" Contact: {e}."),
         (None, None) => String::new(),
     };
-    format!("Customer '{}' is located at {}.{}", c.name, c.address, contact)
+    format!(
+        "Customer '{}' is located at {}.{}",
+        c.name, c.address, contact
+    )
 }
 
 /// The narrative text for a [`Godown`] directory chunk — address and
@@ -381,11 +395,14 @@ pub fn godown_directory_text(g: &Godown) -> String {
         .max_capacity
         .map(|c| format!(" Maximum capacity: {c}."))
         .unwrap_or_default();
-    format!("Godown '{}' is located at {}.{}", g.name, g.address, capacity_note)
+    format!(
+        "Godown '{}' is located at {}.{}",
+        g.name, g.address, capacity_note
+    )
 }
 
-/// The narrative text for a [`Vehicle`] directory chunk — capacity and its
-/// currently assigned driver, if any.
+/// The narrative text for a [`Vehicle`] directory chunk — body type,
+/// capacity and its currently assigned driver, if any.
 pub fn vehicle_directory_text(v: &Vehicle, driver: Option<&Driver>) -> String {
     let driver_note = match driver {
         Some(d) => format!(
@@ -396,8 +413,9 @@ pub fn vehicle_directory_text(v: &Vehicle, driver: Option<&Driver>) -> String {
         None => " No driver currently assigned.".to_string(),
     };
     format!(
-        "Vehicle {} has a capacity of {} {}.{}",
+        "Vehicle {} is a {} with a capacity of {} {}.{}",
         v.registration_number,
+        v.vehicle_type.as_str().to_ascii_lowercase(),
         v.capacity,
         v.unit.as_str(),
         driver_note
@@ -453,7 +471,10 @@ pub fn reindex_vehicle_best_effort(vehicle: &Vehicle, org_id: Uuid) {
 
 /// Remove a vehicle's directory chunk (the vehicle was deleted).
 pub fn delete_vehicle_chunk_best_effort(registration_number: &str) {
-    delete_by_source_best_effort(ChunkKind::OrgDirectory, &vehicle_source_id(registration_number));
+    delete_by_source_best_effort(
+        ChunkKind::OrgDirectory,
+        &vehicle_source_id(registration_number),
+    );
 }
 
 /// Rebuild every chunk for an org from scratch, across every source kind.
@@ -587,7 +608,10 @@ mod tests {
         assert!(text.contains("INS-9911"));
         assert!(text.contains("2026-10-02"));
         assert!(text.contains("ExpiringSoon"));
-        assert!(!text.contains("Notes:"), "no Notes: suffix when notes is None");
+        assert!(
+            !text.contains("Notes:"),
+            "no Notes: suffix when notes is None"
+        );
     }
 
     #[test]
@@ -663,8 +687,14 @@ mod tests {
         };
         let mut d = sample_dispatch();
         d.status_history = vec![
-            DispatchStatusEvent { status: DispatchStatus::Pending, changed_at: 1 },
-            DispatchStatusEvent { status: DispatchStatus::Delivered, changed_at: 2 },
+            DispatchStatusEvent {
+                status: DispatchStatus::Pending,
+                changed_at: 1,
+            },
+            DispatchStatusEvent {
+                status: DispatchStatus::Delivered,
+                changed_at: 2,
+            },
         ];
         d.proof_of_delivery = Some(ProofOfDelivery {
             receiver_name: "Priya Sharma".to_string(),
@@ -776,6 +806,12 @@ mod tests {
     }
 
     #[test]
+    fn vehicle_directory_text_names_the_body_type() {
+        let v = sample_vehicle().with_type(crate::logistics::vehicle::vehicle::VehicleType::Tanker);
+        assert!(vehicle_directory_text(&v, None).contains("is a tanker"));
+    }
+
+    #[test]
     fn vehicle_directory_text_includes_the_assigned_drivers_name_and_active_status() {
         let mut driver = sample_driver();
         driver.is_active = false;
@@ -806,7 +842,11 @@ mod tests {
         .unwrap();
 
         let results = search_by_org(org_a.id, "insurance expires", 8).unwrap();
-        assert_eq!(results.len(), 1, "org B's matching chunk must not leak into org A's results");
+        assert_eq!(
+            results.len(),
+            1,
+            "org B's matching chunk must not leak into org A's results"
+        );
         assert_eq!(results[0].source_id, "n1");
     }
 
@@ -815,11 +855,27 @@ mod tests {
         let _db = TestDb::create();
         let org = Organization::create_organization("Org C", "3 Rd").unwrap();
 
-        upsert(org.id, ChunkKind::Notification, "n1", "original wording".to_string()).unwrap();
-        upsert(org.id, ChunkKind::Notification, "n1", "updated wording".to_string()).unwrap();
+        upsert(
+            org.id,
+            ChunkKind::Notification,
+            "n1",
+            "original wording".to_string(),
+        )
+        .unwrap();
+        upsert(
+            org.id,
+            ChunkKind::Notification,
+            "n1",
+            "updated wording".to_string(),
+        )
+        .unwrap();
 
         let results = search_by_org(org.id, "wording", 8).unwrap();
-        assert_eq!(results.len(), 1, "re-indexing the same source updates in place, not appends");
+        assert_eq!(
+            results.len(),
+            1,
+            "re-indexing the same source updates in place, not appends"
+        );
         assert_eq!(results[0].text, "updated wording");
     }
 
@@ -844,16 +900,30 @@ mod tests {
         // wipe the index to stand in for a pre-existing, never-indexed org.
         let customer = Customer::create_customer(org.id, "Old Customer", "9 Legacy Ln").unwrap();
         let godown = Godown::create(org.id, "Old Godown", "10 Legacy Ln", None).unwrap();
-        Stock::new(1, 20, "Legacy Widgets").add_to_godown(godown.id).unwrap();
+        Stock::new(1, 20, "Legacy Widgets")
+            .add_to_godown(godown.id)
+            .unwrap();
         conn_delete_all_chunks(org.id);
 
         let count = reindex_org(org.id).expect("backfill");
-        assert!(count >= 3, "expected at least customer + godown + stock chunks, got {count}");
+        assert!(
+            count >= 3,
+            "expected at least customer + godown + stock chunks, got {count}"
+        );
 
         let results = search_by_org(org.id, "Old Customer Old Godown Legacy Widgets", 8).unwrap();
-        assert!(results.iter().any(|c| c.text.contains("Old Customer")), "{results:?}");
-        assert!(results.iter().any(|c| c.text.contains("Old Godown")), "{results:?}");
-        assert!(results.iter().any(|c| c.text.contains("Legacy Widgets")), "{results:?}");
+        assert!(
+            results.iter().any(|c| c.text.contains("Old Customer")),
+            "{results:?}"
+        );
+        assert!(
+            results.iter().any(|c| c.text.contains("Old Godown")),
+            "{results:?}"
+        );
+        assert!(
+            results.iter().any(|c| c.text.contains("Legacy Widgets")),
+            "{results:?}"
+        );
         let _ = customer;
     }
 

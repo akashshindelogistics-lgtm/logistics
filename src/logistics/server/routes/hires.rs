@@ -1,16 +1,16 @@
 //! Vehicle hires from vendors and the payments recorded against them.
 
+use super::common::*;
+use super::dispatches::notify_dispatch_created;
 use crate::logistics::customer::customer::Customer;
+use crate::logistics::vehicle::vehicle::Unit;
 use crate::logistics::vendor::hire::{
     HireAssignment, HireError, HireStatus, VehicleHire, VendorPayment,
 };
-use crate::logistics::vehicle::vehicle::Unit;
-use actix_web::{get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
-use super::dispatches::notify_dispatch_created;
 
 /// The vendor's truck, driver and agreed rate, entered after the vendor
 /// confirms a hire.
@@ -131,11 +131,13 @@ fn load_owned_hire(hire_id: Uuid, auth_org_id: Uuid) -> Result<VehicleHire, Http
             message: "Vehicle hire not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch vehicle hire: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle hire: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 

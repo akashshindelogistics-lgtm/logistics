@@ -6,6 +6,8 @@
 
 [![Periodic Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml)
 
+[![Rust Lint](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/rust-lint.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/rust-lint.yml)
+
 [![Pages — Deploy Frontend + Swagger UI](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml)
 
 [![Release](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml)
@@ -18,12 +20,17 @@ operations, live location maps, and AI-generated dispatch summaries.
 
 📖 **Live dashboard:** <https://akashshindelogistics-lgtm.github.io/logistics/>
 &nbsp;·&nbsp; **API docs (Swagger UI):** <https://akashshindelogistics-lgtm.github.io/logistics/api-docs/>
+&nbsp;·&nbsp; 🏷️ **Releases:** [latest](https://github.com/akashshindelogistics-lgtm/logistics/releases/latest)
+· [all releases](https://github.com/akashshindelogistics-lgtm/logistics/releases)
+· [changelog](CHANGELOG.md)
 
 ## Features
 
 - **Organizations** — create and manage organizations, each with its own
   location, vehicles, stock, and customers.
-- **Vehicles** — register vehicles per organization and track their live
+- **Vehicles** — register vehicles per organization with a body type (truck,
+  tipper, trailer, tempo, pickup or tanker — shown as a 3D model and icon in
+  the dashboard) and track their live
   location, updated by hand or pushed automatically by a GPS tracker fitted
   to the vehicle (each vehicle carries its own tracker key). Record each
   vehicle's compliance paperwork (insurance, RC, permit, PUC and fitness
@@ -244,7 +251,27 @@ npm run test:e2e:demo:stock-categories # stock categories
 npm run test:e2e:demo:vendors        # vehicle vendors
 npm run test:e2e:demo:hired-vehicles # dispatching on a hired truck
 npm run test:e2e:demo:vendor-payments # paying vendors + hired-transport report
+npm run test:e2e:demo:vehicle-visuals # 3D icons, vehicle types and the 3D vehicle view
+npm run test:e2e:demo:motion         # motion: transitions, lifecycle track, gliding markers
+npm run test:e2e:demo:theme-colors   # Oxford & Claret colour theme, light and dark
+
+# Already have servers on 5173/8080 (e.g. another worktree)? Run a demo on
+# other ports; it starts its own API (PORT) and Vite (API_PROXY_TARGET) there:
+E2E_WEB_PORT=5174 E2E_API_PORT=8081 npm run test:e2e:demo:motion
+# The headless suite takes the dev server URL the same way:
+E2E_BASE_URL=http://localhost:5174 npm run test:e2e
 ```
+
+Motion follows the OS "reduce motion" setting everywhere (CSS, motion/react,
+auto-animate, page transitions and map gliding), and the headless Playwright
+suite runs with reduced motion so animations never race its assertions.
+
+The vehicle-type icons are still renders of the 3D models in
+`frontend/public/models/vehicles` (Kenney Car Kit, CC0). After changing a model
+or the scene lighting, regenerate them with `npm run render:vehicle-icons`. The
+other 3D icons are Microsoft Fluent Emoji (MIT). Set
+`localStorage['logitrack:disable-3d'] = '1'` to show still renders instead of the
+live WebGL view.
 
 ## API overview
 
@@ -271,9 +298,9 @@ All routes are served under the `/api` prefix.
 | POST/PUT/DELETE | `/api/godowns/{gid}/stock`, `/api/godowns/{gid}/stock/{desc}` | Add, update, or remove a godown's stock |
 | POST | `/api/godowns/{gid}/transfer` | Move a stock item from this godown to another godown of the same org |
 | GET | `/api/orgs/{id}/stock-transfers` | Godown-to-godown transfer history (audit trail) |
-| POST | `/api/orgs/{id}/vehicles` | Add a vehicle to an organization |
+| POST | `/api/orgs/{id}/vehicles` | Add a vehicle to an organization (optional `vehicle_type`, default `Truck`) |
 | GET/DELETE | `/api/vehicles`, `/api/vehicles/{reg}` | List vehicles / remove one |
-| PUT | `/api/vehicles/{reg}` | Update a vehicle's capacity and unit |
+| PUT | `/api/vehicles/{reg}` | Update a vehicle's capacity, unit and (optionally) `vehicle_type` |
 | PUT | `/api/vehicles/{reg}/location` | Update a vehicle's location (org login) |
 | POST | `/api/track/{tracker_key}` | GPS device push: record `{latitude, longitude}` for the vehicle that key belongs to — no login |
 | POST | `/api/vehicles/{reg}/tracker-key/rotate` | Issue a fresh tracker key, invalidating the old one |
@@ -335,6 +362,19 @@ and a GitHub Release — optionally rolling the Oracle VM to that version. See
 [`docs/releasing.md`](docs/releasing.md) and the
 [Releases page](https://github.com/akashshindelogistics-lgtm/logistics/releases).
 
+**What's in a release** (for tag `vX.Y.Z`):
+
+| Artifact | Where | How to use it |
+| --- | --- | --- |
+| API image (arm64) | GHCR, tags `X.Y.Z`, `X.Y`, `latest` | `docker pull ghcr.io/akashshindelogistics-lgtm/logistics-api:X.Y.Z` |
+| Frontend bundle | `frontend-X.Y.Z.tar.gz` on the GitHub Release | Static build with root-relative paths; serve it from any web server |
+| OpenAPI spec | `openapi-X.Y.Z.json` on the GitHub Release | Import into Swagger UI, Postman or a client generator |
+| Release notes | The GitHub Release page and [`CHANGELOG.md`](CHANGELOG.md) | Grouped into features and bug fixes from the conventional commits |
+
+[**→ Latest release**](https://github.com/akashshindelogistics-lgtm/logistics/releases/latest)
+&nbsp;·&nbsp; [All releases](https://github.com/akashshindelogistics-lgtm/logistics/releases)
+&nbsp;·&nbsp; [Changelog](CHANGELOG.md)
+
 ## CI/CD
 
 GitHub Actions workflows in `.github/workflows/`:
@@ -350,6 +390,10 @@ kept only for fork PRs, which can't fire `push` on this repo):
   MySQL service container.
 - **periodic-tests.yml** — runs the Cargo test suite. Also on a 2-hourly
   schedule.
+- **rust-lint.yml** — checks Rust formatting (`cargo fmt --check`) and runs
+  `cargo clippy --all-targets -- -D warnings`, so any clippy warning fails the
+  build. Only runs when Rust sources, `Cargo.toml`/`Cargo.lock` or
+  `rustfmt.toml` change.
 - **pages.yml** — the *validate the OpenAPI spec* and *build the React
   dashboard* jobs run as CI on every branch; the **deploy to
   [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/)** job

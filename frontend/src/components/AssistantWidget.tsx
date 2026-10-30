@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AnimatePresence, m } from 'motion/react';
 import { askAssistant, reindexAssistant, getDailyDigest, getReorderSuggestions } from '../api/assistant';
 import { isLoggedIn, getOrgId } from '../api/auth';
 import type { AssistantSource } from '../types';
@@ -109,8 +110,18 @@ export default function AssistantWidget() {
 
   return (
     <div className="assistant-widget">
+      <AnimatePresence>
       {open && (
-        <div className="assistant-panel" role="dialog" aria-label="Ask your data">
+        <m.div
+          className="assistant-panel"
+          role="dialog"
+          aria-label="Ask your data"
+          // Springs out of the launcher in the corner, and folds back into it.
+          style={{ transformOrigin: 'bottom right' }}
+          initial={{ opacity: 0, scale: 0.92, y: 14 }}
+          animate={{ opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 420, damping: 32 } }}
+          exit={{ opacity: 0, scale: 0.94, y: 10, transition: { duration: 0.15 } }}
+        >
           <div className="assistant-panel-header">
             <span>✦ Ask your data</span>
             <button
@@ -202,8 +213,9 @@ export default function AssistantWidget() {
             </button>
             {reindexStatus && <span className="assistant-reindex-status">{reindexStatus}</span>}
           </div>
-        </div>
+        </m.div>
       )}
+      </AnimatePresence>
 
       <button
         type="button"

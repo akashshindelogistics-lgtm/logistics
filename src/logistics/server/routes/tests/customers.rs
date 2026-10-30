@@ -28,7 +28,10 @@ async fn test_create_customer_returns_403_for_different_org() {
 
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/customers", org.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .set_json(&CreateCustomerPayload {
             name: "Poached".to_string(),
             address: "x".to_string(),
@@ -68,7 +71,9 @@ async fn test_create_customer_with_location_locates_it() {
         .data
         .unwrap();
 
-    let location = customer.location.expect("customer should be located on create");
+    let location = customer
+        .location
+        .expect("customer should be located on create");
     assert_eq!(location.latitude, 19.0760);
     assert_eq!(location.longitude, 72.8777);
     // With no explicit label the customer's address is used for the pin.
@@ -104,7 +109,10 @@ async fn test_create_customer_without_coordinates_has_no_location() {
         .await
         .data
         .unwrap();
-    assert!(customer.location.is_none(), "a lone latitude must not locate the customer");
+    assert!(
+        customer.location.is_none(),
+        "a lone latitude must not locate the customer"
+    );
 }
 
 #[actix_web::test]
@@ -177,7 +185,10 @@ async fn test_update_customer_location_returns_403_for_different_org() {
 
     let req = test::TestRequest::put()
         .uri(&format!("/api/customers/{}/location", customer.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .set_json(&LocationPayload {
             latitude: 1.0,
             longitude: 1.0,
@@ -197,7 +208,10 @@ async fn test_delete_customer_and_cross_org_guard() {
     // A different org cannot delete it.
     let req = test::TestRequest::delete()
         .uri(&format!("/api/customers/{}", customer.id))
-        .insert_header(("Authorization", make_auth_header(Uuid::new_v4(), "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(Uuid::new_v4(), "Attacker"),
+        ))
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
 
@@ -270,7 +284,10 @@ async fn test_create_customer_with_contact_details() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 201);
-    let customer = test::read_body_json::<ApiResponse<Customer>, _>(resp).await.data.unwrap();
+    let customer = test::read_body_json::<ApiResponse<Customer>, _>(resp)
+        .await
+        .data
+        .unwrap();
     assert_eq!(customer.phone.as_deref(), Some("+91 90000 00000"));
     assert_eq!(customer.email.as_deref(), Some("ops@reachable.example"));
 }

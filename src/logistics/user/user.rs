@@ -13,7 +13,7 @@
 //! Enforcement lives in `require_role` in the server routes.
 
 use crate::logistics::db::connection::DbConnection;
-use bcrypt::{hash, verify, DEFAULT_COST};
+use bcrypt::{DEFAULT_COST, hash, verify};
 use mysql::prelude::*;
 use mysql::*;
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,12 @@ impl OrgRole {
     /// Parse a stored / claimed role string. Unknown input falls back to the
     /// **least**-privileged role so a bad value can never widen access.
     pub fn from_str(s: &str) -> Self {
-        match s.trim().to_ascii_uppercase().replace([' ', '-'], "_").as_str() {
+        match s
+            .trim()
+            .to_ascii_uppercase()
+            .replace([' ', '-'], "_")
+            .as_str()
+        {
             "ADMIN" | "OWNER" => OrgRole::Admin,
             "DISPATCHER" | "DISPATCH" => OrgRole::Dispatcher,
             _ => OrgRole::WarehouseStaff,
@@ -153,10 +158,14 @@ impl OrgUser {
             return Err(UserError::InvalidInput("a valid email address is required"));
         }
         if password.as_ref().len() < 8 {
-            return Err(UserError::InvalidInput("password must be at least 8 characters"));
+            return Err(UserError::InvalidInput(
+                "password must be at least 8 characters",
+            ));
         }
 
-        let mut conn = DbConnection::from_env().get_connection().map_err(UserError::from)?;
+        let mut conn = DbConnection::from_env()
+            .get_connection()
+            .map_err(UserError::from)?;
         Self::ensure_table(&mut conn).map_err(UserError::from)?;
 
         let taken: Option<i64> = conn.exec_first(
@@ -230,7 +239,9 @@ impl OrgUser {
             Some((id, org_id, name, email, role, is_active, password_hash))
                 if is_active && verify(password, &password_hash)? =>
             {
-                Ok(Some(Self::row_to_user((id, org_id, name, email, role, is_active))))
+                Ok(Some(Self::row_to_user((
+                    id, org_id, name, email, role, is_active,
+                ))))
             }
             _ => Ok(None),
         }

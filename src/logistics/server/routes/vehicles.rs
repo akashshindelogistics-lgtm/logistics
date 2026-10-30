@@ -1,13 +1,13 @@
 //! Fleet vehicles: CRUD, location updates, and the tracker-key GPS push
 //! (`POST /api/track/{tracker_key}`).
 
+use super::common::*;
 use crate::logistics::orgs::orgs::Organization;
-use crate::logistics::vehicle::vehicle::{Unit, Vehicle};
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use crate::logistics::vehicle::vehicle::{Unit, Vehicle, VehicleType};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 /// Body a GPS tracker device sends to `POST /api/track/{tracker_key}`. No
 /// address — a device only knows coordinates; the server stamps the time.
@@ -27,12 +27,19 @@ pub struct CreateVehiclePayload {
     pub registration_number: String,
     pub capacity: i64,
     pub unit: String,
+    /// Truck, Tipper, Trailer, Tempo, Pickup or Tanker. Omitted or
+    /// unrecognised means Truck.
+    #[serde(default)]
+    pub vehicle_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct UpdateVehiclePayload {
     pub capacity: i64,
     pub unit: String,
+    /// New body style. Omitted keeps the vehicle's current type.
+    #[serde(default)]
+    pub vehicle_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -105,7 +112,13 @@ pub async fn add_vehicle(
     };
 
     let unit = Unit::from_str(&payload.unit);
-    let vehicle = Vehicle::new(&payload.registration_number, payload.capacity, unit);
+    let vehicle_type = payload
+        .vehicle_type
+        .as_deref()
+        .map(VehicleType::from_str)
+        .unwrap_or_default();
+    let vehicle =
+        Vehicle::new(&payload.registration_number, payload.capacity, unit).with_type(vehicle_type);
 
     match vehicle.add_new_vehicle_to_org(&org) {
         Ok(_) => HttpResponse::Created().json(ApiResponse {
@@ -136,11 +149,13 @@ fn check_owned_vehicle(reg: &str, auth_org_id: Uuid) -> Result<(), HttpResponse>
             message: "Vehicle not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch vehicle: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -170,7 +185,13 @@ pub async fn edit_vehicle(
     }
 
     let mut vehicle = Vehicle::new(&reg, payload.capacity, Unit::from_str(&payload.unit));
-    match vehicle.update_vehicle(payload.capacity, Unit::from_str(&payload.unit)) {
+    let updated = vehicle
+        .update_vehicle(payload.capacity, Unit::from_str(&payload.unit))
+        .and_then(|_| match payload.vehicle_type.as_deref() {
+            Some(t) => vehicle.set_vehicle_type(VehicleType::from_str(t)),
+            None => Ok(()),
+        });
+    match updated {
         Ok(_) => HttpResponse::Ok().json(ApiResponse {
             success: true,
             message: "Vehicle updated successfully".to_string(),
@@ -256,14 +277,14 @@ pub async fn track_vehicle_location(
                 success: false,
                 message: "No vehicle has this tracker key".to_string(),
                 data: None,
-            })
+            });
         }
         Err(err) => {
             return HttpResponse::InternalServerError().json(ApiResponse::<String> {
                 success: false,
                 message: format!("Failed to look up tracker key: {}", err),
                 data: None,
-            })
+            });
         }
     };
 
@@ -315,7 +336,7 @@ pub async fn rotate_vehicle_tracker_key(
                     success: false,
                     message: "Vehicle not found".to_string(),
                     data: None,
-                })
+                });
             }
         },
         Err(err) => {
@@ -323,7 +344,7 @@ pub async fn rotate_vehicle_tracker_key(
                 success: false,
                 message: format!("Failed to fetch vehicle: {}", err),
                 data: None,
-            })
+            });
         }
     };
 

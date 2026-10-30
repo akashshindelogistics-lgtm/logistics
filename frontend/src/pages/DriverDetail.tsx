@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { listDrivers, updateDriver } from '../api/drivers';
 import { IconUsers, IconChevron, IconCheck } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import type { Driver } from '../types';
 import './page.css';
 
@@ -17,9 +18,14 @@ export default function DriverDetail() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+  // A load from an effect that has since been cleaned up (StrictMode runs
+  // effects twice in dev, or the id changed) must not land late and reset
+  // fields the user is already editing.
   useEffect(() => {
+    let cancelled = false;
     listDrivers()
       .then(res => {
+        if (cancelled) return;
         const d = (res.data ?? []).find(x => x.id === id) ?? null;
         setDriver(d);
         if (d) {
@@ -29,7 +35,8 @@ export default function DriverDetail() {
           setIsActive(d.is_active);
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [id]);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -61,7 +68,7 @@ export default function DriverDetail() {
     return (
       <div className="page">
         <div className="empty-state">
-          <div className="empty-state-icon"><IconUsers size={28} /></div>
+          <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="person" size={48} /></div>
           <h3>Driver not found</h3>
           <p>This driver may have been removed, or belongs to another organization.</p>
           <Link to="/orgs" className="btn btn-primary">Back to Organizations</Link>

@@ -66,10 +66,9 @@ impl fmt::Display for TransferError {
             TransferError::SameGodown => {
                 write!(f, "Source and destination godown must be different")
             }
-            TransferError::DifferentOrg => write!(
-                f,
-                "Both godowns must belong to the same organization"
-            ),
+            TransferError::DifferentOrg => {
+                write!(f, "Both godowns must belong to the same organization")
+            }
             TransferError::NonPositiveQuantity => {
                 write!(f, "Transfer quantity must be greater than zero")
             }
@@ -305,7 +304,17 @@ impl StockTransfer {
         Ok(rows
             .into_iter()
             .map(
-                |(id, org_id, from_godown_id, to_godown_id, description, quantity, volume_in_size, category, transferred_at)| {
+                |(
+                    id,
+                    org_id,
+                    from_godown_id,
+                    to_godown_id,
+                    description,
+                    quantity,
+                    volume_in_size,
+                    category,
+                    transferred_at,
+                )| {
                     StockTransfer {
                         id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
                         org_id: Uuid::parse_str(&org_id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -333,12 +342,15 @@ mod tests {
     use crate::logistics::test_support::TestDb;
 
     fn org() -> Organization {
-        Organization::create_organization("Transfer Test Org", "1 Warehouse Way").expect("create org")
+        Organization::create_organization("Transfer Test Org", "1 Warehouse Way")
+            .expect("create org")
     }
 
     /// Reload a godown so its `stock` reflects the latest writes.
     fn reload(id: Uuid) -> Godown {
-        Godown::get_by_id(id).expect("get godown").expect("godown exists")
+        Godown::get_by_id(id)
+            .expect("get godown")
+            .expect("godown exists")
     }
 
     #[test]
@@ -347,7 +359,9 @@ mod tests {
         let org = org();
         let a = Godown::create(org.id, "A", "Addr A", None).expect("godown a");
         let b = Godown::create(org.id, "B", "Addr B", None).expect("godown b");
-        Stock::new(5, 100, "Cement").add_to_godown(a.id).expect("seed stock");
+        Stock::new(5, 100, "Cement")
+            .add_to_godown(a.id)
+            .expect("seed stock");
 
         let transfer = StockTransfer::execute(&reload(a.id), &reload(b.id), "Cement", 40)
             .expect("transfer succeeds");
@@ -356,9 +370,17 @@ mod tests {
         assert_eq!(transfer.from_godown_id, a.id);
         assert_eq!(transfer.to_godown_id, b.id);
 
-        let a_cement = reload(a.id).stock.into_iter().find(|s| s.description == "Cement").unwrap();
+        let a_cement = reload(a.id)
+            .stock
+            .into_iter()
+            .find(|s| s.description == "Cement")
+            .unwrap();
         assert_eq!(a_cement.quantity, 60);
-        let b_cement = reload(b.id).stock.into_iter().find(|s| s.description == "Cement").unwrap();
+        let b_cement = reload(b.id)
+            .stock
+            .into_iter()
+            .find(|s| s.description == "Cement")
+            .unwrap();
         assert_eq!(b_cement.quantity, 40);
         assert_eq!(b_cement.volume_in_size, 5);
 
@@ -373,14 +395,22 @@ mod tests {
         let org = org();
         let a = Godown::create(org.id, "A", "Addr A", None).expect("a");
         let b = Godown::create(org.id, "B", "Addr B", None).expect("b");
-        Stock::new(5, 100, "Bolts").add_to_godown(a.id).expect("seed a");
-        Stock::new(5, 30, "Bolts").add_to_godown(b.id).expect("seed b");
+        Stock::new(5, 100, "Bolts")
+            .add_to_godown(a.id)
+            .expect("seed a");
+        Stock::new(5, 30, "Bolts")
+            .add_to_godown(b.id)
+            .expect("seed b");
 
         StockTransfer::execute(&reload(a.id), &reload(b.id), "Bolts", 100).expect("transfer");
 
         // Source item is fully drained -> its row is gone.
         assert!(reload(a.id).stock.iter().all(|s| s.description != "Bolts"));
-        let b_bolts = reload(b.id).stock.into_iter().find(|s| s.description == "Bolts").unwrap();
+        let b_bolts = reload(b.id)
+            .stock
+            .into_iter()
+            .find(|s| s.description == "Bolts")
+            .unwrap();
         assert_eq!(b_bolts.quantity, 130);
     }
 
@@ -391,17 +421,23 @@ mod tests {
         let org = org();
         let a = Godown::create(org.id, "Warehouse A", "1 Dock Road", None).expect("a");
         let b = Godown::create(org.id, "Warehouse B", "2 Dock Road", None).expect("b");
-        Stock::new(5, 100, "Cement").add_to_godown(a.id).expect("seed stock");
+        Stock::new(5, 100, "Cement")
+            .add_to_godown(a.id)
+            .expect("seed stock");
 
         StockTransfer::execute(&reload(a.id), &reload(b.id), "Cement", 40).expect("transfer");
 
         let results = chunk::search_by_org(org.id, "Warehouse Cement", 8).expect("search");
         assert!(
-            results.iter().any(|c| c.text.contains("Warehouse A") && c.text.contains("60 units of Cement")),
+            results
+                .iter()
+                .any(|c| c.text.contains("Warehouse A") && c.text.contains("60 units of Cement")),
             "source godown chunk should reflect the drawn-down quantity: {results:?}"
         );
         assert!(
-            results.iter().any(|c| c.text.contains("Warehouse B") && c.text.contains("40 units of Cement")),
+            results
+                .iter()
+                .any(|c| c.text.contains("Warehouse B") && c.text.contains("40 units of Cement")),
             "destination godown chunk should reflect the credited quantity: {results:?}"
         );
     }
@@ -413,19 +449,27 @@ mod tests {
         let org = org();
         let a = Godown::create(org.id, "Warehouse A", "1 Dock Road", None).expect("a");
         let b = Godown::create(org.id, "Warehouse B", "2 Dock Road", None).expect("b");
-        Stock::new(5, 100, "Bolts").add_to_godown(a.id).expect("seed a");
-        Stock::new(5, 30, "Bolts").add_to_godown(b.id).expect("seed b");
+        Stock::new(5, 100, "Bolts")
+            .add_to_godown(a.id)
+            .expect("seed a");
+        Stock::new(5, 30, "Bolts")
+            .add_to_godown(b.id)
+            .expect("seed b");
 
         StockTransfer::execute(&reload(a.id), &reload(b.id), "Bolts", 100).expect("transfer");
 
         let results = chunk::search_by_org(org.id, "Warehouse A Bolts", 8).expect("search");
         assert!(
-            !results.iter().any(|c| c.text.contains("Warehouse A") && c.text.contains("Bolts")),
+            !results
+                .iter()
+                .any(|c| c.text.contains("Warehouse A") && c.text.contains("Bolts")),
             "draining the source item completely should drop its chunk: {results:?}"
         );
         let b_results = chunk::search_by_org(org.id, "Warehouse B Bolts", 8).expect("search");
         assert!(
-            b_results.iter().any(|c| c.text.contains("Warehouse B") && c.text.contains("130 units of Bolts")),
+            b_results
+                .iter()
+                .any(|c| c.text.contains("Warehouse B") && c.text.contains("130 units of Bolts")),
             "destination chunk should reflect the merged quantity: {b_results:?}"
         );
     }
@@ -436,15 +480,25 @@ mod tests {
         let org = org();
         let a = Godown::create(org.id, "A", "Addr A", None).expect("a");
         let b = Godown::create(org.id, "B", "Addr B", None).expect("b");
-        Stock::new(5, 10, "Pipes").add_to_godown(a.id).expect("seed");
+        Stock::new(5, 10, "Pipes")
+            .add_to_godown(a.id)
+            .expect("seed");
 
         let err = StockTransfer::execute(&reload(a.id), &reload(b.id), "Pipes", 25).unwrap_err();
         assert!(matches!(
             err,
-            TransferError::InsufficientQuantity { available: 10, requested: 25 }
+            TransferError::InsufficientQuantity {
+                available: 10,
+                requested: 25
+            }
         ));
         assert_eq!(
-            reload(a.id).stock.into_iter().find(|s| s.description == "Pipes").unwrap().quantity,
+            reload(a.id)
+                .stock
+                .into_iter()
+                .find(|s| s.description == "Pipes")
+                .unwrap()
+                .quantity,
             10
         );
         assert!(StockTransfer::list_by_org(org.id).expect("list").is_empty());
@@ -473,7 +527,9 @@ mod tests {
         let org = org();
         let a = Godown::create(org.id, "A", "Addr A", None).expect("a");
         let b = Godown::create(org.id, "B", "Addr B", Some(100)).expect("b capped at 100");
-        Stock::new(10, 50, "Tiles").add_to_godown(a.id).expect("seed"); // vol 10 each
+        Stock::new(10, 50, "Tiles")
+            .add_to_godown(a.id)
+            .expect("seed"); // vol 10 each
 
         // Moving 11 units -> 110 volume at the destination, over the cap of 100.
         assert!(matches!(
@@ -491,7 +547,9 @@ mod tests {
         let org_b = Organization::create_organization("Other Org", "2 Elsewhere").expect("org b");
         let ga = Godown::create(org_a.id, "GA", "A", None).expect("ga");
         let gb = Godown::create(org_b.id, "GB", "B", None).expect("gb");
-        Stock::new(1, 5, "Widget").add_to_godown(ga.id).expect("seed");
+        Stock::new(1, 5, "Widget")
+            .add_to_godown(ga.id)
+            .expect("seed");
 
         assert!(matches!(
             StockTransfer::execute(&reload(ga.id), &reload(gb.id), "Widget", 1).unwrap_err(),
@@ -514,7 +572,11 @@ mod tests {
             .expect("transfer succeeds");
         assert_eq!(transfer.category, "Building Materials");
 
-        let b_cement = reload(b.id).stock.into_iter().find(|s| s.description == "Cement").unwrap();
+        let b_cement = reload(b.id)
+            .stock
+            .into_iter()
+            .find(|s| s.description == "Cement")
+            .unwrap();
         assert_eq!(b_cement.category, "Building Materials");
     }
 
@@ -533,12 +595,17 @@ mod tests {
             .add_to_godown(b.id)
             .expect("seed b");
 
-        let transfer = StockTransfer::execute(&reload(a.id), &reload(b.id), "Bolts", 50).expect("transfer");
+        let transfer =
+            StockTransfer::execute(&reload(a.id), &reload(b.id), "Bolts", 50).expect("transfer");
 
         // The audit row records what actually moved: the source's category.
         assert_eq!(transfer.category, "Hardware");
         // The destination's existing category wins on the merged row.
-        let b_bolts = reload(b.id).stock.into_iter().find(|s| s.description == "Bolts").unwrap();
+        let b_bolts = reload(b.id)
+            .stock
+            .into_iter()
+            .find(|s| s.description == "Bolts")
+            .unwrap();
         assert_eq!(b_bolts.category, "Fasteners");
     }
 
@@ -548,7 +615,9 @@ mod tests {
         let org = org();
         let a = Godown::create(org.id, "A", "Addr A", None).expect("a");
         let b = Godown::create(org.id, "B", "Addr B", None).expect("b");
-        Stock::new(1, 10, "Sacks").add_to_godown(a.id).expect("seed");
+        Stock::new(1, 10, "Sacks")
+            .add_to_godown(a.id)
+            .expect("seed");
         StockTransfer::execute(&reload(a.id), &reload(b.id), "Sacks", 3).expect("transfer");
 
         org.remove_organization().expect("remove org");

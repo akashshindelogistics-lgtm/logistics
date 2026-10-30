@@ -117,9 +117,10 @@ describe('OrganizationDetail page', () => {
 
     await user.type(screen.getByLabelText(/registration number/i), 'MH09XY9999');
     await user.type(screen.getByLabelText(/capacity/i), '15');
+    await user.selectOptions(screen.getByLabelText(/^type$/i), 'Tipper');
     await user.click(screen.getByRole('button', { name: /add vehicle/i }));
 
-    expect(vehiclesApi.addVehicle).toHaveBeenCalledWith('o1', 'MH09XY9999', 15);
+    expect(vehiclesApi.addVehicle).toHaveBeenCalledWith('o1', 'MH09XY9999', 15, 'Tipper');
     await waitFor(() =>
       expect(within(screen.getByTestId('fleet-table')).getByText('MH09XY9999')).toBeInTheDocument(),
     );

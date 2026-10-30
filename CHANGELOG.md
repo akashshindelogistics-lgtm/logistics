@@ -4,6 +4,71 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.12.3](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.2...v0.12.3) (2026-10-12)
+
+
+### Documentation
+
+* **readme:** add the Rust Lint badge and CI entry ([bf95050](https://github.com/akashshindelogistics-lgtm/logistics/commit/bf950500e5420c5c2288f0b643aae8004f7ef016))
+* **readme:** add the Rust Lint badge and CI entry ([bfc4d8a](https://github.com/akashshindelogistics-lgtm/logistics/commit/bfc4d8a301408f04e622ed0f492a2ff6a6cf9a76))
+
+## [0.12.2](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.1...v0.12.2) (2026-10-11)
+
+
+### Documentation
+
+* **readme:** add release links and a "what's in a release" table ([a61efe8](https://github.com/akashshindelogistics-lgtm/logistics/commit/a61efe8740608c14ccf8d2ecad7bded7ba5e2837))
+* **readme:** add release links and a "what's in a release" table ([374c2f6](https://github.com/akashshindelogistics-lgtm/logistics/commit/374c2f6e210d04e987352431560cb27152fa5365))
+
+## [0.12.1](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.0...v0.12.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* resolve clippy warnings so clippy -D warnings passes ([107288a](https://github.com/akashshindelogistics-lgtm/logistics/commit/107288a7c0e52bb51a7ff5dc3d9f9f4689b5d330))
+* **ui:** stop stale loads resetting the driver, godown and vehicle edit forms ([615e4e7](https://github.com/akashshindelogistics-lgtm/logistics/commit/615e4e7b7faa56bfbd27afd80d2c58aa33b4e44b))
+* **ui:** stop stale loads resetting the driver, godown and vehicle edit forms ([cbcc5d2](https://github.com/akashshindelogistics-lgtm/logistics/commit/cbcc5d221b9c260920afad9b2d74ed54a08c0a7f))
+
+## [0.12.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.11.1...v0.12.0) (2026-10-10)
+
+
+### Features
+
+* **ui:** motion - transitions, list animations, lifecycle track, gliding markers, org page ([ae30bcb](https://github.com/akashshindelogistics-lgtm/logistics/commit/ae30bcb0014440e5ff56a3892b82b00b48f23237))
+* **ui:** motion on the org detail page ([73f258c](https://github.com/akashshindelogistics-lgtm/logistics/commit/73f258c97eff3b2a999654596c6003fb61e06321))
+* **ui:** Oxford & Claret colour theme with a richer dashboard ([334faf3](https://github.com/akashshindelogistics-lgtm/logistics/commit/334faf34fd3b4f29621c410b0c62bab0b77dd898))
+* **ui:** Peacock & Marigold colour theme with a richer dashboard ([ad68b85](https://github.com/akashshindelogistics-lgtm/logistics/commit/ad68b85cbf421847a34e5a582f1184d49302ad73))
+* **ui:** switch to the Oxford & Claret heritage palette ([4990837](https://github.com/akashshindelogistics-lgtm/logistics/commit/49908370a516d3a2dfef669eecdcc7bad717f273))
+* **ui:** warm, low-focus rebalance of the Oxford & Claret palette ([8bbc655](https://github.com/akashshindelogistics-lgtm/logistics/commit/8bbc6556bb50717a91d43fc37e9e704b40725b6b))
+
+## [0.11.1](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.11.0...v0.11.1) (2026-10-10)
+
+
+### Documentation
+
+* **onboarding:** add E2E test org manifest as a rehearsal before Mau… ([dfc558f](https://github.com/akashshindelogistics-lgtm/logistics/commit/dfc558f28919004b4404a330052d18bae4c220f4))
+
+## [0.11.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.10.0...v0.11.0) (2026-10-10)
+
+
+### Features
+
+* 3D icons, vehicle types and 3D vehicle models ([1a02107](https://github.com/akashshindelogistics-lgtm/logistics/commit/1a0210797b0b0b05181f361198e2e5697115bbea))
+* **driver:** GET /api/driver/me for the driver's phone ([5908aa1](https://github.com/akashshindelogistics-lgtm/logistics/commit/5908aa16b56c63473e5c34d0e08cfa52a6b5daa3))
+* **driver:** GET /api/driver/me for the driver's phone ([c7c8c6e](https://github.com/akashshindelogistics-lgtm/logistics/commit/c7c8c6e691a05b6c51ae3cc1d81dfc1c6c910fc8))
+* **ui:** 3D icons, per-type vehicle renders, 3D vehicle view and 3D map markers ([e49f5c7](https://github.com/akashshindelogistics-lgtm/logistics/commit/e49f5c7076963eefb36999ce1a9f845e38251aa8))
+* **vehicles:** add vehicle_type (Truck/Tipper/Trailer/Tempo/Pickup/Tanker) ([ab70774](https://github.com/akashshindelogistics-lgtm/logistics/commit/ab7077484c78ff51e55da23f662e38c84df1775f))
+
+
+### Documentation
+
+* plan the native Android driver app (phase 1) ([6c079c9](https://github.com/akashshindelogistics-lgtm/logistics/commit/6c079c93199c8b01106edb98e7632f66cb0c4d52))
+* plan the native Android driver app (phase 1) ([00047fb](https://github.com/akashshindelogistics-lgtm/logistics/commit/00047fbb4b8870354c16f0d9949245e611a25299))
+* **todo:** plan 3D icons and vehicle models for the UI ([41c4263](https://github.com/akashshindelogistics-lgtm/logistics/commit/41c426317b9d4421e688171c6bc46c2877738f88))
+* **todo:** plan a native Android driver app to replace the Expo one ([fc5f219](https://github.com/akashshindelogistics-lgtm/logistics/commit/fc5f219763146655f5eb2f43dce06bdceed01746))
+* **todo:** plan a native Android driver app to replace the Expo one ([b2e4e0e](https://github.com/akashshindelogistics-lgtm/logistics/commit/b2e4e0e3626559faeca4421f708a6c5cb549f3e5))
+* **todo:** plan motion in the UI ([fab1ebc](https://github.com/akashshindelogistics-lgtm/logistics/commit/fab1ebc75d462fdc3234a7e7cb86eabeb8bc88f1))
+
 ## [0.10.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.9.0...v0.10.0) (2026-10-07)
 
 

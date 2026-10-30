@@ -1,6 +1,6 @@
 use crate::logistics::db::connection::DbConnection;
-use bcrypt::{hash, verify, DEFAULT_COST};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use bcrypt::{DEFAULT_COST, hash, verify};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use mysql::prelude::*;
 use mysql::*;
 use serde::{Deserialize, Serialize};
@@ -25,9 +25,7 @@ fn jwt_secret() -> &'static [u8] {
     static SECRET: OnceLock<Vec<u8>> = OnceLock::new();
     SECRET.get_or_init(|| match std::env::var("JWT_SECRET") {
         Ok(s) if s.len() >= 32 => s.into_bytes(),
-        _ if cfg!(debug_assertions) => {
-            b"insecure-development-only-jwt-secret-change-me".to_vec()
-        }
+        _ if cfg!(debug_assertions) => b"insecure-development-only-jwt-secret-change-me".to_vec(),
         Ok(_) => panic!(
             "JWT_SECRET must be at least 32 characters — refusing to sign tokens with a short key"
         ),

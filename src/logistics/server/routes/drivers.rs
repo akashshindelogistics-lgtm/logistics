@@ -2,15 +2,15 @@
 //! vehicle, and the driver's phone: pairing it with a device token and the
 //! location reports it sends (`POST /api/driver/location`).
 
+use super::common::*;
+use super::vehicles::coordinates_in_range;
 use crate::logistics::driver::driver::Driver;
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::vehicle::vehicle::{Location, Vehicle};
-use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse, Responder};
-use super::vehicles::coordinates_in_range;
+use actix_web::{HttpRequest, HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateDriverPayload {
@@ -65,11 +65,13 @@ fn load_owned_driver(driver_id: Uuid, auth_org_id: Uuid) -> Result<Driver, HttpR
             message: "Driver not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch driver: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch driver: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -254,7 +256,7 @@ pub async fn assign_vehicle_driver(
                     success: false,
                     message: "Vehicle not found in this organization".to_string(),
                     data: None,
-                })
+                });
             }
         },
         Err(err) => {
@@ -262,7 +264,7 @@ pub async fn assign_vehicle_driver(
                 success: false,
                 message: format!("Failed to fetch vehicle: {}", err),
                 data: None,
-            })
+            });
         }
     };
 
@@ -414,12 +416,18 @@ fn driver_from_device_token(req: &HttpRequest) -> Result<Driver, HttpResponse> {
         .and_then(|s| s.strip_prefix("Bearer "))
         .and_then(|t| Uuid::parse_str(t.trim()).ok())
         .ok_or_else(|| {
-            json_error(StatusCode::UNAUTHORIZED, "Missing or malformed driver device token")
+            json_error(
+                StatusCode::UNAUTHORIZED,
+                "Missing or malformed driver device token",
+            )
         })?;
 
     match Driver::by_device_token(token) {
         Ok(Some(d)) => Ok(d),
-        Ok(None) => Err(json_error(StatusCode::UNAUTHORIZED, "Unknown driver device token")),
+        Ok(None) => Err(json_error(
+            StatusCode::UNAUTHORIZED,
+            "Unknown driver device token",
+        )),
         Err(err) => Err(json_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to look up device token: {}", err),
@@ -518,13 +526,13 @@ pub async fn report_driver_location(
             return json_error(
                 StatusCode::CONFLICT,
                 "This driver has no assigned vehicle — ask your dispatcher to assign one",
-            )
+            );
         }
         Err(err) => {
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to find the driver's vehicle: {}", err),
-            )
+            );
         }
     };
 
@@ -541,7 +549,7 @@ pub async fn report_driver_location(
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to record location: {}", err),
-            )
+            );
         }
     };
 
@@ -590,13 +598,16 @@ pub async fn driver_me(req: HttpRequest) -> impl Responder {
     let org_name = match Organization::name_by_id(driver.org_id) {
         Ok(Some(name)) => name,
         Ok(None) => {
-            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "The driver's organization no longer exists")
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "The driver's organization no longer exists",
+            );
         }
         Err(err) => {
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to load the organization: {}", err),
-            )
+            );
         }
     };
 
@@ -609,7 +620,7 @@ pub async fn driver_me(req: HttpRequest) -> impl Responder {
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to find the driver's vehicle: {}", err),
-            )
+            );
         }
     };
 

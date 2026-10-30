@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import Vehicles from './Vehicles';
 import * as vehiclesApi from '../api/vehicles';
 import type { Vehicle } from '../types';
+import { VEHICLE_VISUALS } from '../lib/vehicleVisuals';
 
 vi.mock('../api/vehicles');
 vi.mock('../components/LocationMap', () => ({
@@ -41,6 +42,18 @@ describe('Vehicles page', () => {
     expect(screen.getByText('1 vehicles on map')).toBeInTheDocument();
     // "tracked" stat tile reads "<count> tracked"
     expect(screen.getByText('tracked').parentElement).toHaveTextContent('1 tracked');
+  });
+
+  it('shows each vehicle type with its rendered icon, defaulting to Truck', async () => {
+    vi.mocked(vehiclesApi.listVehicles).mockResolvedValue(
+      ok([vehicle({ vehicle_type: 'Tanker' }), vehicle({ registration_number: 'OLD-1' })]),
+    );
+    const { container } = render(<Vehicles />, { wrapper: MemoryRouter });
+
+    expect(await screen.findByText('Tanker')).toBeInTheDocument();
+    expect(screen.getByText('Truck')).toBeInTheDocument();
+    const icons = [...container.querySelectorAll('img.vehicle-type-icon')].map(i => i.getAttribute('src'));
+    expect(icons).toEqual([VEHICLE_VISUALS.Tanker.icon, VEHICLE_VISUALS.Truck.icon]);
   });
 
   it('removes a vehicle after the user confirms the prompt', async () => {

@@ -7,9 +7,12 @@ import { uploadFile, uploadedFileHref } from '../api/uploads';
 import { getOrgId } from '../api/auth';
 import { listVehicleHires, assignVehicleHire } from '../api/vendors';
 import { IconDispatch, IconClock, IconCheck, IconX } from '../components/Icons';
+import Icon3D from '../components/Icon3D';
 import { STATUS_TAG_CLASS, NEXT_ACTIONS, formatStatus, isRunningLate, type NextAction } from '../lib/dispatchLifecycle';
+import LifecycleTrack from '../components/LifecycleTrack';
 import type { DispatchOrder, Invoice, Notification, NotificationStatus, PaymentStatus, VehicleHire } from '../types';
 import './page.css';
+import { useListAnimation } from '../lib/motion';
 
 const PAYMENT_TAG_CLASS: Record<PaymentStatus, string> = {
   PENDING: 'tag-amber',
@@ -39,6 +42,7 @@ const emptyHireForm = {
 type HireFormState = typeof emptyHireForm;
 
 export default function Dispatches() {
+  const rowsRef = useListAnimation();
   const [orders, setOrders] = useState<DispatchOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [summaries, setSummaries] = useState<Record<string, string>>({});
@@ -318,7 +322,7 @@ export default function Dispatches() {
           </div>
         ) : orders.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconDispatch size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="outbox" size={48} /></div>
             <h3>No dispatch orders yet</h3>
             <p>Dispatch orders are created from an organization's detail page when stock is sent to a customer.</p>
           </div>
@@ -339,7 +343,7 @@ export default function Dispatches() {
                   <th>AI Status</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef}>
                 {orders.map(o => (
                   <>
                     <tr key={o.id}>
@@ -384,12 +388,13 @@ export default function Dispatches() {
                         <span className="muted" style={{ marginLeft: 4 }}>units</span>
                       </td>
                       <td>
-                        <span className={`status-tag ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span>
+                        <span key={o.status} className={`status-tag status-tag-pop ${STATUS_TAG_CLASS[o.status]}`}>{formatStatus(o.status)}</span>
                         {isRunningLate(o) && (
                           <span className="status-tag tag-red" style={{ marginLeft: 6 }} title="Still in transit past its expected delivery window">
                             ⚠ Running late
                           </span>
                         )}
+                        <LifecycleTrack order={o} />
                       </td>
                       <td data-testid="billing-cell">
                         {invoices[o.id] ? (

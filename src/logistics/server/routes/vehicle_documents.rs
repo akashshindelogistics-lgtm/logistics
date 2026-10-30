@@ -1,13 +1,15 @@
 //! Vehicle compliance documents (insurance, permits, fitness, ...) and their
 //! expiry status.
 
-use crate::logistics::vehicle::document::{ComplianceDocType, VehicleDocument, VehicleDocumentError};
+use super::common::*;
+use crate::logistics::vehicle::document::{
+    ComplianceDocType, VehicleDocument, VehicleDocumentError,
+};
 use crate::logistics::vehicle::vehicle::Vehicle;
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 /// Create or update (renew) one piece of vehicle compliance paperwork.
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
@@ -55,11 +57,13 @@ pub(super) fn ensure_owned_vehicle(reg: &str, auth_org_id: Uuid) -> Result<(), H
             message: "Vehicle not found in this organization".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch vehicle: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -81,11 +85,13 @@ fn load_owned_vehicle_document(
             message: "Vehicle document not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch vehicle document: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch vehicle document: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -93,16 +99,20 @@ fn load_owned_vehicle_document(
 /// `400`, anything else a `500`.
 fn vehicle_document_error_response(err: VehicleDocumentError) -> HttpResponse {
     match err {
-        VehicleDocumentError::InvalidDate(_) => HttpResponse::BadRequest().json(ApiResponse::<String> {
-            success: false,
-            message: err.to_string(),
-            data: None,
-        }),
-        VehicleDocumentError::Db(_) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to save vehicle document: {}", err),
-            data: None,
-        }),
+        VehicleDocumentError::InvalidDate(_) => {
+            HttpResponse::BadRequest().json(ApiResponse::<String> {
+                success: false,
+                message: err.to_string(),
+                data: None,
+            })
+        }
+        VehicleDocumentError::Db(_) => {
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to save vehicle document: {}", err),
+                data: None,
+            })
+        }
     }
 }
 

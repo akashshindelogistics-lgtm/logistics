@@ -146,7 +146,20 @@ fn parse_iso_date(s: &str) -> Result<(i64, i64, i64), VehicleMaintenanceError> {
         return Err(invalid());
     }
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let dim = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][(m - 1) as usize];
+    let dim = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ][(m - 1) as usize];
     if d > dim {
         return Err(invalid());
     }
@@ -314,7 +327,8 @@ impl VehicleMaintenance {
             },
         )?;
 
-        let (days_until_due, km_until_due, status) = evaluate(due_on.as_deref(), due_at_mileage_km, None);
+        let (days_until_due, km_until_due, status) =
+            evaluate(due_on.as_deref(), due_at_mileage_km, None);
         let item = VehicleMaintenance {
             id,
             org_id,
@@ -426,8 +440,11 @@ impl VehicleMaintenance {
             },
         )?;
 
-        let (days_until_due, km_until_due, status) =
-            evaluate(due_on.as_deref(), due_at_mileage_km, self.current_mileage_km);
+        let (days_until_due, km_until_due, status) = evaluate(
+            due_on.as_deref(),
+            due_at_mileage_km,
+            self.current_mileage_km,
+        );
         self.description = description;
         self.due_on = due_on;
         self.due_at_mileage_km = due_at_mileage_km;
@@ -455,8 +472,11 @@ impl VehicleMaintenance {
             params! { "km" => current_mileage_km, "id" => self.id.to_string() },
         )?;
 
-        let (days_until_due, km_until_due, status) =
-            evaluate(self.due_on.as_deref(), self.due_at_mileage_km, Some(current_mileage_km));
+        let (days_until_due, km_until_due, status) = evaluate(
+            self.due_on.as_deref(),
+            self.due_at_mileage_km,
+            Some(current_mileage_km),
+        );
         self.current_mileage_km = Some(current_mileage_km);
         self.days_until_due = days_until_due;
         self.km_until_due = km_until_due;
@@ -537,8 +557,9 @@ mod tests {
     fn test_create_rejects_a_record_with_no_due_criterion() {
         let _db = TestDb::create();
         let org = org_with_vehicle("MH12MT0001");
-        let err = VehicleMaintenance::create(org.id, "MH12MT0001", "Oil change", None, None, None, None)
-            .unwrap_err();
+        let err =
+            VehicleMaintenance::create(org.id, "MH12MT0001", "Oil change", None, None, None, None)
+                .unwrap_err();
         assert!(matches!(err, VehicleMaintenanceError::NoDueCriterion));
     }
 
@@ -565,20 +586,38 @@ mod tests {
         let org = org_with_vehicle("MH12MT0003");
 
         let valid = VehicleMaintenance::create(
-            org.id, "MH12MT0003", "Full service", Some(date_offset(120)), None, None, None,
+            org.id,
+            "MH12MT0003",
+            "Full service",
+            Some(date_offset(120)),
+            None,
+            None,
+            None,
         )
         .expect("create");
         assert_eq!(valid.status, MaintenanceStatus::UpToDate);
         assert!(valid.days_until_due.unwrap() >= 118);
 
         let soon = VehicleMaintenance::create(
-            org.id, "MH12MT0003", "Full service", Some(date_offset(5)), None, None, None,
+            org.id,
+            "MH12MT0003",
+            "Full service",
+            Some(date_offset(5)),
+            None,
+            None,
+            None,
         )
         .expect("create");
         assert_eq!(soon.status, MaintenanceStatus::DueSoon);
 
         let overdue = VehicleMaintenance::create(
-            org.id, "MH12MT0003", "Full service", Some(date_offset(-3)), None, None, None,
+            org.id,
+            "MH12MT0003",
+            "Full service",
+            Some(date_offset(-3)),
+            None,
+            None,
+            None,
         )
         .expect("create");
         assert_eq!(overdue.status, MaintenanceStatus::Overdue);
@@ -591,7 +630,13 @@ mod tests {
         let org = org_with_vehicle("MH12MT0004");
 
         let mut item = VehicleMaintenance::create(
-            org.id, "MH12MT0004", "Tyre rotation", None, Some(50_000), None, None,
+            org.id,
+            "MH12MT0004",
+            "Tyre rotation",
+            None,
+            Some(50_000),
+            None,
+            None,
         )
         .expect("create");
         // No reading recorded yet -> nothing to compare against.
@@ -616,7 +661,13 @@ mod tests {
 
         // Due date far off, but mileage already overdue.
         let mut item = VehicleMaintenance::create(
-            org.id, "MH12MT0005", "Brake pads", Some(date_offset(300)), Some(40_000), None, None,
+            org.id,
+            "MH12MT0005",
+            "Brake pads",
+            Some(date_offset(300)),
+            Some(40_000),
+            None,
+            None,
         )
         .expect("create");
         item.record_mileage(41_000).expect("record");
@@ -628,13 +679,25 @@ mod tests {
         let _db = TestDb::create();
         let org = org_with_vehicle("MH12MT0006");
         let mut item = VehicleMaintenance::create(
-            org.id, "MH12MT0006", "Oil change", Some(date_offset(1)), None, None, None,
+            org.id,
+            "MH12MT0006",
+            "Oil change",
+            Some(date_offset(1)),
+            None,
+            None,
+            None,
         )
         .expect("create");
         assert_eq!(item.status, MaintenanceStatus::DueSoon);
 
-        item.update("Oil change", Some(date_offset(120)), None, Some(date_offset(-1)), Some("done".to_string()))
-            .expect("update");
+        item.update(
+            "Oil change",
+            Some(date_offset(120)),
+            None,
+            Some(date_offset(-1)),
+            Some("done".to_string()),
+        )
+        .expect("update");
         assert_eq!(item.status, MaintenanceStatus::UpToDate);
         assert_eq!(item.notes, Some("done".to_string()));
     }
@@ -644,10 +707,18 @@ mod tests {
         let _db = TestDb::create();
         let org = org_with_vehicle("MH12MT0007");
         let mut item = VehicleMaintenance::create(
-            org.id, "MH12MT0007", "Oil change", Some(date_offset(30)), None, None, None,
+            org.id,
+            "MH12MT0007",
+            "Oil change",
+            Some(date_offset(30)),
+            None,
+            None,
+            None,
         )
         .expect("create");
-        let err = item.update("Oil change", None, None, None, None).unwrap_err();
+        let err = item
+            .update("Oil change", None, None, None, None)
+            .unwrap_err();
         assert!(matches!(err, VehicleMaintenanceError::NoDueCriterion));
     }
 
@@ -656,11 +727,21 @@ mod tests {
         let _db = TestDb::create();
         let org = org_with_vehicle("MH12MT0008");
         let item = VehicleMaintenance::create(
-            org.id, "MH12MT0008", "Oil change", Some(date_offset(30)), None, None, None,
+            org.id,
+            "MH12MT0008",
+            "Oil change",
+            Some(date_offset(30)),
+            None,
+            None,
+            None,
         )
         .expect("create");
         item.delete().expect("delete");
-        assert!(VehicleMaintenance::get_by_id(item.id).expect("get").is_none());
+        assert!(
+            VehicleMaintenance::get_by_id(item.id)
+                .expect("get")
+                .is_none()
+        );
     }
 
     #[test]
@@ -668,14 +749,24 @@ mod tests {
         let _db = TestDb::create();
         let org = org_with_vehicle("MH12MT0009");
         VehicleMaintenance::create(
-            org.id, "MH12MT0009", "Oil change", Some(date_offset(30)), None, None, None,
+            org.id,
+            "MH12MT0009",
+            "Oil change",
+            Some(date_offset(30)),
+            None,
+            None,
+            None,
         )
         .expect("create");
 
         let vehicle = Vehicle::new("MH12MT0009", 20, Unit::MetricTon);
         vehicle.remove_vehicle().expect("remove vehicle");
 
-        assert!(VehicleMaintenance::list_by_org(org.id).expect("list").is_empty());
+        assert!(
+            VehicleMaintenance::list_by_org(org.id)
+                .expect("list")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -683,16 +774,31 @@ mod tests {
         let _db = TestDb::create();
         let org = org_with_vehicle("MH12MT0010");
         let mileage_only = VehicleMaintenance::create(
-            org.id, "MH12MT0010", "Tyre check", None, Some(60_000), None, None,
+            org.id,
+            "MH12MT0010",
+            "Tyre check",
+            None,
+            Some(60_000),
+            None,
+            None,
         )
         .expect("create");
         let dated = VehicleMaintenance::create(
-            org.id, "MH12MT0010", "Full service", Some(date_offset(10)), None, None, None,
+            org.id,
+            "MH12MT0010",
+            "Full service",
+            Some(date_offset(10)),
+            None,
+            None,
+            None,
         )
         .expect("create");
 
         let by_vehicle = VehicleMaintenance::list_by_vehicle("MH12MT0010").expect("list");
-        assert_eq!(by_vehicle.iter().map(|m| m.id).collect::<Vec<_>>(), vec![dated.id, mileage_only.id]);
+        assert_eq!(
+            by_vehicle.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![dated.id, mileage_only.id]
+        );
 
         let by_org = VehicleMaintenance::list_by_org(org.id).expect("list");
         assert_eq!(by_org.len(), 2);

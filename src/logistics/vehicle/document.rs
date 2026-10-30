@@ -49,10 +49,7 @@ impl ComplianceDocType {
     /// Unknown input falls back to `Insurance` so a bad value never fails a
     /// request outright — mirrors [`Unit::from_str`](super::vehicle::Unit::from_str).
     pub fn from_str(s: &str) -> Self {
-        let normalized = s
-            .trim()
-            .to_ascii_lowercase()
-            .replace([' ', '-', '_'], "");
+        let normalized = s.trim().to_ascii_lowercase().replace([' ', '-', '_'], "");
         match normalized.as_str() {
             "registrationcertificate" | "rc" | "registration" => {
                 ComplianceDocType::RegistrationCertificate
@@ -249,8 +246,16 @@ impl VehicleDocument {
     /// Build a `VehicleDocument` from one raw [`DocRow`], computing the
     /// derived `days_until_expiry` / `status` fields.
     fn hydrate(row: DocRow) -> Self {
-        let (id, org_id, vehicle_registration, doc_type, document_number, issued_on, expires_on, notes) =
-            row;
+        let (
+            id,
+            org_id,
+            vehicle_registration,
+            doc_type,
+            document_number,
+            issued_on,
+            expires_on,
+            notes,
+        ) = row;
         let (days_until_expiry, status) = evaluate(&expires_on);
         VehicleDocument {
             id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -347,9 +352,7 @@ impl VehicleDocument {
         Ok(row.map(Self::hydrate))
     }
 
-    pub fn list_by_vehicle(
-        vehicle_registration: &str,
-    ) -> Result<Vec<Self>, Box<dyn Error>> {
+    pub fn list_by_vehicle(vehicle_registration: &str) -> Result<Vec<Self>, Box<dyn Error>> {
         let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
 
@@ -363,10 +366,7 @@ impl VehicleDocument {
             params! { "reg" => vehicle_registration },
         )?;
 
-        Ok(rows
-            .into_iter()
-            .map(Self::hydrate)
-            .collect())
+        Ok(rows.into_iter().map(Self::hydrate).collect())
     }
 
     /// Every compliance document for an org's whole fleet, soonest expiry
@@ -385,10 +385,7 @@ impl VehicleDocument {
             params! { "org_id" => org_id.to_string() },
         )?;
 
-        Ok(rows
-            .into_iter()
-            .map(Self::hydrate)
-            .collect())
+        Ok(rows.into_iter().map(Self::hydrate).collect())
     }
 
     /// Update the mutable fields — in practice this is how a document gets

@@ -1,11 +1,11 @@
 //! Team members (role-scoped users) of an organization.
 
+use super::common::*;
 use crate::logistics::user::user::{OrgRole, OrgUser, UserError};
-use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, delete, get, post, put, web};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct CreateUserPayload {
@@ -51,11 +51,13 @@ fn load_owned_user(user_id: Uuid, auth_org_id: Uuid) -> Result<OrgUser, HttpResp
             message: "User not found".to_string(),
             data: None,
         })),
-        Err(err) => Err(HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to fetch user: {}", err),
-            data: None,
-        })),
+        Err(err) => Err(
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to fetch user: {}", err),
+                data: None,
+            }),
+        ),
     }
 }
 
@@ -148,16 +150,20 @@ pub async fn add_org_user(
             message: "That email address is already registered".to_string(),
             data: None,
         }),
-        Err(UserError::InvalidInput(why)) => HttpResponse::BadRequest().json(ApiResponse::<String> {
-            success: false,
-            message: why.to_string(),
-            data: None,
-        }),
-        Err(UserError::Db(err)) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
-            success: false,
-            message: format!("Failed to create team member: {}", err),
-            data: None,
-        }),
+        Err(UserError::InvalidInput(why)) => {
+            HttpResponse::BadRequest().json(ApiResponse::<String> {
+                success: false,
+                message: why.to_string(),
+                data: None,
+            })
+        }
+        Err(UserError::Db(err)) => {
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
+                success: false,
+                message: format!("Failed to create team member: {}", err),
+                data: None,
+            })
+        }
     }
 }
 

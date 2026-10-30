@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { listCustomers, createCustomer, deleteCustomer } from '../api/customers';
 import { listOrgInvoices } from '../api/billing';
 import { getOrgId } from '../api/auth';
-import { IconUsers, IconPlus, IconX, IconPin, IconTrash } from '../components/Icons';
+import { IconPlus, IconX, IconPin, IconTrash } from '../components/Icons';
+import Icon3D, { ICONS_3D } from '../components/Icon3D';
 import type { Customer } from '../types';
 import LocationMap, { type MapPin } from '../components/LocationMap';
 import './page.css';
+import { useListAnimation } from '../lib/motion';
 
 interface CustomerBalance {
   outstanding: number;
@@ -13,6 +15,7 @@ interface CustomerBalance {
 }
 
 export default function Customers() {
+  const rowsRef = useListAnimation();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -98,7 +101,7 @@ export default function Customers() {
 
   const pins: MapPin[] = customers.filter(c => c.location).map(c => ({
     lat: c.location!.latitude, lng: c.location!.longitude,
-    label: c.name, detail: c.address,
+    label: c.name, detail: c.address, iconUrl: ICONS_3D.store,
   }));
 
   return (
@@ -184,7 +187,7 @@ export default function Customers() {
           </div>
         ) : customers.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><IconUsers size={26} /></div>
+            <div className="empty-state-icon empty-state-icon-3d"><Icon3D name="store" size={48} /></div>
             <h3>No customers yet</h3>
             <p>Add customers to start dispatching stock to them.</p>
             <button className="btn btn-primary" onClick={() => setShowForm(true)}>
@@ -197,7 +200,7 @@ export default function Customers() {
               <thead>
                 <tr><th>Customer</th><th>Address</th><th>Location</th><th>Billing</th><th></th></tr>
               </thead>
-              <tbody>
+              <tbody ref={rowsRef}>
                 {customers.map(c => (
                   <tr key={c.id}>
                     <td>

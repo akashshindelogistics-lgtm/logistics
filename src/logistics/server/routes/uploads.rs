@@ -1,13 +1,13 @@
 //! File uploads (`/api/orgs/{id}/uploads`) and serving them back.
 
-use crate::logistics::upload::upload::{UploadedFile, UploadError, MAX_UPLOAD_BYTES};
+use super::common::*;
+use crate::logistics::upload::upload::{MAX_UPLOAD_BYTES, UploadError, UploadedFile};
 use actix_multipart::Multipart;
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, get, post, web};
 use futures_util::StreamExt as _;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
-use super::common::*;
 
 /// The minimal info handed back after a successful upload: the new file's id
 /// and the URL it can be fetched back from (`GET /api/uploads/{id}`).
@@ -65,7 +65,8 @@ pub async fn upload_file(
     let mut bytes: Vec<u8> = Vec::new();
     let mut found_field = false;
 
-    while let Some(item) = payload.next().await {
+    // Exactly one file field is expected; any further fields are ignored.
+    if let Some(item) = payload.next().await {
         let mut field = match item {
             Ok(f) => f,
             Err(err) => {
@@ -73,7 +74,7 @@ pub async fn upload_file(
                     success: false,
                     message: format!("Malformed multipart upload: {err}"),
                     data: None,
-                })
+                });
             }
         };
         found_field = true;
@@ -87,21 +88,18 @@ pub async fn upload_file(
                         success: false,
                         message: format!("Malformed multipart upload: {err}"),
                         data: None,
-                    })
+                    });
                 }
             };
             if bytes.len() + data.len() > MAX_UPLOAD_BYTES {
                 return HttpResponse::BadRequest().json(ApiResponse::<String> {
                     success: false,
-                    message: format!(
-                        "File exceeds the {MAX_UPLOAD_BYTES}-byte limit"
-                    ),
+                    message: format!("File exceeds the {MAX_UPLOAD_BYTES}-byte limit"),
                     data: None,
                 });
             }
             bytes.extend_from_slice(&data);
         }
-        break; // exactly one file field is expected
     }
 
     if !found_field {
@@ -128,13 +126,15 @@ pub async fn upload_file(
                 url: format!("/api/uploads/{}", file.id),
             }),
         }),
-        Err(err @ (UploadError::UnsupportedContentType(_) | UploadError::Empty | UploadError::TooLarge(_))) => {
-            HttpResponse::BadRequest().json(ApiResponse::<String> {
-                success: false,
-                message: err.to_string(),
-                data: None,
-            })
-        }
+        Err(
+            err @ (UploadError::UnsupportedContentType(_)
+            | UploadError::Empty
+            | UploadError::TooLarge(_)),
+        ) => HttpResponse::BadRequest().json(ApiResponse::<String> {
+            success: false,
+            message: err.to_string(),
+            data: None,
+        }),
         Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
             success: false,
             message: err.to_string(),
@@ -170,7 +170,9 @@ pub async fn get_uploaded_file(path: web::Path<Uuid>, auth: AuthenticatedOrg) ->
                 });
             }
             match file.read_bytes() {
-                Ok(bytes) => HttpResponse::Ok().content_type(file.content_type.clone()).body(bytes),
+                Ok(bytes) => HttpResponse::Ok()
+                    .content_type(file.content_type.clone())
+                    .body(bytes),
                 Err(err) => HttpResponse::InternalServerError().json(ApiResponse::<String> {
                     success: false,
                     message: format!("Failed to read stored file: {err}"),

@@ -116,7 +116,7 @@ async fn test_auth_orgs_returns_list_without_auth() {
     assert_eq!(resp.status().as_u16(), 200);
     let body: ApiResponse<Vec<OrgSummary>> = test::read_body_json(resp).await;
     assert!(body.success);
-    assert!(body.data.unwrap().len() >= 1);
+    assert!(!body.data.unwrap().is_empty());
 }
 
 #[actix_web::test]
@@ -180,7 +180,10 @@ async fn test_user_login_rejects_wrong_password_and_inactive_account() {
 
     let bad = test::TestRequest::post()
         .uri("/api/auth/user-login")
-        .set_json(&UserLoginPayload { email: "dana@example.com".into(), password: "nope".into() })
+        .set_json(&UserLoginPayload {
+            email: "dana@example.com".into(),
+            password: "nope".into(),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, bad).await.status().as_u16(), 401);
 
@@ -188,13 +191,20 @@ async fn test_user_login_rejects_wrong_password_and_inactive_account() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/users/{}", user.id))
         .insert_header(("Authorization", admin))
-        .set_json(&UpdateUserPayload { name: "Dana".into(), role: OrgRole::Dispatcher, is_active: false })
+        .set_json(&UpdateUserPayload {
+            name: "Dana".into(),
+            role: OrgRole::Dispatcher,
+            is_active: false,
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
 
     let after = test::TestRequest::post()
         .uri("/api/auth/user-login")
-        .set_json(&UserLoginPayload { email: "dana@example.com".into(), password: "dana-password".into() })
+        .set_json(&UserLoginPayload {
+            email: "dana@example.com".into(),
+            password: "dana-password".into(),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, after).await.status().as_u16(), 401);
 }

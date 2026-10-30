@@ -98,7 +98,9 @@ impl Trip {
             (),
         )?;
         if reg_not_null.is_some() {
-            conn.query_drop("ALTER TABLE Trips MODIFY vehicle_registration_number VARCHAR(255) DEFAULT NULL")?;
+            conn.query_drop(
+                "ALTER TABLE Trips MODIFY vehicle_registration_number VARCHAR(255) DEFAULT NULL",
+            )?;
         }
         Ok(())
     }
@@ -108,7 +110,10 @@ impl Trip {
     pub fn compute_status(stops: &[DispatchOrder]) -> TripStatus {
         if stops.is_empty()
             || stops.iter().all(|s| {
-                matches!(s.status, DispatchStatus::Pending | DispatchStatus::AwaitingVehicle)
+                matches!(
+                    s.status,
+                    DispatchStatus::Pending | DispatchStatus::AwaitingVehicle
+                )
             })
         {
             TripStatus::Planned

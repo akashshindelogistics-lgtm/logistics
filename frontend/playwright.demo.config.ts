@@ -15,6 +15,12 @@ import { defineConfig, devices } from '@playwright/test';
  * It starts the Vite dev server and the Rust API itself if they aren't
  * already running (reusing them if they are), so this is a single command.
  */
+// Ports default to the usual 5173 (Vite) and 8080 (API). Set E2E_WEB_PORT and
+// E2E_API_PORT to run a worktree's demo beside servers already on those ports.
+const webPort = process.env.E2E_WEB_PORT || '5173';
+const apiPort = process.env.E2E_API_PORT || '8080';
+const webURL = process.env.E2E_BASE_URL || `http://localhost:${webPort}`;
+
 export default defineConfig({
   testDir: './tests',
   testMatch: /(e2e-full-flow\.spec|\.demo)\.ts$/,
@@ -24,7 +30,7 @@ export default defineConfig({
   timeout: 120_000,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: webURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'on',
@@ -52,15 +58,17 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'npm run dev',
-      url: 'http://localhost:5173',
+      command: `npm run dev -- --port ${webPort} --strictPort`,
+      url: webURL,
+      env: { API_PROXY_TARGET: `http://localhost:${apiPort}` },
       reuseExistingServer: true,
       timeout: 60_000,
     },
     {
       command: 'cargo run --bin logistics-system',
       cwd: '..',
-      url: 'http://127.0.0.1:8080/api/orgs',
+      url: `http://127.0.0.1:${apiPort}/api/orgs`,
+      env: { PORT: apiPort },
       reuseExistingServer: true,
       timeout: 300_000,
     },

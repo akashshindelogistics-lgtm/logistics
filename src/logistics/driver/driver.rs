@@ -103,9 +103,11 @@ impl Driver {
             params! { "hash" => Self::hash_device_token(token) },
         )?;
 
-        Ok(row.map(|(id, org_id, name, license_number, phone, is_active)| {
-            Self::row_to_driver(id, org_id, name, license_number, phone, is_active)
-        }))
+        Ok(
+            row.map(|(id, org_id, name, license_number, phone, is_active)| {
+                Self::row_to_driver(id, org_id, name, license_number, phone, is_active)
+            }),
+        )
     }
 
     pub fn create(
@@ -169,9 +171,11 @@ impl Driver {
             params! { "id" => id.to_string() },
         )?;
 
-        Ok(row.map(|(id, org_id, name, license_number, phone, is_active)| {
-            Self::row_to_driver(id, org_id, name, license_number, phone, is_active)
-        }))
+        Ok(
+            row.map(|(id, org_id, name, license_number, phone, is_active)| {
+                Self::row_to_driver(id, org_id, name, license_number, phone, is_active)
+            }),
+        )
     }
 
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
@@ -326,14 +330,19 @@ mod tests {
         let d = Driver::create(org.id, "Phone Driver", "LIC-P", "222").expect("create");
 
         let first = d.rotate_device_token().expect("issue token");
-        let found = Driver::by_device_token(first).expect("lookup").expect("resolves");
+        let found = Driver::by_device_token(first)
+            .expect("lookup")
+            .expect("resolves");
         assert_eq!(found.id, d.id);
 
         let second = d.rotate_device_token().expect("rotate");
         assert_ne!(first, second);
         assert!(Driver::by_device_token(first).expect("lookup").is_none());
         assert_eq!(
-            Driver::by_device_token(second).expect("lookup").expect("resolves").id,
+            Driver::by_device_token(second)
+                .expect("lookup")
+                .expect("resolves")
+                .id,
             d.id
         );
     }
@@ -341,7 +350,11 @@ mod tests {
     #[test]
     fn test_unknown_device_token_resolves_to_none() {
         let _db = TestDb::create();
-        assert!(Driver::by_device_token(Uuid::new_v4()).expect("lookup").is_none());
+        assert!(
+            Driver::by_device_token(Uuid::new_v4())
+                .expect("lookup")
+                .is_none()
+        );
     }
 
     #[test]

@@ -48,7 +48,12 @@ fn build_ops_snapshot_text(report: &OpsReport) -> String {
         report
             .godown_inventory
             .iter()
-            .map(|g| format!("{} holds {} units across {} item(s)", g.godown_name, g.units_on_hand, g.distinct_items))
+            .map(|g| {
+                format!(
+                    "{} holds {} units across {} item(s)",
+                    g.godown_name, g.units_on_hand, g.distinct_items
+                )
+            })
             .collect::<Vec<_>>()
             .join("; ")
     };
@@ -134,10 +139,10 @@ pub async fn answer_question(org_id: Uuid, question: &str) -> Result<AssistantAn
     // workspace) must name the target workspace explicitly, or the API rejects
     // the call with `workspace_id_required`. Workspace-scoped keys don't need
     // this, so the header is only sent when `ANTHROPIC_WORKSPACE_ID` is set.
-    if let Ok(workspace_id) = std::env::var("ANTHROPIC_WORKSPACE_ID") {
-        if !workspace_id.trim().is_empty() {
-            request = request.header("anthropic-workspace-id", workspace_id);
-        }
+    if let Ok(workspace_id) = std::env::var("ANTHROPIC_WORKSPACE_ID")
+        && !workspace_id.trim().is_empty()
+    {
+        request = request.header("anthropic-workspace-id", workspace_id);
     }
 
     let resp = request
@@ -198,7 +203,10 @@ mod tests {
     fn build_answer_prompt_includes_the_question_every_fact_and_the_snapshot() {
         let chunks = vec![
             sample_chunk(ChunkKind::Notification, "Order abcd1234 was dispatched"),
-            sample_chunk(ChunkKind::VehicleDocument, "MH12AB1234 insurance expires 2026-10-02"),
+            sample_chunk(
+                ChunkKind::VehicleDocument,
+                "MH12AB1234 insurance expires 2026-10-02",
+            ),
         ];
         let prompt = build_answer_prompt(
             "What happened to order abcd1234?",
@@ -226,9 +234,16 @@ mod tests {
     fn sample_report() -> OpsReport {
         use crate::logistics::reports::{DeliveryPerformance, VehicleUtilization};
         OpsReport {
-            vehicle_utilization: VehicleUtilization { total_vehicles: 4, vehicles_on_active_trip: 1, utilization_percent: 25.0 },
+            vehicle_utilization: VehicleUtilization {
+                total_vehicles: 4,
+                vehicles_on_active_trip: 1,
+                utilization_percent: 25.0,
+            },
             delivery_performance: DeliveryPerformance {
-                delivered_count: 10, returned_count: 2, avg_hours_to_deliver: Some(18.5), on_time_rate_percent: Some(80.0),
+                delivered_count: 10,
+                returned_count: 2,
+                avg_hours_to_deliver: Some(18.5),
+                on_time_rate_percent: Some(80.0),
             },
             units_dispatched_recently: 340,
             godown_inventory: Vec::new(),
@@ -301,7 +316,8 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn answer_question_does_not_short_circuit_when_the_org_has_operational_data_even_without_a_matching_chunk() {
+    async fn answer_question_does_not_short_circuit_when_the_org_has_operational_data_even_without_a_matching_chunk()
+     {
         use crate::logistics::godown::godown::Godown;
         use crate::logistics::orgs::orgs::Organization;
 
@@ -320,7 +336,9 @@ mod tests {
 
         let err = answer_question(org.id, "what's my fleet utilization?")
             .await
-            .expect_err("an org with real operational data should attempt generation, not short-circuit");
+            .expect_err(
+                "an org with real operational data should attempt generation, not short-circuit",
+            );
         assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
     }
 }

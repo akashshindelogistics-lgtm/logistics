@@ -2,6 +2,8 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { IconGrid, IconBuilding, IconTruck, IconUsers, IconPackage, IconDispatch, IconChart, IconX, IconSun, IconMoon } from './Icons';
 import { getOrgName, getOrgId, clearAuth, isLoggedIn, isAdmin } from '../api/auth';
 import { useTheme } from '../lib/theme';
+import { m } from 'motion/react';
+import { useTransitionClick } from '../lib/viewTransition';
 import './Sidebar.css';
 
 const baseLinks = [
@@ -17,6 +19,38 @@ const baseLinks = [
 const adminLinks = [
   { to: '/team',       label: 'Team',            Icon: IconUsers },
 ];
+
+function SidebarLink({ href, end, label, Icon }: {
+  href: string;
+  end: boolean;
+  label: string;
+  Icon: (typeof baseLinks)[number]['Icon'];
+}) {
+  const onClick = useTransitionClick(href);
+  return (
+    <NavLink
+      to={href}
+      end={end}
+      onClick={onClick}
+      className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
+    >
+      {({ isActive }) => (
+        <>
+          {/* One shared highlight that slides to whichever link is active */}
+          {isActive && (
+            <m.span
+              layoutId="sidebar-active"
+              className="sidebar-link-highlight"
+              transition={{ type: 'spring', stiffness: 520, damping: 40 }}
+            />
+          )}
+          <Icon size={16} />
+          <span>{label}</span>
+        </>
+      )}
+    </NavLink>
+  );
+}
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -58,17 +92,7 @@ export default function Sidebar() {
         {links.map(({ to, label, Icon }) => {
           // Redirect /orgs to the specific org detail page if we know the org ID
           const href = (to === '/orgs' && orgId) ? `/orgs/${orgId}` : to;
-          return (
-            <NavLink
-              key={to}
-              to={href}
-              end={to === '/'}
-              className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
-            >
-              <Icon size={16} />
-              <span>{label}</span>
-            </NavLink>
-          );
+          return <SidebarLink key={to} href={href} end={to === '/'} label={label} Icon={Icon} />;
         })}
       </nav>
 

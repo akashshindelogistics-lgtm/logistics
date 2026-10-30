@@ -1,7 +1,10 @@
 name: Release
 
-# Fires when a version tag is pushed (release-please creates these on merge of
-# its release PR; you can also tag by hand: `git tag v0.1.0 && git push --tags`).
+# Fires for a new version tag. release-please creates these on merge of its
+# release PR and then dispatches this workflow for the tag (its own tag push
+# can't trigger it, see release-please.yml). A tag pushed by hand
+# (`git tag v0.1.0 && git push --tags`) triggers it directly, and "Run
+# workflow" with an existing tag rebuilds that release.
 #
 # Produces, for tag vX.Y.Z:
 #   - GHCR image  ghcr.io/<owner>/logistics-api:X.Y.Z, :X.Y, :latest  (arm64)
@@ -24,8 +27,10 @@ permissions:
   contents: write
   packages: write
 
+# Keyed on the tag, not the ref: a dispatched run has ref=master, a tag push
+# has ref=refs/tags/vX.Y.Z, and both must queue behind each other.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:

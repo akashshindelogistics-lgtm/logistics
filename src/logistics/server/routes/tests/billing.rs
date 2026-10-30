@@ -31,7 +31,10 @@ async fn test_invoice_lifecycle_via_api() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/dispatches/{}/invoice", dispatch.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&InvoicePayload { amount: 4500, due_on: billing_date_offset(15) })
+        .set_json(&InvoicePayload {
+            amount: 4500,
+            due_on: billing_date_offset(15),
+        })
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 201);
@@ -44,7 +47,10 @@ async fn test_invoice_lifecycle_via_api() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/dispatches/{}/invoice", dispatch.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&InvoicePayload { amount: 1, due_on: billing_date_offset(1) })
+        .set_json(&InvoicePayload {
+            amount: 1,
+            due_on: billing_date_offset(1),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
 
@@ -52,7 +58,10 @@ async fn test_invoice_lifecycle_via_api() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/invoices/{}", inv.id))
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&InvoicePayload { amount: 5200, due_on: billing_date_offset(15) })
+        .set_json(&InvoicePayload {
+            amount: 5200,
+            due_on: billing_date_offset(15),
+        })
         .to_request();
     let amended: ApiResponse<Invoice> =
         test::read_body_json(test::call_service(&app, req).await).await;
@@ -90,7 +99,10 @@ async fn test_invoice_lifecycle_via_api() {
     let req = test::TestRequest::put()
         .uri(&format!("/api/invoices/{}", inv.id))
         .insert_header(("Authorization", auth))
-        .set_json(&InvoicePayload { amount: 1, due_on: billing_date_offset(30) })
+        .set_json(&InvoicePayload {
+            amount: 1,
+            due_on: billing_date_offset(30),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 409);
 }
@@ -104,7 +116,10 @@ async fn test_create_invoice_rejects_bad_amount_with_400() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/dispatches/{}/invoice", dispatch.id))
         .insert_header(("Authorization", auth))
-        .set_json(&InvoicePayload { amount: 0, due_on: billing_date_offset(10) })
+        .set_json(&InvoicePayload {
+            amount: 0,
+            due_on: billing_date_offset(10),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 400);
 }
@@ -119,7 +134,10 @@ async fn test_invoice_routes_403_for_a_different_org() {
     let req = test::TestRequest::post()
         .uri(&format!("/api/dispatches/{}/invoice", dispatch.id))
         .insert_header(("Authorization", auth))
-        .set_json(&InvoicePayload { amount: 100, due_on: billing_date_offset(10) })
+        .set_json(&InvoicePayload {
+            amount: 100,
+            due_on: billing_date_offset(10),
+        })
         .to_request();
     let created: ApiResponse<Invoice> =
         test::read_body_json(test::call_service(&app, req).await).await;

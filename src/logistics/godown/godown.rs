@@ -53,8 +53,7 @@ impl Godown {
         address: impl Into<String>,
         max_capacity: Option<i64>,
     ) -> Result<Self, Box<dyn Error>> {
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
 
         let godown = Godown {
@@ -93,8 +92,7 @@ impl Godown {
         let new_name = name.into();
         let new_address = address.into();
 
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
 
         conn.exec_drop(
             "UPDATE Godowns SET name = :name, address = :address, max_capacity = :max_capacity WHERE id = :id",
@@ -158,8 +156,7 @@ impl Godown {
         longitude: f64,
         address: Option<impl Into<String>>,
     ) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -188,8 +185,7 @@ impl Godown {
     }
 
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
 
         let row: Option<(String, String, String, Option<i64>, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn
@@ -222,8 +218,7 @@ impl Godown {
     }
 
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
 
         let rows: Vec<(String, String, String, Option<i64>, Option<f64>, Option<f64>, Option<i64>, Option<String>)> = conn.exec_map(
@@ -255,8 +250,7 @@ impl Godown {
     }
 
     pub fn remove(&self) -> Result<(), Box<dyn Error>> {
-        let mut conn = DbConnection::from_env()
-            .get_connection()?;
+        let mut conn = DbConnection::from_env().get_connection()?;
         conn.exec_drop(
             "DELETE FROM Godowns WHERE id = :id",
             params! { "id" => self.id.to_string() },
@@ -273,17 +267,19 @@ mod tests {
     use crate::logistics::test_support::TestDb;
 
     fn make_org() -> Organization {
-        Organization::create_organization("Godown Test Org", "1 Warehouse Way")
-            .expect("create org")
+        Organization::create_organization("Godown Test Org", "1 Warehouse Way").expect("create org")
     }
 
     #[test]
     fn test_create_and_get_godown() {
         let _db = TestDb::create();
         let org = make_org();
-        let g = Godown::create(org.id, "North Godown", "Plot 5, Industrial Area", None).expect("create godown");
+        let g = Godown::create(org.id, "North Godown", "Plot 5, Industrial Area", None)
+            .expect("create godown");
 
-        let fetched = Godown::get_by_id(g.id).expect("get_by_id").expect("godown exists");
+        let fetched = Godown::get_by_id(g.id)
+            .expect("get_by_id")
+            .expect("godown exists");
         assert_eq!(fetched.name, "North Godown");
         assert_eq!(fetched.org_id, org.id);
         assert!(fetched.location.is_none());
@@ -297,8 +293,10 @@ mod tests {
         let org = make_org();
         let mut g = Godown::create(org.id, "Old Name", "Old Address", None).expect("create godown");
 
-        g.update("New Name", "New Address", Some(5_000)).expect("update");
-        g.update_location(19.07, 72.87, Some("Bandra")).expect("update location");
+        g.update("New Name", "New Address", Some(5_000))
+            .expect("update");
+        g.update_location(19.07, 72.87, Some("Bandra"))
+            .expect("update location");
 
         let fetched = Godown::get_by_id(g.id).expect("get").expect("exists");
         assert_eq!(fetched.name, "New Name");
@@ -317,15 +315,29 @@ mod tests {
 
         let mut g = Godown::create(org.id, "Old Name", "Old Address", None).expect("create");
         let results = chunk::search_by_org(org.id, "Old Name Old Address", 8).expect("search");
-        assert!(results.iter().any(|c| c.text.contains("Old Name") && c.text.contains("Old Address")), "{results:?}");
+        assert!(
+            results
+                .iter()
+                .any(|c| c.text.contains("Old Name") && c.text.contains("Old Address")),
+            "{results:?}"
+        );
 
-        g.update("New Name", "New Address", Some(5_000)).expect("update");
+        g.update("New Name", "New Address", Some(5_000))
+            .expect("update");
         let results = chunk::search_by_org(org.id, "New Name New Address", 8).expect("search");
-        assert!(results.iter().any(|c| c.text.contains("New Name") && c.text.contains("Maximum capacity: 5000")), "{results:?}");
+        assert!(
+            results
+                .iter()
+                .any(|c| c.text.contains("New Name") && c.text.contains("Maximum capacity: 5000")),
+            "{results:?}"
+        );
 
         g.remove().expect("remove");
         let results = chunk::search_by_org(org.id, "New Name New Address", 8).expect("search");
-        assert!(!results.iter().any(|c| c.text.contains("New Name")), "removing a godown should drop its chunk: {results:?}");
+        assert!(
+            !results.iter().any(|c| c.text.contains("New Name")),
+            "removing a godown should drop its chunk: {results:?}"
+        );
     }
 
     #[test]
@@ -358,10 +370,12 @@ mod tests {
     fn test_check_capacity_for_enforces_max_capacity() {
         let _db = TestDb::create();
         let org = make_org();
-        let g = Godown::create(org.id, "Capped Godown", "Bay 7", Some(1_000))
-            .expect("create godown");
+        let g =
+            Godown::create(org.id, "Capped Godown", "Bay 7", Some(1_000)).expect("create godown");
 
-        Stock::new(10, 50, "Pallets A").add_to_godown(g.id).expect("add stock a"); // 500
+        Stock::new(10, 50, "Pallets A")
+            .add_to_godown(g.id)
+            .expect("add stock a"); // 500
         let g = Godown::get_by_id(g.id).expect("get").expect("exists");
         assert_eq!(g.used_capacity(), 500);
 

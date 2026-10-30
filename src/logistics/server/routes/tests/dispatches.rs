@@ -51,7 +51,10 @@ async fn dispatch_notifications(
         .to_request();
     let resp = test::call_service(app, req).await;
     assert_eq!(resp.status().as_u16(), 200);
-    test::read_body_json::<ApiResponse<Vec<Notification>>, _>(resp).await.data.unwrap()
+    test::read_body_json::<ApiResponse<Vec<Notification>>, _>(resp)
+        .await
+        .data
+        .unwrap()
 }
 
 #[actix_web::test]
@@ -87,7 +90,11 @@ async fn test_dispatch_rejects_customer_from_another_org() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 400);
     let body: ApiResponse<String> = test::read_body_json(resp).await;
-    assert!(body.message.contains("different organization"), "{}", body.message);
+    assert!(
+        body.message.contains("different organization"),
+        "{}",
+        body.message
+    );
 }
 
 #[actix_web::test]
@@ -152,6 +159,7 @@ async fn test_dispatch_stock_carries_multiple_line_items() {
             registration_number: "DISP-VH-002".to_string(),
             capacity: 100_000,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     test::call_service(&app, req).await;
@@ -169,7 +177,9 @@ async fn test_dispatch_stock_carries_multiple_line_items() {
     let req = test::TestRequest::put()
         .uri("/api/vehicles/DISP-VH-002/driver")
         .insert_header(("Authorization", auth.clone()))
-        .set_json(&AssignDriverPayload { driver_id: Some(driver.data.unwrap().id) })
+        .set_json(&AssignDriverPayload {
+            driver_id: Some(driver.data.unwrap().id),
+        })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
 
@@ -209,8 +219,14 @@ async fn test_dispatch_stock_carries_multiple_line_items() {
             vendor_id: None,
             customer_id: first.customer_id,
             line_items: vec![
-                DispatchLineItemPayload { stock_description: "Bricks".to_string(), requested_quantity: 120 },
-                DispatchLineItemPayload { stock_description: "Tiles".to_string(), requested_quantity: 40 },
+                DispatchLineItemPayload {
+                    stock_description: "Bricks".to_string(),
+                    requested_quantity: 120,
+                },
+                DispatchLineItemPayload {
+                    stock_description: "Tiles".to_string(),
+                    requested_quantity: 40,
+                },
             ],
         })
         .to_request();
@@ -221,7 +237,10 @@ async fn test_dispatch_stock_carries_multiple_line_items() {
     assert_eq!(order.line_items.len(), 2);
     assert_eq!(order.line_items[0].stock_description, "Bricks");
     assert_eq!(order.line_items[1].stock_description, "Tiles");
-    assert_eq!(order.line_items.iter().map(|li| li.quantity).sum::<i64>(), 160);
+    assert_eq!(
+        order.line_items.iter().map(|li| li.quantity).sum::<i64>(),
+        160
+    );
 
     // A duplicated description is rejected with 400.
     let req = test::TestRequest::post()
@@ -232,8 +251,14 @@ async fn test_dispatch_stock_carries_multiple_line_items() {
             vendor_id: None,
             customer_id: first.customer_id,
             line_items: vec![
-                DispatchLineItemPayload { stock_description: "Bricks".to_string(), requested_quantity: 1 },
-                DispatchLineItemPayload { stock_description: "Bricks".to_string(), requested_quantity: 2 },
+                DispatchLineItemPayload {
+                    stock_description: "Bricks".to_string(),
+                    requested_quantity: 1,
+                },
+                DispatchLineItemPayload {
+                    stock_description: "Bricks".to_string(),
+                    requested_quantity: 2,
+                },
             ],
         })
         .to_request();
@@ -410,7 +435,11 @@ async fn test_update_dispatch_status_returned_credits_stock_back_into_a_godown()
             .sum()
     }
 
-    assert_eq!(goods_qty(&app, org.id, &auth).await, 90, "10 units were dispatched");
+    assert_eq!(
+        goods_qty(&app, org.id, &auth).await,
+        90,
+        "10 units were dispatched"
+    );
 
     for status in [
         DispatchStatus::Confirmed,
@@ -520,7 +549,10 @@ async fn test_dispatch_stock_returns_403_for_different_org() {
     };
     let req = test::TestRequest::post()
         .uri(&format!("/api/orgs/{}/dispatch", target_org_id))
-        .insert_header(("Authorization", make_auth_header(attacker_org_id, "Attacker")))
+        .insert_header((
+            "Authorization",
+            make_auth_header(attacker_org_id, "Attacker"),
+        ))
         .set_json(&payload)
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -537,14 +569,24 @@ async fn test_creating_a_dispatch_records_customer_and_driver_notifications() {
 
     let notifs = dispatch_notifications(&app, dispatch.id, &auth).await;
     assert_eq!(notifs.len(), 2);
-    assert!(notifs.iter().all(|n| n.event == NotificationEvent::DispatchCreated));
+    assert!(
+        notifs
+            .iter()
+            .all(|n| n.event == NotificationEvent::DispatchCreated)
+    );
 
     // setup_dispatch's customer has no contact details → SKIPPED.
-    let customer = notifs.iter().find(|n| n.recipient_kind == "customer").unwrap();
+    let customer = notifs
+        .iter()
+        .find(|n| n.recipient_kind == "customer")
+        .unwrap();
     assert_eq!(customer.status, NotificationStatus::Skipped);
 
     // The assigned driver has a phone → a QUEUED SMS.
-    let driver = notifs.iter().find(|n| n.recipient_kind == "driver").unwrap();
+    let driver = notifs
+        .iter()
+        .find(|n| n.recipient_kind == "driver")
+        .unwrap();
     assert_eq!(driver.status, NotificationStatus::Queued);
     assert_eq!(driver.channel, NotificationChannel::Sms);
 }
@@ -599,11 +641,18 @@ async fn test_dispatcher_can_dispatch_but_warehouse_staff_cannot() {
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
 
-    let dispatcher = add_user_and_login(&app, org.id, &admin, "d@example.com", OrgRole::Dispatcher).await;
-    let warehouse = add_user_and_login(&app, org.id, &admin, "w@example.com", OrgRole::WarehouseStaff).await;
+    let dispatcher =
+        add_user_and_login(&app, org.id, &admin, "d@example.com", OrgRole::Dispatcher).await;
+    let warehouse = add_user_and_login(
+        &app,
+        org.id,
+        &admin,
+        "w@example.com",
+        OrgRole::WarehouseStaff,
+    )
+    .await;
 
     let body = DispatchRequestPayload {
-
         vehicle_source: VehicleSource::Own,
 
         vendor_id: None,
@@ -645,6 +694,7 @@ async fn test_dispatch_rejected_when_no_vehicle_has_an_active_driver() {
             registration_number: "ND-VH-1".to_string(),
             capacity: 20,
             unit: "MetricTon".to_string(),
+            vehicle_type: None,
         })
         .to_request();
     assert_eq!(test::call_service(&app, req).await.status().as_u16(), 201);
@@ -719,5 +769,9 @@ async fn test_dispatch_rejected_when_no_vehicle_has_an_active_driver() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 400);
     let body: ApiResponse<String> = test::read_body_json(resp).await;
-    assert!(body.message.contains("active assigned driver"), "{}", body.message);
+    assert!(
+        body.message.contains("active assigned driver"),
+        "{}",
+        body.message
+    );
 }

@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.10.0",
+  "version": "0.12.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,19 +21,27 @@
     "test:e2e:demo:assistant": "playwright test --config=playwright.demo.config.ts assistant.demo",
     "test:e2e:demo:uploads": "playwright test --config=playwright.demo.config.ts file-uploads.demo",
     "test:e2e:demo:stock-categories": "playwright test --config=playwright.demo.config.ts stock-categories.demo",
+    "test:e2e:demo:vehicle-visuals": "playwright test --config=playwright.demo.config.ts vehicle-visuals.demo",
+    "test:e2e:demo:motion": "playwright test --config=playwright.demo.config.ts motion.demo",
     "test:e2e:demo:vendors": "playwright test --config=playwright.demo.config.ts vendors.demo",
     "test:e2e:demo:hired-vehicles": "playwright test --config=playwright.demo.config.ts hired-vehicles.demo",
     "test:e2e:demo:vendor-payments": "playwright test --config=playwright.demo.config.ts vendor-payments.demo",
-    "test:e2e:demo:driver-tracking": "playwright test --config=playwright.demo.config.ts driver-tracking.demo"
+    "test:e2e:demo:driver-tracking": "playwright test --config=playwright.demo.config.ts driver-tracking.demo",
+    "test:e2e:demo:theme-colors": "playwright test --config=playwright.demo.config.ts theme-colors.demo",
+    "render:vehicle-icons": "node scripts/render-vehicle-icons.mjs"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.10.0",
+    "@react-three/fiber": "^9.8.1",
     "@types/leaflet": "^1.9.22",
     "axios": "^1.20.0",
     "leaflet": "^1.9.4",
+    "motion": "^14.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-leaflet": "^5.0.0",
-    "react-router-dom": "^7.18.2"
+    "react-router-dom": "^7.18.2",
+    "three": "^0.186.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -43,6 +51,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.0",
     "jsdom": "^29.1.1",
     "oxlint": "^1.79.0",

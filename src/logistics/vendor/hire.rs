@@ -167,7 +167,8 @@ impl From<Box<dyn Error>> for HireError {
     }
 }
 
-const SELECT_HIRE: &str = "SELECT h.id, h.org_id, h.vendor_id, COALESCE(v.name, ''), h.dispatch_id, h.trip_id,
+const SELECT_HIRE: &str =
+    "SELECT h.id, h.org_id, h.vendor_id, COALESCE(v.name, ''), h.dispatch_id, h.trip_id,
         h.required_volume, h.status, h.registration_number, h.capacity, h.unit,
         h.driver_name, h.driver_phone, h.driver_license, h.freight_amount, h.advance_paid,
         h.requested_at, h.confirmed_at, h.closed_at,
@@ -307,7 +308,10 @@ impl VehicleHire {
     }
 
     /// The org's hires, newest first, optionally only those in `status`.
-    pub fn list_by_org(org_id: Uuid, status: Option<HireStatus>) -> Result<Vec<Self>, Box<dyn Error>> {
+    pub fn list_by_org(
+        org_id: Uuid,
+        status: Option<HireStatus>,
+    ) -> Result<Vec<Self>, Box<dyn Error>> {
         let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
         let rows: Vec<mysql::Row> = conn.exec(
@@ -358,13 +362,19 @@ impl VehicleHire {
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty());
         if reg.is_empty() {
-            return Err(HireError::InvalidInput("the hired truck's registration number is required".into()));
+            return Err(HireError::InvalidInput(
+                "the hired truck's registration number is required".into(),
+            ));
         }
         if driver_name.is_empty() || driver_phone.is_empty() {
-            return Err(HireError::InvalidInput("the hired driver's name and phone are required".into()));
+            return Err(HireError::InvalidInput(
+                "the hired driver's name and phone are required".into(),
+            ));
         }
         if input.freight_amount <= 0 {
-            return Err(HireError::InvalidInput("freight amount must be greater than zero".into()));
+            return Err(HireError::InvalidInput(
+                "freight amount must be greater than zero".into(),
+            ));
         }
         if input.advance_paid < 0 || input.advance_paid > input.freight_amount {
             return Err(HireError::InvalidInput(
@@ -415,7 +425,9 @@ impl VehicleHire {
             )?;
             if tx.affected_rows() == 0 {
                 tx.rollback()?;
-                return Err(HireError::Conflict("this hire was assigned or closed meanwhile".into()));
+                return Err(HireError::Conflict(
+                    "this hire was assigned or closed meanwhile".into(),
+                ));
             }
 
             let ids: Vec<String> = tx.exec(
@@ -480,16 +492,18 @@ impl VehicleHire {
         paid_on: Option<String>,
         note: Option<String>,
     ) -> Result<VendorPayment, HireError> {
-        let balance = match (self.status, self.balance_due) {
-            (HireStatus::Confirmed | HireStatus::Released, Some(b)) => b,
-            _ => {
-                return Err(HireError::Conflict(
-                    "no truck or rate has been assigned to this hire, so there is nothing to pay".into(),
-                ))
-            }
-        };
+        let balance =
+            match (self.status, self.balance_due) {
+                (HireStatus::Confirmed | HireStatus::Released, Some(b)) => b,
+                _ => return Err(HireError::Conflict(
+                    "no truck or rate has been assigned to this hire, so there is nothing to pay"
+                        .into(),
+                )),
+            };
         if amount <= 0 {
-            return Err(HireError::InvalidInput("payment amount must be greater than zero".into()));
+            return Err(HireError::InvalidInput(
+                "payment amount must be greater than zero".into(),
+            ));
         }
         if amount > balance {
             return Err(HireError::InvalidInput(format!(
@@ -501,7 +515,9 @@ impl VehicleHire {
             .filter(|d| !d.is_empty())
             .unwrap_or_else(crate::logistics::billing::invoice::today_iso);
         if !crate::logistics::billing::invoice::is_valid_iso_date(&paid_on) {
-            return Err(HireError::InvalidInput(format!("'{paid_on}' is not a YYYY-MM-DD date")));
+            return Err(HireError::InvalidInput(format!(
+                "'{paid_on}' is not a YYYY-MM-DD date"
+            )));
         }
         let note = note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
 
@@ -612,12 +628,20 @@ mod tests {
     fn fleetless_org() -> (Organization, Customer, VehicleVendor) {
         let org = Organization::create_organization("No Fleet Co", "Pune").expect("org");
         let godown = Godown::create(org.id, "Main", "MIDC", None).expect("godown");
-        Stock::new(2, 100, "Cement").add_to_godown(godown.id).expect("stock");
+        Stock::new(2, 100, "Cement")
+            .add_to_godown(godown.id)
+            .expect("stock");
         let mut customer = Customer::create_customer(org.id, "Buyer", "Baner").expect("customer");
-        customer.update_location(18.56, 73.78, Some("Baner")).expect("location");
+        customer
+            .update_location(18.56, 73.78, Some("Baner"))
+            .expect("location");
         let vendor = VehicleVendor::create(
             org.id,
-            VendorInput { name: "Sharma Roadlines".into(), phone: "+91 1".into(), ..Default::default() },
+            VendorInput {
+                name: "Sharma Roadlines".into(),
+                phone: "+91 1".into(),
+                ..Default::default()
+            },
         )
         .expect("vendor");
         (org, customer, vendor)
@@ -665,7 +689,9 @@ mod tests {
         assert_eq!(order.vehicle_registration_number, None);
         assert_eq!(cement_left(&org), 90, "stock is reserved straight away");
 
-        let hire = VehicleHire::get_by_id(order.hire_id.expect("hire id")).unwrap().unwrap();
+        let hire = VehicleHire::get_by_id(order.hire_id.expect("hire id"))
+            .unwrap()
+            .unwrap();
         assert_eq!(hire.status, HireStatus::Requested);
         assert_eq!(hire.dispatch_id, Some(order.id));
         assert_eq!(hire.vendor_name, "Sharma Roadlines");
@@ -683,7 +709,11 @@ mod tests {
         let other = Organization::create_organization("Other Org", "x").expect("org");
         let foreign = VehicleVendor::create(
             other.id,
-            VendorInput { name: "Theirs".into(), phone: "1".into(), ..Default::default() },
+            VendorInput {
+                name: "Theirs".into(),
+                phone: "1".into(),
+                ..Default::default()
+            },
         )
         .expect("foreign vendor");
 
@@ -693,7 +723,14 @@ mod tests {
         assert!(err.to_string().contains("not found"), "{err}");
 
         vendor
-            .update(VendorInput { name: vendor.name.clone(), phone: vendor.phone.clone(), ..Default::default() }, false)
+            .update(
+                VendorInput {
+                    name: vendor.name.clone(),
+                    phone: vendor.phone.clone(),
+                    ..Default::default()
+                },
+                false,
+            )
             .expect("deactivate");
         let err = org
             .dispatch_stock_on_hired_vehicle(&customer, &[line("Cement", 5)], vendor.id)
@@ -711,16 +748,29 @@ mod tests {
         let order = org
             .dispatch_stock_on_hired_vehicle(&customer, &[line("Cement", 10)], vendor.id)
             .expect("hired dispatch");
-        let mut hire = VehicleHire::get_by_id(order.hire_id.unwrap()).unwrap().unwrap();
+        let mut hire = VehicleHire::get_by_id(order.hire_id.unwrap())
+            .unwrap()
+            .unwrap();
 
-        let too_small = hire.assign(truck("MH12 HR 0001", 19)).expect_err("capacity 19 < 20");
-        assert!(matches!(too_small, HireError::InvalidInput(ref m) if m.contains("too small")), "{too_small}");
+        let too_small = hire
+            .assign(truck("MH12 HR 0001", 19))
+            .expect_err("capacity 19 < 20");
+        assert!(
+            matches!(too_small, HireError::InvalidInput(ref m) if m.contains("too small")),
+            "{too_small}"
+        );
         let bad_advance = hire
-            .assign(HireAssignment { advance_paid: 20_000, ..truck("MH12 HR 0001", 20) })
+            .assign(HireAssignment {
+                advance_paid: 20_000,
+                ..truck("MH12 HR 0001", 20)
+            })
             .expect_err("advance above freight");
         assert!(matches!(bad_advance, HireError::InvalidInput(_)));
         let no_driver = hire
-            .assign(HireAssignment { driver_phone: " ".into(), ..truck("MH12 HR 0001", 20) })
+            .assign(HireAssignment {
+                driver_phone: " ".into(),
+                ..truck("MH12 HR 0001", 20)
+            })
             .expect_err("blank driver phone");
         assert!(matches!(no_driver, HireError::InvalidInput(_)));
 
@@ -730,16 +780,24 @@ mod tests {
 
         let d = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
         assert_eq!(d.status, DispatchStatus::Pending);
-        assert_eq!(d.vehicle_registration_number.as_deref(), Some("MH12 HR 0001"));
+        assert_eq!(
+            d.vehicle_registration_number.as_deref(),
+            Some("MH12 HR 0001")
+        );
         let history: Vec<DispatchStatus> = d.status_history.iter().map(|e| e.status).collect();
-        assert_eq!(history, [DispatchStatus::AwaitingVehicle, DispatchStatus::Pending]);
+        assert_eq!(
+            history,
+            [DispatchStatus::AwaitingVehicle, DispatchStatus::Pending]
+        );
 
         let stored = VehicleHire::get_by_id(hire.id).unwrap().unwrap();
         assert_eq!(stored.freight_amount, Some(12_000));
         assert_eq!(stored.advance_paid, 10_000);
         assert_eq!(stored.driver_name.as_deref(), Some("Hired Driver"));
 
-        let again = hire.assign(truck("MH12 HR 0002", 50)).expect_err("already assigned");
+        let again = hire
+            .assign(truck("MH12 HR 0002", 50))
+            .expect_err("already assigned");
         assert!(matches!(again, HireError::Conflict(_)));
     }
 
@@ -750,8 +808,16 @@ mod tests {
         let mut order = org
             .dispatch_stock_on_hired_vehicle(&customer, &[line("Cement", 1)], vendor.id)
             .expect("hired dispatch");
-        assert!(order.transition_to(DispatchStatus::Pending, None, None).is_err());
-        assert!(order.transition_to(DispatchStatus::Confirmed, None, None).is_err());
+        assert!(
+            order
+                .transition_to(DispatchStatus::Pending, None, None)
+                .is_err()
+        );
+        assert!(
+            order
+                .transition_to(DispatchStatus::Confirmed, None, None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -763,10 +829,14 @@ mod tests {
             .expect("hired dispatch");
         assert_eq!(cement_left(&org), 90);
 
-        order.transition_to(DispatchStatus::Cancelled, None, None).expect("cancel");
+        order
+            .transition_to(DispatchStatus::Cancelled, None, None)
+            .expect("cancel");
         assert_eq!(cement_left(&org), 100, "reserved stock goes back");
 
-        let hire = VehicleHire::get_by_id(order.hire_id.unwrap()).unwrap().unwrap();
+        let hire = VehicleHire::get_by_id(order.hire_id.unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(hire.status, HireStatus::Cancelled);
         assert!(hire.closed_at.is_some());
     }
@@ -778,28 +848,44 @@ mod tests {
         let order = org
             .dispatch_stock_on_hired_vehicle(&customer, &[line("Cement", 10)], vendor.id)
             .expect("hired dispatch");
-        let mut hire = VehicleHire::get_by_id(order.hire_id.unwrap()).unwrap().unwrap();
+        let mut hire = VehicleHire::get_by_id(order.hire_id.unwrap())
+            .unwrap()
+            .unwrap();
         hire.assign(truck("MH12 HR 0003", 40)).expect("assign");
 
         let mut d = DispatchOrder::get_by_id(order.id).unwrap().unwrap();
-        for s in [DispatchStatus::Confirmed, DispatchStatus::Loaded, DispatchStatus::InTransit] {
+        for s in [
+            DispatchStatus::Confirmed,
+            DispatchStatus::Loaded,
+            DispatchStatus::InTransit,
+        ] {
             d.transition_to(s, None, None).expect("advance");
-            assert_eq!(VehicleHire::get_by_id(hire.id).unwrap().unwrap().status, HireStatus::Confirmed);
+            assert_eq!(
+                VehicleHire::get_by_id(hire.id).unwrap().unwrap().status,
+                HireStatus::Confirmed
+            );
         }
         d.transition_to(
             DispatchStatus::Delivered,
-            Some(ProofOfDeliveryInput { receiver_name: "R".into(), signature_or_photo_url: "u".into() }),
+            Some(ProofOfDeliveryInput {
+                receiver_name: "R".into(),
+                signature_or_photo_url: "u".into(),
+            }),
             None,
         )
         .expect("deliver");
-        assert_eq!(VehicleHire::get_by_id(hire.id).unwrap().unwrap().status, HireStatus::Released);
+        assert_eq!(
+            VehicleHire::get_by_id(hire.id).unwrap().unwrap().status,
+            HireStatus::Released
+        );
     }
 
     #[test]
     fn test_hired_dispatch_does_not_block_an_own_vehicle_with_the_same_number() {
         let _db = TestDb::create();
         let (mut org, customer, vendor) = fleetless_org();
-        org.update_location(18.52, 73.85, Some("Pune")).expect("org location");
+        org.update_location(18.52, 73.85, Some("Pune"))
+            .expect("org location");
 
         // An active hired dispatch on truck "MH12 SAME 1"…
         let order = org
@@ -827,7 +913,9 @@ mod tests {
         let _db = TestDb::create();
         let (org, first, vendor) = fleetless_org();
         let mut second = Customer::create_customer(org.id, "Second", "Aundh").expect("customer");
-        second.update_location(18.55, 73.80, Some("Aundh")).expect("location");
+        second
+            .update_location(18.55, 73.80, Some("Aundh"))
+            .expect("location");
 
         let (lines_a, lines_b) = ([line("Cement", 3)], [line("Cement", 4)]);
         let stops: Vec<(&Customer, &[DispatchLineItemInput])> =
@@ -837,24 +925,47 @@ mod tests {
             .expect("hired trip");
         assert_eq!(trip.vehicle_source, VehicleSource::Hired);
         assert_eq!(trip.vehicle_registration_number, None);
-        assert!(trip.stops.iter().all(|s| s.status == DispatchStatus::AwaitingVehicle));
+        assert!(
+            trip.stops
+                .iter()
+                .all(|s| s.status == DispatchStatus::AwaitingVehicle)
+        );
 
-        let mut hire = VehicleHire::get_by_id(trip.hire_id.unwrap()).unwrap().unwrap();
+        let mut hire = VehicleHire::get_by_id(trip.hire_id.unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(hire.trip_id, Some(trip.id));
         assert_eq!(hire.required_volume, 14, "7 units x volume 2");
         let released = hire.assign(truck("MH12 TRIP 1", 14)).expect("assign");
         assert_eq!(released.len(), 2);
 
         let trip = Trip::get_by_id(trip.id).unwrap().unwrap();
-        assert_eq!(trip.vehicle_registration_number.as_deref(), Some("MH12 TRIP 1"));
-        assert!(trip.stops.iter().all(|s| s.status == DispatchStatus::Pending));
+        assert_eq!(
+            trip.vehicle_registration_number.as_deref(),
+            Some("MH12 TRIP 1")
+        );
+        assert!(
+            trip.stops
+                .iter()
+                .all(|s| s.status == DispatchStatus::Pending)
+        );
 
         // Cancelling one stop leaves the hire open; cancelling the last closes it.
         let mut stops = trip.stops;
-        stops[0].transition_to(DispatchStatus::Cancelled, None, None).expect("cancel 1");
-        assert_eq!(VehicleHire::get_by_id(hire.id).unwrap().unwrap().status, HireStatus::Confirmed);
-        stops[1].transition_to(DispatchStatus::Cancelled, None, None).expect("cancel 2");
-        assert_eq!(VehicleHire::get_by_id(hire.id).unwrap().unwrap().status, HireStatus::Released);
+        stops[0]
+            .transition_to(DispatchStatus::Cancelled, None, None)
+            .expect("cancel 1");
+        assert_eq!(
+            VehicleHire::get_by_id(hire.id).unwrap().unwrap().status,
+            HireStatus::Confirmed
+        );
+        stops[1]
+            .transition_to(DispatchStatus::Cancelled, None, None)
+            .expect("cancel 2");
+        assert_eq!(
+            VehicleHire::get_by_id(hire.id).unwrap().unwrap().status,
+            HireStatus::Released
+        );
     }
 
     #[test]
@@ -888,17 +999,25 @@ mod tests {
         let order = org
             .dispatch_stock_on_hired_vehicle(&customer, &[line("Cement", 10)], vendor.id)
             .expect("hired dispatch");
-        let mut hire = VehicleHire::get_by_id(order.hire_id.unwrap()).unwrap().unwrap();
+        let mut hire = VehicleHire::get_by_id(order.hire_id.unwrap())
+            .unwrap()
+            .unwrap();
 
         // Nothing to pay before a truck and rate exist.
-        assert!(matches!(hire.record_payment(100, None, None), Err(HireError::Conflict(_))));
+        assert!(matches!(
+            hire.record_payment(100, None, None),
+            Err(HireError::Conflict(_))
+        ));
         assert_eq!(hire.balance_due, None);
 
         hire.assign(truck("MH12 PAY 1", 20)).expect("assign"); // 12,000 with 10,000 advance
         assert_eq!(hire.total_paid, 10_000);
         assert_eq!(hire.balance_due, Some(2_000));
 
-        assert!(matches!(hire.record_payment(0, None, None), Err(HireError::InvalidInput(_))));
+        assert!(matches!(
+            hire.record_payment(0, None, None),
+            Err(HireError::InvalidInput(_))
+        ));
         let over = hire.record_payment(2_001, None, None).expect_err("overpay");
         assert!(over.to_string().contains("more than the 2000"), "{over}");
         assert!(matches!(
@@ -907,7 +1026,11 @@ mod tests {
         ));
 
         let first = hire
-            .record_payment(1_500, Some("2026-09-20".into()), Some("  part payment ".into()))
+            .record_payment(
+                1_500,
+                Some("2026-09-20".into()),
+                Some("  part payment ".into()),
+            )
             .expect("pay 1");
         assert_eq!(first.note.as_deref(), Some("part payment"));
         assert_eq!(hire.balance_due, Some(500));
@@ -919,7 +1042,10 @@ mod tests {
         assert_eq!(stored.total_paid, 12_000);
         assert_eq!(stored.balance_due, Some(0));
         let payments = stored.payments().unwrap();
-        assert_eq!(payments.iter().map(|p| p.amount).collect::<Vec<_>>(), [1_500, 500]);
+        assert_eq!(
+            payments.iter().map(|p| p.amount).collect::<Vec<_>>(),
+            [1_500, 500]
+        );
 
         // Deleting the org takes the hire and its payments with it.
         org.remove_organization().expect("remove org");
