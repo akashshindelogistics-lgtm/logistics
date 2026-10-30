@@ -4,6 +4,28 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.13.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.3...v0.13.0) (2026-10-30)
+
+
+### Features
+
+* **android:** background location reporting (phase 3) ([9b0362c](https://github.com/akashshindelogistics-lgtm/logistics/commit/9b0362c41e761468275608d29365412c1bdf642c))
+* **android:** native driver app, phases 2-5 (skeleton, background reporting, tests, release) ([268d1a0](https://github.com/akashshindelogistics-lgtm/logistics/commit/268d1a0a00b283c457da648a28880bc33e759b65))
+* **android:** signed release build, icon, install guide and CI (phase 5) ([a2dda20](https://github.com/akashshindelogistics-lgtm/logistics/commit/a2dda20cc2f464c9950fb00559a31643bd26c983))
+
+
+### Bug Fixes
+
+* **android:** demos stop the backend they start ([a57cd15](https://github.com/akashshindelogistics-lgtm/logistics/commit/a57cd15a2e4a942034124537fbc0b6441a490340))
+* **deploy:** forward notification + Anthropic workspace env to the API ([37eb457](https://github.com/akashshindelogistics-lgtm/logistics/commit/37eb4576432a789994263b93a24e18ff2cf1491a))
+* **deploy:** forward notification + Anthropic workspace env to the API ([29d6652](https://github.com/akashshindelogistics-lgtm/logistics/commit/29d66521d65c1b85c13ee00ac938c339906e34f1))
+
+
+### Documentation
+
+* add the Android Driver App CI badge to the READMEs ([1f0a123](https://github.com/akashshindelogistics-lgtm/logistics/commit/1f0a1231bcaaae04c1e649046348af9ef8bea7d1))
+* add the Android Driver App CI badge to the READMEs ([9a3c994](https://github.com/akashshindelogistics-lgtm/logistics/commit/9a3c994ee5c159f19b2b38a94d664dadd5356b72))
+
 ## [0.12.3](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.2...v0.12.3) (2026-10-12)
 
 
