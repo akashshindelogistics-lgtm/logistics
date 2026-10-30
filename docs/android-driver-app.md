@@ -427,6 +427,42 @@ testing and the demo.
   upload with outcome `OK`.
 - **CI** moves to phase 5 with the release build job.
 
+## Phase 5 as built
+
+- **Signing:** `app/build.gradle.kts` signs release builds from
+  `DRIVER_KEYSTORE`, `DRIVER_KEYSTORE_PASSWORD` and optional `DRIVER_KEY_ALIAS`
+  / `DRIVER_KEY_PASSWORD`. Without them `assembleRelease` builds unsigned (CI).
+- **`scripts/make-release-keystore.sh`:** creates the key once (PKCS12, RSA
+  4096, 30 years, alias `driver`), by default at
+  `~/.config/logistics-driver/release.jks`. It refuses to overwrite a keystore
+  or to put one inside the repo, and reminds you to back it up.
+- **`scripts/build-release.sh`:** unit tests, `lintRelease`, signed
+  `assembleRelease` (without the configuration cache, so passwords aren't
+  cached), `apksigner verify`, then a check of the certificate against
+  `android/release-cert.sha256`. That file is written and committed with the
+  first real release; after that, an APK signed with any other key fails the
+  build, since drivers couldn't install it as an update. Output:
+  `android/build/release/logistics-driver-<versionName>.apk` and its SHA-256.
+  Tested with throwaway keys: first release, same key, and a different key
+  (refused). No real key has been made yet.
+- **Release build checked on the emulator:** with R8 on, the release APK
+  installs and opens the pairing screen. It can't pair with `cargo run`, since
+  release builds refuse `http://`, so the shrunk JSON and Room code is first
+  used for real with the hosted backend (open question below).
+- **Icon:** a white location pin on a stretch of road, on black. The
+  black-on-white pin was hard to find among the mostly white icons of a
+  launcher. The name stays "Logistics Driver" (shortened to "Logistics Dri…"
+  in the Pixel launcher), because the battery steps tell drivers to look for
+  that exact name in Settings.
+- **Install guide:** [android-driver-install.md](android-driver-install.md),
+  for the office and the driver: issuing a device token, sideloading, Play
+  Protect, pairing, permissions, per-brand battery settings, what the sync
+  messages mean, updating, and building a release. Until the dashboard has a
+  pairing panel, the office issues tokens with `curl`.
+- **CI:** `.github/workflows/android.yml` runs `testDebugUnitTest lintDebug
+  assembleDebug assembleRelease` on JDK 21 when `android/**` changes, and
+  uploads the debug APK. Not yet seen running on GitHub.
+
 ## Decisions
 
 - **Distribution: signed APK installed directly (sideloaded).** There's no

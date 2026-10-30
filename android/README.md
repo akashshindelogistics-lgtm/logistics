@@ -10,7 +10,7 @@ Backend contract: [docs/driver-phone-tracking.md](../docs/driver-phone-tracking.
 
 ## Status
 
-Phases 2 (skeleton), 3 (background reporting) and 4 (tests and demo) are built:
+Phases 2 to 5 are built (skeleton, background reporting, tests and demo, release):
 
 - **Pairing screen:** enter the server address and the device token. The app
   checks them with `GET /api/driver/me` before saving anything.
@@ -27,7 +27,8 @@ Phases 2 (skeleton), 3 (background reporting) and 4 (tests and demo) are built:
 - **Battery:** a one-time explanation and a card with the phone brand's
   battery settings steps.
 
-Phase 5 (signed release APK, icon, driver install guide, CI) comes next.
+Left: phase 6, retiring the Expo app in `../mobile/` once this app has been
+checked on a real phone against an `https://` backend.
 
 ## Setup
 
@@ -87,6 +88,28 @@ to `android/build/demo/tracking-demo.webm`, with a final screenshot in
 
 `demo-pairing.sh` reports one location fix with curl and taps Refresh.
 Recorded to `android/build/demo/pairing-demo.mp4`.
+
+## Releases
+
+Drivers install a signed APK directly; there's no Play Store listing. The
+install guide for drivers and the office, including building a release, is
+[docs/android-driver-install.md](../docs/android-driver-install.md). In short:
+
+```sh
+android/scripts/make-release-keystore.sh   # once; back the key up off this machine
+# raise versionCode / versionName in app/build.gradle.kts, then:
+DRIVER_KEYSTORE=~/.config/logistics-driver/release.jks android/scripts/build-release.sh
+```
+
+Signing reads `DRIVER_KEYSTORE`, `DRIVER_KEYSTORE_PASSWORD` and optionally
+`DRIVER_KEY_ALIAS` (default `driver`) and `DRIVER_KEY_PASSWORD` from the
+environment; nothing about the key is in git except its certificate
+fingerprint, `release-cert.sha256`, which `build-release.sh` checks every
+release against. Without `DRIVER_KEYSTORE`, `assembleRelease` builds an
+unsigned APK.
+
+CI (`.github/workflows/android.yml`) runs the unit tests, lint, and the debug
+and unsigned release builds when `android/` changes.
 
 ## Connecting to a backend
 

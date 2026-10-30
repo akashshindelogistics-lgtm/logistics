@@ -1110,8 +1110,26 @@
    Checked on the emulator against the local backend: permissions, fixes
    moving the vehicle, offline queueing and automatic upload on reconnect,
    resume after an app update, Stop from the notification.
-** TODO Phase 4: tests - JVM unit tests (validation, queue, batching, API client against MockWebServer), a Compose UI test for pairing, an end-to-end run on the emulator against the local backend (10.0.2.2:8080) that moves a vehicle on the dashboard map, plus a recorded demo
-** TODO Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideloading the signed APK, "Install unknown apps", Play Protect warning), versionCode bump per release, keystore backed up outside git, CI job that builds the APK
+** DONE Phase 4: tests - JVM unit tests (validation, queue, batching, API client against MockWebServer), a Compose UI test for pairing, an end-to-end run on the emulator against the local backend (10.0.2.2:8080) that moves a vehicle on the dashboard map, plus a recorded demo
+   As built: [[file:docs/android-driver-app.md]] ("Phase 4 as built").
+   Instrumented tests in app/src/androidTest: 5 Room DAO tests on a real
+   SQLite queue and 3 Compose tests of the pairing flow against a
+   MockWebServer on the device (connectedDebugAndroidTest). 45 JVM unit
+   tests. `android/scripts/demo-tracking.sh` pairs on the emulator, feeds
+   positions with adb emu geo fix, checks GET /api/vehicles after each, cuts
+   the network to check offline queueing and catch-up upload, and records
+   the run (android/build/demo/tracking-demo.webm). The demo found a bug, now
+   fixed: "Last position" stayed "No position yet" after uploads. CI moved
+   to phase 5.
+** DONE Phase 5: release - signed release APK (keystore kept out of git), app name and icon, install guide for drivers (sideloading the signed APK, "Install unknown apps", Play Protect warning), versionCode bump per release, keystore backed up outside git, CI job that builds the APK
+   As built: [[file:docs/android-driver-app.md]] ("Phase 5 as built") and
+   [[file:docs/android-driver-install.md]]. Release signing from env vars;
+   scripts/make-release-keystore.sh (once, outside the repo) and
+   scripts/build-release.sh (tests, lint, signed APK, certificate checked
+   against android/release-cert.sha256). New icon (white pin and road on
+   black). CI: .github/workflows/android.yml. Still to do by hand: create
+   the real release keystore, back it up, build the first release and commit
+   release-cert.sha256.
 ** TODO Phase 6: retire mobile/ once the native app is verified on a real phone - delete the Expo app, update README, docs/driver-phone-tracking.md and the driver tracking Phase 4 note
 * TODO [#B] New-organisation onboarding flow - guided setup so a new org can reach its first dispatch, instead of landing on empty pages
   Plan written: [[file:docs/onboarding.md]]

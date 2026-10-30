@@ -27,8 +27,25 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release signing comes from the environment, so the keystore and its
+    // passwords never enter git (scripts/build-release.sh sets these). Without
+    // DRIVER_KEYSTORE, assembleRelease still builds, unsigned, as CI does.
+    val keystore = providers.environmentVariable("DRIVER_KEYSTORE").orNull
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = providers.environmentVariable("DRIVER_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("DRIVER_KEY_ALIAS").getOrElse("driver")
+                keyPassword = providers.environmentVariable("DRIVER_KEY_PASSWORD")
+                    .orElse(providers.environmentVariable("DRIVER_KEYSTORE_PASSWORD")).get()
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
