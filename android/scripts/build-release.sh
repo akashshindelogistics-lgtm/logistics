@@ -7,6 +7,8 @@
 #      so a release is never signed with a different key by mistake (drivers
 #      couldn't install it over the old app)
 #   4. copy it to android/build/release/logistics-driver-<version>.apk
+#   5. with PUBLISH_DIR set, publish it there for the backend to serve
+#      (scripts/publish-apk.sh)
 #
 # Bump versionCode (and versionName) in app/build.gradle.kts first: Android
 # won't install an APK over one with the same or a higher versionCode.
@@ -64,4 +66,8 @@ echo
 echo "Release:  $DEST"
 echo "Version:  $VERSION_NAME (versionCode $VERSION_CODE)"
 echo "SHA-256:  $(sha256sum "$DEST" | cut -d' ' -f1)"
-echo "Send drivers the APK with docs/android-driver-install.md."
+if [ -n "${PUBLISH_DIR:-}" ]; then
+    "$ROOT/android/scripts/publish-apk.sh" "$DEST" "$PUBLISH_DIR"
+else
+    echo "Publish it for drivers with: android/scripts/publish-apk.sh $DEST <release dir>"
+fi

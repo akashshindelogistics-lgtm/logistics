@@ -2,17 +2,20 @@
 
 The Logistics Driver app lets a driver's phone report its location, so the
 vehicle assigned to them moves on the dispatch map without a GPS tracker. It
-isn't on the Play Store: the office sends the APK file and the driver installs
-it directly. This guide is for the office and the driver together; the first
+isn't on the Play Store: the backend serves the APK at a fixed link, and the
+driver installs it directly. This guide is for the office and the driver together; the first
 install takes about ten minutes.
 
 Needs Android 8.0 or newer, and location (GPS) switched on.
 
 ## Before you start (office)
 
-1. **The APK:** `logistics-driver-<version>.apk`, built with
-   `android/scripts/build-release.sh` (see "Building a release" below). Send it
-   over WhatsApp, email or a download link.
+1. **The download:** open the driver's page on the dashboard (from the
+   organization's driver list). The **Driver app (Android)** card has a QR
+   code the driver scans with the phone's camera, the download link to send
+   over WhatsApp or SMS instead, and the server address. The link is the same
+   for every release. If the card says nothing is published, build and publish
+   a release first ("Building a release" below).
 2. **The server address:** the `https://` address of the backend, the same one
    the dashboard uses for its API.
 3. **A device token for the driver:** the driver must exist, be active and
@@ -32,7 +35,9 @@ Needs Android 8.0 or newer, and location (GPS) switched on.
 
 ## Install (driver)
 
-1. Open the APK from WhatsApp, the browser's downloads or the Files app.
+1. Scan the QR code or open the link; the browser downloads
+   `logistics-driver-<version>.apk`. Open it from the download notification,
+   the browser's downloads or the Files app.
 2. Android asks to allow installing apps from that app ("Install unknown
    apps"). Tap **Settings**, switch on **Allow from this source**, go back and
    tap **Install**.
@@ -100,8 +105,12 @@ itself after a restart.
 
 ## Updating the app
 
-Install the new APK over the old one, the same way as the first time. Pairing
-and queued positions are kept, so there's no need to uninstall. The status
+Once the office publishes a newer release, the app shows **Update available**
+at the top of the status screen. It checks when opened, when brought back to
+the screen, and on **Refresh**. Tap **Download update**, then open the
+download and tap **Update**. It installs over the old app the same way as the
+first time. Pairing and queued positions are kept, so there's no need to
+uninstall. The status
 screen shows the **App version**, so the office can see who needs the update.
 If Android says the app "conflicts with an existing package", the APK was
 signed with a different key. Don't uninstall: ask whoever built it to use the
@@ -123,13 +132,32 @@ For each release:
 
 1. Raise `versionCode` by one, and set `versionName`, in
    `android/app/build.gradle.kts`.
-2. Run:
+2. Build it, and publish it into a local folder:
 
    ```sh
-   DRIVER_KEYSTORE=~/.config/logistics-driver/release.jks android/scripts/build-release.sh
+   DRIVER_KEYSTORE=~/.config/logistics-driver/release.jks PUBLISH_DIR=/tmp/driver-app \
+       android/scripts/build-release.sh
    ```
 
    It runs the unit tests and lint and builds the signed APK. It also checks
    the signing certificate against `android/release-cert.sha256`; the first
    release creates that file, which you commit. The APK is written to
-   `android/build/release/logistics-driver-<version>.apk`.
+   `android/build/release/logistics-driver-<version>.apk`, and
+   `/tmp/driver-app` gets the APK and its `latest.json`.
+3. Put it on the server's uploads volume (the backend reads
+   `DRIVER_APP_DIR`, by default `driver-app` under `UPLOAD_DIR`):
+
+   ```sh
+   # on the server, after copying /tmp/driver-app there (e.g. with scp)
+   cd ~/logistics-deploy && docker compose --env-file .env cp /tmp/driver-app/. api:/app/uploads/driver-app/
+   ```
+
+   Check it with `curl https://<server>/api/driver-app/latest`. Phones offer
+   the update the next time the app is opened. A backend run with
+   `cargo run` reads `./uploads/driver-app`, so locally publish straight
+   there: `PUBLISH_DIR=./uploads/driver-app`.
+
+`android/scripts/publish-apk.sh <apk> <dir>` does step 2's publishing on its
+own, for an APK that's already built. It refuses an APK whose `versionCode`
+isn't above the one already published, because phones wouldn't install it as
+an update.

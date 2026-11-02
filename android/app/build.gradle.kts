@@ -23,6 +23,10 @@ android {
         // old one if versionCode is higher (see docs/android-driver-app.md).
         versionCode = 1
         versionName = "0.1.0"
+        // Overridable for local demos of the in-app update prompt
+        // (scripts/demo-update.sh); releases use the values above.
+        providers.gradleProperty("driver.versionCode").orNull?.let { versionCode = it.toInt() }
+        providers.gradleProperty("driver.versionName").orNull?.let { versionName = it }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

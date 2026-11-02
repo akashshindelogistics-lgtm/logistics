@@ -17,6 +17,7 @@ use crate::logistics::dispatch::dispatch::{
 };
 use crate::logistics::dispatch::trip::{Trip, TripStatus};
 use crate::logistics::driver::driver::Driver;
+use crate::logistics::driver_app::driver_app::{DriverAppDir, DriverAppRelease};
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::godown::transfer::StockTransfer;
 use crate::logistics::notification::notification::{
@@ -45,6 +46,7 @@ mod billing;
 mod common;
 mod customers;
 mod dispatches;
+mod driver_app;
 mod drivers;
 mod godowns;
 mod health;
@@ -66,6 +68,7 @@ pub use billing::*;
 pub use common::*;
 pub use customers::*;
 pub use dispatches::*;
+pub use driver_app::*;
 pub use drivers::*;
 pub use godowns::*;
 pub use health::*;
@@ -130,6 +133,8 @@ impl Modify for SecurityAddon {
         report_driver_location,
         driver_me,
         rotate_driver_device_token,
+        latest_driver_app,
+        download_driver_app,
         delete_vehicle,
         list_drivers,
         add_driver,
@@ -228,6 +233,7 @@ impl Modify for SecurityAddon {
             DriverLocationFix, DriverLocationPayload, DriverLocationResult, DriverLocationResultResponse,
             DriverDeviceToken, DriverDeviceTokenResponse,
             DriverMe, DriverMeVehicle, DriverMeResponse,
+            DriverAppRelease, DriverAppReleaseResponse,
             VendorResponse, VendorListResponse, VehicleHireResponse, VehicleHireListResponse,
             DispatchOrderResponse, DispatchOrderListResponse,
             InvoiceResponse, InvoiceListResponse, CustomerBillingResponse,
@@ -246,6 +252,7 @@ impl Modify for SecurityAddon {
         (name = "Organizations", description = "Organization management"),
         (name = "Vehicles", description = "Vehicle fleet management"),
         (name = "Drivers", description = "Driver records and vehicle assignment"),
+        (name = "Driver App", description = "The Android driver app published on this server: latest version and APK download"),
         (name = "Vehicle vendors", description = "Transporters and brokers the organization hires vehicles from, and the trucks hired from them"),
         (name = "Vehicle compliance", description = "Vehicle paperwork (insurance, RC, permit, PUC, fitness) and expiry tracking"),
         (name = "Vehicle maintenance", description = "Preventive maintenance scheduling by due date and/or odometer mileage, with alerts"),
@@ -263,6 +270,9 @@ impl Modify for SecurityAddon {
 pub struct ApiDoc;
 
 pub fn config_routes(cfg: &mut web::ServiceConfig) {
+    // Where the driver app's releases are kept. Tests register their own
+    // after configure(), which replaces this one.
+    cfg.app_data(web::Data::new(DriverAppDir::from_env()));
     cfg.service(
         web::scope("/api")
             .service(health_check)
@@ -288,6 +298,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(rotate_vehicle_tracker_key)
             .service(report_driver_location)
             .service(driver_me)
+            .service(latest_driver_app)
+            .service(download_driver_app)
             .service(rotate_driver_device_token)
             .service(delete_vehicle)
             .service(list_drivers)

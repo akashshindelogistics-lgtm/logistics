@@ -469,6 +469,67 @@ testing and the demo.
   assembleDebug assembleRelease` on JDK 21 when `android/**` changes, and
   uploads the debug APK. Not yet seen running on GitHub.
 
+## Distribution
+
+Decided 2026-10-30, after comparing the ways to get the app onto drivers'
+phones:
+
+| Route | Updates | Verdict |
+| --- | --- | --- |
+| APK sent over WhatsApp or email | Manual, by resending | Where we started |
+| **APK served by our backend at a fixed link, with an in-app update prompt** | The app offers each new release | **Chosen now** |
+| Google Play, internal or closed testing | Automatic | Next step, at more drivers or once developer verification applies (below) |
+| Google Play, public listing | Automatic | Not needed for an internal app |
+| Managed Google Play (EMM), private app | Pushed by us | Best if the company issues the phones; can also allow permissions and exempt battery optimisation |
+| Firebase App Distribution | Notified | For test builds only |
+
+**As built:**
+
+- **Backend:** `GET /api/driver-app/latest` (the version file) and `GET
+  /api/driver-app/download` (the APK), with no login. A driver downloads the
+  app before pairing, and the APK holds no secrets. A release is `latest.json`
+  plus the APK in `DRIVER_APP_DIR` (default `{UPLOAD_DIR}/driver-app`, so a
+  deployment keeps it on the uploads volume). The backend refuses a
+  `latest.json` naming anything but an `.apk` in that directory.
+- **Publishing:** `android/scripts/publish-apk.sh <apk> <dir>` reads the
+  version from the APK, refuses a `versionCode` that isn't higher than the
+  published one, and writes `latest.json` last (atomically).
+  `build-release.sh` runs it when `PUBLISH_DIR` is set. For a server, publish
+  into a local folder and `docker compose cp` it onto the uploads volume
+  ([android-driver-install.md](android-driver-install.md)).
+- **App:** the status screen checks `latest` when it opens, each time the app
+  returns to the foreground, and on Refresh. If the published `versionCode`
+  is higher than the installed one, an "Update available" card offers
+  Download update. That opens the link in the browser; the driver installs
+  the download over the app and stays paired, with queued fixes kept. A failed
+  check shows nothing, so an older server without the endpoint is fine.
+  Installing in-app (a `REQUEST_INSTALL_PACKAGES` permission and the system
+  installer) was left out: the browser already does it, with one less
+  permission to explain.
+- **Dashboard:** each driver's page has a "Driver app (Android)" card with the
+  version, the download link, a QR code for the phone's camera, and the
+  server address to pair with: the API origin from `VITE_API_BASE_URL`, or
+  the page's own origin in development.
+- **Checks:**
+  - Rust model and route tests (manifest validation, path escape, 404, the
+    download).
+  - App unit tests for the update decision, the client and the view model.
+  - Vitest tests for the card and client, and a headless Playwright spec
+    (`frontend/tests/driver-app.spec.ts`).
+  - `android/scripts/demo-update.sh` runs it end to end on the emulator:
+    v1 paired, v2 published, update offered, Chrome downloads v2 (SHA-256
+    checked), v2 installed over v1 and still paired, and the dashboard
+    card's link downloads the same APK.
+
+**Watch: Android developer verification.** Google has announced that apps
+installed on certified Android phones must come from a verified developer,
+sideloaded APKs included. The rollout starts in a few countries in 2026 and
+reaches others, India among them, from 2027, with an "advanced" path for
+experienced users to install unverified apps. Check the current rules before
+relying on sideloading at scale. If they apply, register as a developer and
+register `com.logistics.driver` with the release signing key, or move to Play
+testing tracks.
+
 ## Decisions
 
 - **Distribution: signed APK installed directly (sideloaded).** There's no

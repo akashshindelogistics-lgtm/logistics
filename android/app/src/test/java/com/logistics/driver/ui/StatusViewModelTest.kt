@@ -9,7 +9,10 @@ import com.logistics.driver.data.LocationReporter
 import com.logistics.driver.data.Pairing
 import com.logistics.driver.data.PairingRepository
 import com.logistics.driver.data.SyncStatus
+import com.logistics.driver.domain.AppUpdate
 import com.logistics.driver.domain.FlushOutcome
+import com.logistics.driver.net.AppRelease
+import com.logistics.driver.net.DriverApiException
 import com.logistics.driver.tracking.TrackingControl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -20,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -42,13 +46,16 @@ class StatusViewModelTest {
     @After
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun viewModel() = StatusViewModel(
+    private fun viewModel(installedVersionCode: Int = 2) = StatusViewModel(
         PairingRepository(pairingStore, api),
         pairing,
         LocationReporter(pairingStore, FakeFixQueue(), status, api),
         status,
         tracking,
+        installedVersionCode,
     )
+
+    private val release = AppRelease(versionCode = 3, versionName = "0.3.0", sizeBytes = 9_000_000, downloadPath = "/api/driver-app/download")
 
     @Test
     fun `driver info is fetched again after each upload that moved the vehicle`() = runTest {
@@ -76,5 +83,43 @@ class StatusViewModelTest {
         status.recordSync(1, FlushOutcome.OK, "Reported")
 
         assertEquals(2, api.calls.size)
+    }
+
+    @Test
+    fun `a newer release on the server is offered as an update`() = runTest {
+        api.release = release
+
+        val vm = viewModel(installedVersionCode = 2)
+
+        assertEquals(
+            AppUpdate("0.3.0", 9_000_000, "https://api.example.com/api/driver-app/download"),
+            vm.state.value.update,
+        )
+    }
+
+    @Test
+    fun `no update when the installed app is current, none is published, or the check fails`() = runTest {
+        api.release = release
+        assertNull(viewModel(installedVersionCode = 3).state.value.update)
+
+        api.release = null
+        assertNull(viewModel().state.value.update)
+
+        api.releaseError = DriverApiException(DriverApiException.NETWORK_ERROR, "offline")
+        val vm = viewModel()
+        assertNull(vm.state.value.update)
+        // A failed check is not shown as an error.
+        assertNull(vm.state.value.error)
+    }
+
+    @Test
+    fun `checking again picks up a release published since`() = runTest {
+        val vm = viewModel()
+        assertNull(vm.state.value.update)
+
+        api.release = release
+        vm.checkForUpdate()
+
+        assertEquals("0.3.0", vm.state.value.update?.versionName)
     }
 }

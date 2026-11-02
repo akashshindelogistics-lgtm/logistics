@@ -28,6 +28,9 @@ Phases 2 to 5 are built (skeleton, background reporting, tests and demo, release
   notification; the status screen warns when sharing is on but stopped.
 - **Battery:** a one-time explanation and a card with the phone brand's
   battery settings steps.
+- **Updates:** the app checks `GET /api/driver-app/latest` on the paired
+  server. When a higher `versionCode` is published, an "Update available"
+  card downloads it through the browser, to install over this app.
 
 Left: phase 6, retiring the Expo app in `../mobile/` once this app has been
 checked on a real phone against an `https://` backend.
@@ -77,8 +80,18 @@ over adb. Shared steps are in `scripts/lib.sh`.
 
 ```sh
 android/scripts/demo-tracking.sh   # phase 4 end to end, about 3 minutes
+android/scripts/demo-update.sh     # distribution and in-app update, about 3 minutes
 android/scripts/demo-pairing.sh    # pairing only, under a minute
 ```
+
+`demo-update.sh` starts its own backend, with releases in
+`android/build/demo/driver-app-releases`. It installs and pairs v1, publishes
+a v2 build (`-Pdriver.versionCode=2`), and checks that the app offers it.
+Download update must have Chrome save v2's exact APK (it clicks through
+Chrome's first-run screens), and v2 installed over v1 must still be paired.
+It ends on the dashboard (`frontend/tests/driver-app.demo.ts`): the driver's
+page shows v0.2.0-demo and a QR code, and its link downloads the same APK.
+Recorded to `android/build/demo/update-demo.webm`.
 
 `demo-tracking.sh` switches sharing on and drives the emulator along the
 Chakan - Pune road with `adb emu geo fix`. After each position it checks the
@@ -109,8 +122,16 @@ install guide for drivers and the office, including building a release, is
 ```sh
 android/scripts/make-release-keystore.sh   # once; back the key up off this machine
 # raise versionCode / versionName in app/build.gradle.kts, then:
-DRIVER_KEYSTORE=~/.config/logistics-driver/release.jks android/scripts/build-release.sh
+DRIVER_KEYSTORE=~/.config/logistics-driver/release.jks PUBLISH_DIR=/tmp/driver-app \
+    android/scripts/build-release.sh
 ```
+
+Drivers download the app from the backend, at `/api/driver-app/download`;
+each driver's page on the dashboard shows the link, a QR code and the server
+address. `PUBLISH_DIR` (or `scripts/publish-apk.sh <apk> <dir>`) writes the
+APK and `latest.json` for the backend to serve; for a deployed server, copy
+that folder onto the uploads volume (see the install guide). The app offers
+every newer release by itself.
 
 Signing reads `DRIVER_KEYSTORE`, `DRIVER_KEYSTORE_PASSWORD` and optionally
 `DRIVER_KEY_ALIAS` (default `driver`) and `DRIVER_KEY_PASSWORD` from the

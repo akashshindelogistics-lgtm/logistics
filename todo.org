@@ -1130,6 +1130,20 @@
    black). CI: .github/workflows/android.yml. Still to do by hand: create
    the real release keystore, back it up, build the first release and commit
    release-cert.sha256.
+** DONE Distribution: drivers download the app from our backend, and the app offers updates itself
+   As built: [[file:docs/android-driver-app.md]] ("Distribution"; the
+   routes compared and why) and [[file:docs/android-driver-install.md]].
+   Backend: GET /api/driver-app/latest and /api/driver-app/download (no
+   login), serving latest.json + the APK from DRIVER_APP_DIR (default
+   {UPLOAD_DIR}/driver-app). android/scripts/publish-apk.sh publishes a
+   build (refuses a versionCode that isn't higher); build-release.sh runs it
+   with PUBLISH_DIR. App: "Update available" card when a higher versionCode
+   is published; Download update opens the browser. Dashboard: a "Driver
+   app (Android)" card on each driver's page with the link, a QR code and
+   the server address. Tests: Rust model + route, app unit, Vitest, and a
+   headless Playwright spec; android/scripts/demo-update.sh runs v1 -> v2 on
+   the emulator, Chrome download included, and ends on the dashboard.
+** TODO Later: move to Google Play internal/closed testing (auto-updates, no Play Protect warning) once there are more drivers or Android developer verification applies to sideloaded APKs; managed Google Play instead if the company issues the phones
 ** TODO Phase 6: retire mobile/ once the native app is verified on a real phone - delete the Expo app, update README, docs/driver-phone-tracking.md and the driver tracking Phase 4 note
 * TODO [#B] New-organisation onboarding flow - guided setup so a new org can reach its first dispatch, instead of landing on empty pages
   Plan written: [[file:docs/onboarding.md]]

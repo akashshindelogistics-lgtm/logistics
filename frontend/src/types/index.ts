@@ -39,6 +39,19 @@ export interface Driver {
   is_active: boolean;
 }
 
+/** The Android driver app release published on the server (GET /api/driver-app/latest). */
+export interface DriverAppRelease {
+  version_code: number;
+  version_name: string;
+  sha256: string;
+  size_bytes: number;
+  /** Unix seconds. */
+  released_at: number;
+  file_name: string;
+  /** Same for every release, e.g. `/api/driver-app/download`. */
+  download_path: string;
+}
+
 export interface Stock {
   volume_in_size: number;
   quantity: number;

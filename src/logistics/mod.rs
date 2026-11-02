@@ -5,6 +5,7 @@ pub mod customer;
 pub mod db;
 pub mod dispatch;
 pub mod driver;
+pub mod driver_app;
 pub mod godown;
 pub mod notification;
 pub mod orgs;

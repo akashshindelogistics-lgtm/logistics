@@ -27,6 +27,7 @@
     "test:e2e:demo:hired-vehicles": "playwright test --config=playwright.demo.config.ts hired-vehicles.demo",
     "test:e2e:demo:vendor-payments": "playwright test --config=playwright.demo.config.ts vendor-payments.demo",
     "test:e2e:demo:driver-tracking": "playwright test --config=playwright.demo.config.ts driver-tracking.demo",
+    "test:e2e:demo:driver-app": "playwright test --config=playwright.demo.config.ts driver-app.demo",
     "test:e2e:demo:theme-colors": "playwright test --config=playwright.demo.config.ts theme-colors.demo",
     "render:vehicle-icons": "node scripts/render-vehicle-icons.mjs"
   },
@@ -37,6 +38,7 @@
     "axios": "^1.20.0",
     "leaflet": "^1.9.4",
     "motion": "^14.1.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-leaflet": "^5.0.0",
@@ -49,6 +51,7 @@
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.6",
     "@types/node": "^24.13.3",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@types/three": "^0.186.0",
