@@ -45,9 +45,11 @@ operations, live location maps, and AI-generated dispatch summaries.
   organization and assign one to a vehicle from the dashboard. A vehicle
   needs an **active** assigned driver, spare capacity, and no trip already
   in progress before it can be selected for a dispatch. Each driver's page
-  also hands out the Android driver app (`android/`): a download link and QR
-  code served by this backend, plus the server address to pair with; the app
-  offers newer releases itself.
+  also sets up the driver's phone. The **Driver's phone** panel pairs it: a
+  device token shown once as a QR code for the Android app (`android/`) to
+  scan, when the phone last reported, re-pair for a lost phone, and unpair.
+  Next to it is the app's download link and QR code, served by this backend;
+  the app offers newer releases itself.
 - **Vehicle vendors and hired trucks** — keep a directory of the transporters
   and brokers an organization phones to hire a truck when it has none of its
   own free (name, contact, phone, GSTIN, notes, active flag). A dispatch or
@@ -317,6 +319,7 @@ All routes are served under the `/api` prefix.
 | PUT | `/api/vehicles/{reg}/driver` | Assign (or clear) the vehicle's driver |
 | GET/POST | `/api/drivers`, `/api/orgs/{id}/drivers` | List / add drivers |
 | PUT/DELETE | `/api/drivers/{id}` | Update (incl. active flag) or remove a driver |
+| GET/DELETE | `/api/drivers/{id}/device-token` | Whether the driver's phone is paired, when, and when it last used its token (never the token itself) / unpair it, so its token stops working at once (DELETE: Admin/Dispatcher) |
 | POST | `/api/drivers/{id}/device-token/rotate` | Pair (or re-pair) a driver's phone: issue a device token, shown once; the previous one stops working (Admin/Dispatcher) |
 | POST | `/api/driver/location` | Driver phone push, authenticated by the device token (`Authorization: Bearer <token>`, not an org login): batched `{fixes: [{latitude, longitude, recorded_at, accuracy_m?, speed_mps?}]}` moves the driver's assigned vehicle to the newest fix; older fixes never move it backwards |
 | GET | `/api/driver-app/latest` | The Android driver app release published on this server (version, size, SHA-256, download path), or `404` if none — no login; the app checks it to offer updates |

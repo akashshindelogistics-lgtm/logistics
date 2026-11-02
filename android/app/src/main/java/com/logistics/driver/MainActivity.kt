@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.logistics.driver.domain.PAIRING_LINK_SCHEME
 import com.logistics.driver.tracking.LocationService
 import com.logistics.driver.tracking.Notifications
 import com.logistics.driver.ui.DriverApp
@@ -21,12 +22,24 @@ class MainActivity : ComponentActivity() {
                 DriverApp(container)
             }
         }
-        if (savedInstanceState == null) handleResume(intent)
+        if (savedInstanceState == null) {
+            handleResume(intent)
+            handlePairingLink(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleResume(intent)
+        handlePairingLink(intent)
+    }
+
+    /** Opened from a pairing link (the dashboard's QR code read by the camera, or a shared link). */
+    private fun handlePairingLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (intent.action == Intent.ACTION_VIEW && data.scheme == PAIRING_LINK_SCHEME) {
+            container.pendingPairingLink.value = data.toString()
+        }
     }
 
     /**

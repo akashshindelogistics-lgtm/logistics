@@ -7,6 +7,7 @@ import com.logistics.driver.Config
 import com.logistics.driver.data.PairingRepository
 import com.logistics.driver.domain.InputResult
 import com.logistics.driver.domain.parseDeviceToken
+import com.logistics.driver.domain.parsePairingLink
 import com.logistics.driver.domain.parseServerAddress
 import com.logistics.driver.net.describeApiError
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,8 @@ data class PairUiState(
     /** Why the server refused the pairing (bad token, unreachable, ...). */
     val error: String? = null,
     val busy: Boolean = false,
+    /** The fields were filled in from a pairing code, waiting for the driver to check them and tap Pair. */
+    val fromCode: Boolean = false,
 )
 
 class PairViewModel(
@@ -34,6 +37,34 @@ class PairViewModel(
 
     fun onServerUrlChange(value: String) =
         _state.update { it.copy(serverUrl = value, serverUrlError = null, error = null) }
+
+    /**
+     * Fill in both fields from a scanned or opened pairing code. Never pairs
+     * by itself: the driver sees which server the code points at and taps
+     * Pair, so a stray link can't send the phone's location elsewhere.
+     */
+    fun applyPairingCode(text: String) {
+        val link = parsePairingLink(text)
+        if (link == null) {
+            _state.update { it.copy(error = "That code isn't a pairing code. Scan the code on your driver page in the dashboard.", fromCode = false) }
+            return
+        }
+        _state.update {
+            it.copy(
+                serverUrl = link.serverUrl,
+                deviceToken = link.deviceToken,
+                serverUrlError = null,
+                deviceTokenError = null,
+                error = null,
+                fromCode = true,
+            )
+        }
+    }
+
+    /** The scanner couldn't run (no Google Play services, or it failed). */
+    fun onScannerUnavailable() = _state.update {
+        it.copy(error = "The QR scanner isn't available on this phone. Type the server address and device token instead.")
+    }
 
     fun onDeviceTokenChange(value: String) =
         _state.update { it.copy(deviceToken = value, deviceTokenError = null, error = null) }

@@ -4,7 +4,7 @@
 
 use super::common::*;
 use super::vehicles::coordinates_in_range;
-use crate::logistics::driver::driver::Driver;
+use crate::logistics::driver::driver::{DevicePairing, Driver};
 use crate::logistics::orgs::orgs::Organization;
 use crate::logistics::vehicle::vehicle::{Location, Vehicle};
 use actix_web::{HttpRequest, HttpResponse, Responder, delete, get, post, put, web};
@@ -364,6 +364,13 @@ pub struct DriverDeviceTokenResponse {
     pub data: Option<DriverDeviceToken>,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DevicePairingResponse {
+    pub success: bool,
+    pub message: String,
+    pub data: Option<DevicePairing>,
+}
+
 /// The vehicle a driver's location reports move.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DriverMeVehicle {
@@ -423,7 +430,14 @@ fn driver_from_device_token(req: &HttpRequest) -> Result<Driver, HttpResponse> {
         })?;
 
     match Driver::by_device_token(token) {
-        Ok(Some(d)) => Ok(d),
+        Ok(Some(d)) => {
+            // "Last seen" on the dashboard's pairing panel. Best effort: a
+            // failed write must not refuse the phone's request.
+            if let Err(err) = d.touch_device() {
+                eprintln!("couldn't record driver {} device last-seen: {err}", d.id);
+            }
+            Ok(d)
+        }
         Ok(None) => Err(json_error(
             StatusCode::UNAUTHORIZED,
             "Unknown driver device token",
@@ -680,6 +694,84 @@ pub async fn rotate_driver_device_token(
         Err(err) => json_error(
             actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to rotate device token: {}", err),
+        ),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/drivers/{id}/device-token",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Driver UUID")),
+    responses(
+        (status = 200, description = "Whether a phone is paired, when it was paired and last used its token; never the token itself", body = DevicePairingResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Driver not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+/// The pairing state of a driver's phone, for the dashboard's pairing panel.
+#[get("/drivers/{id}/device-token")]
+pub async fn get_driver_device_pairing(
+    path: web::Path<Uuid>,
+    auth: AuthenticatedOrg,
+) -> impl Responder {
+    let driver = match load_owned_driver(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match driver.device_pairing() {
+        Ok(pairing) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: if pairing.paired {
+                "A phone is paired"
+            } else {
+                "No phone is paired"
+            }
+            .to_string(),
+            data: Some(pairing),
+        }),
+        Err(err) => json_error(
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to read the device pairing: {}", err),
+        ),
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/drivers/{id}/device-token",
+    tag = "Drivers",
+    security(("bearer_auth" = [])),
+    params(("id" = Uuid, Path, description = "Driver UUID")),
+    responses(
+        (status = 200, description = "The phone is unpaired; its token stops working at once", body = DevicePairingResponse),
+        (status = 403, description = "Forbidden", body = EmptyResponse),
+        (status = 404, description = "Driver not found", body = EmptyResponse),
+        (status = 401, description = "Unauthorized", body = EmptyResponse)
+    )
+)]
+/// Unpair a driver's phone (lost phone, driver left): its device token stops
+/// working at once. Requires an Admin or Dispatcher.
+#[delete("/drivers/{id}/device-token")]
+pub async fn unpair_driver_device(path: web::Path<Uuid>, auth: AuthenticatedOrg) -> impl Responder {
+    if let Err(resp) = auth.require_role(&DISPATCH_ROLES) {
+        return resp;
+    }
+    let driver = match load_owned_driver(path.into_inner(), auth.org_id) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    match driver.unpair_device().and_then(|_| driver.device_pairing()) {
+        Ok(pairing) => HttpResponse::Ok().json(ApiResponse {
+            success: true,
+            message: "The phone was unpaired".to_string(),
+            data: Some(pairing),
+        }),
+        Err(err) => json_error(
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to unpair the phone: {}", err),
         ),
     }
 }

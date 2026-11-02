@@ -891,3 +891,133 @@ async fn test_driver_me_never_returns_secrets() {
     assert!(!text.contains("device_token"));
     assert!(!text.contains("tracker_key"));
 }
+
+async fn device_pairing_request(
+    app: &impl actix_web::dev::Service<
+        actix_http::Request,
+        Response = actix_web::dev::ServiceResponse,
+        Error = actix_web::Error,
+    >,
+    method: actix_http::Method,
+    driver_id: Uuid,
+    auth: &str,
+) -> actix_web::dev::ServiceResponse {
+    let req = test::TestRequest::default()
+        .method(method)
+        .uri(&format!("/api/drivers/{driver_id}/device-token"))
+        .insert_header(("Authorization", auth.to_string()))
+        .to_request();
+    test::call_service(app, req).await
+}
+
+async fn pairing_of(resp: actix_web::dev::ServiceResponse) -> DevicePairing {
+    assert_eq!(resp.status().as_u16(), 200);
+    test::read_body_json::<DevicePairingResponse, _>(resp)
+        .await
+        .data
+        .expect("pairing")
+}
+
+#[actix_web::test]
+async fn test_device_pairing_shows_paired_and_last_seen_but_never_the_token() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Pairing Panel Org").await;
+    let (driver_id, token) = pair_driver_phone(&app, org.id, &auth, Some("PP-VH-1")).await;
+
+    let resp = device_pairing_request(&app, actix_http::Method::GET, driver_id, &auth).await;
+    assert_eq!(resp.status().as_u16(), 200);
+    let body = String::from_utf8(test::read_body(resp).await.to_vec()).unwrap();
+    assert!(
+        !body.contains(&token.to_string()),
+        "pairing status leaked the token"
+    );
+    let pairing: DevicePairingResponse = serde_json::from_str(&body).unwrap();
+    let pairing = pairing.data.unwrap();
+    assert!(pairing.paired);
+    assert!(pairing.paired_at.is_some());
+    assert_eq!(pairing.last_seen_at, None);
+
+    // The phone using its token shows up as "last seen".
+    assert_eq!(
+        get_driver_me(&app, Some(&token.to_string()))
+            .await
+            .status()
+            .as_u16(),
+        200
+    );
+    let seen =
+        pairing_of(device_pairing_request(&app, actix_http::Method::GET, driver_id, &auth).await)
+            .await;
+    assert!(seen.last_seen_at.is_some());
+}
+
+#[actix_web::test]
+async fn test_unpair_driver_device_kills_the_token() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Unpair Org").await;
+    let (driver_id, token) = pair_driver_phone(&app, org.id, &auth, Some("UP-VH-1")).await;
+
+    let after = pairing_of(
+        device_pairing_request(&app, actix_http::Method::DELETE, driver_id, &auth).await,
+    )
+    .await;
+
+    assert_eq!(
+        after,
+        DevicePairing {
+            paired: false,
+            paired_at: None,
+            last_seen_at: None
+        }
+    );
+    assert_eq!(
+        get_driver_me(&app, Some(&token.to_string()))
+            .await
+            .status()
+            .as_u16(),
+        401
+    );
+}
+
+#[actix_web::test]
+async fn test_device_pairing_access_rules() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, auth) = setup_org(&app, "Pairing Access Org").await;
+    let (_other, other_auth) = setup_org(&app, "Pairing Other Org").await;
+    let (driver_id, token) = pair_driver_phone(&app, org.id, &auth, None).await;
+
+    // Another org sees neither the status nor can unpair.
+    for method in [actix_http::Method::GET, actix_http::Method::DELETE] {
+        let resp = device_pairing_request(&app, method, driver_id, &other_auth).await;
+        assert_eq!(resp.status().as_u16(), 403);
+    }
+    // Warehouse staff may look, but only Admin/Dispatcher may unpair.
+    let staff = format!(
+        "Bearer {}",
+        generate_user_token(
+            org.id,
+            &org.name,
+            Some(Uuid::new_v4()),
+            OrgRole::WarehouseStaff.as_str()
+        )
+        .expect("user token")
+    );
+    let status = device_pairing_request(&app, actix_http::Method::GET, driver_id, &staff).await;
+    assert_eq!(status.status().as_u16(), 200);
+    let unpair = device_pairing_request(&app, actix_http::Method::DELETE, driver_id, &staff).await;
+    assert_eq!(unpair.status().as_u16(), 403);
+    assert_eq!(
+        get_driver_me(&app, Some(&token.to_string()))
+            .await
+            .status()
+            .as_u16(),
+        200
+    );
+
+    let unknown =
+        device_pairing_request(&app, actix_http::Method::GET, Uuid::new_v4(), &auth).await;
+    assert_eq!(unknown.status().as_u16(), 404);
+}

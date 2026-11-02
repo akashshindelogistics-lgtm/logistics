@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from './client';
-import { listDrivers, addDriver, updateDriver, deleteDriver, assignVehicleDriver } from './drivers';
+import {
+  listDrivers, addDriver, updateDriver, deleteDriver, assignVehicleDriver,
+  getDevicePairing, rotateDeviceToken, unpairDevice,
+} from './drivers';
 
 vi.mock('./client', () => ({
   default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
@@ -57,5 +60,25 @@ describe('drivers api client', () => {
     vi.mocked(api.put).mockResolvedValue(envelope({}));
     await assignVehicleDriver('REG1', null);
     expect(api.put).toHaveBeenCalledWith('/vehicles/REG1/driver', { driver_id: null });
+  });
+
+  it('getDevicePairing GETs /drivers/{id}/device-token', async () => {
+    vi.mocked(api.get).mockResolvedValue(envelope({ paired: true, paired_at: 1, last_seen_at: null }));
+    const res = await getDevicePairing('d1');
+    expect(api.get).toHaveBeenCalledWith('/drivers/d1/device-token');
+    expect(res.data).toEqual({ paired: true, paired_at: 1, last_seen_at: null });
+  });
+
+  it('rotateDeviceToken POSTs /drivers/{id}/device-token/rotate and returns the token', async () => {
+    vi.mocked(api.post).mockResolvedValue(envelope({ driver_id: 'd1', device_token: 't' }));
+    const res = await rotateDeviceToken('d1');
+    expect(api.post).toHaveBeenCalledWith('/drivers/d1/device-token/rotate');
+    expect(res.data?.device_token).toBe('t');
+  });
+
+  it('unpairDevice DELETEs /drivers/{id}/device-token', async () => {
+    vi.mocked(api.delete).mockResolvedValue(envelope({ paired: false, paired_at: null, last_seen_at: null }));
+    await unpairDevice('d1');
+    expect(api.delete).toHaveBeenCalledWith('/drivers/d1/device-token');
   });
 });

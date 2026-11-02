@@ -16,7 +16,7 @@ use crate::logistics::dispatch::dispatch::{
     VehicleSource,
 };
 use crate::logistics::dispatch::trip::{Trip, TripStatus};
-use crate::logistics::driver::driver::Driver;
+use crate::logistics::driver::driver::{DevicePairing, Driver};
 use crate::logistics::driver_app::driver_app::{DriverAppDir, DriverAppRelease};
 use crate::logistics::godown::godown::Godown;
 use crate::logistics::godown::transfer::StockTransfer;
@@ -133,6 +133,8 @@ impl Modify for SecurityAddon {
         report_driver_location,
         driver_me,
         rotate_driver_device_token,
+        get_driver_device_pairing,
+        unpair_driver_device,
         latest_driver_app,
         download_driver_app,
         delete_vehicle,
@@ -231,7 +233,7 @@ impl Modify for SecurityAddon {
             CustomerResponse, CustomerListResponse,
             DriverResponse, DriverListResponse,
             DriverLocationFix, DriverLocationPayload, DriverLocationResult, DriverLocationResultResponse,
-            DriverDeviceToken, DriverDeviceTokenResponse,
+            DriverDeviceToken, DriverDeviceTokenResponse, DevicePairing, DevicePairingResponse,
             DriverMe, DriverMeVehicle, DriverMeResponse,
             DriverAppRelease, DriverAppReleaseResponse,
             VendorResponse, VendorListResponse, VehicleHireResponse, VehicleHireListResponse,
@@ -301,6 +303,8 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(latest_driver_app)
             .service(download_driver_app)
             .service(rotate_driver_device_token)
+            .service(get_driver_device_pairing)
+            .service(unpair_driver_device)
             .service(delete_vehicle)
             .service(list_drivers)
             .service(add_driver)

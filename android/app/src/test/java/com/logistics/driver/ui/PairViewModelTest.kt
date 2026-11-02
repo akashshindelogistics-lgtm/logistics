@@ -92,4 +92,29 @@ class PairViewModelTest {
 
         assertNull(vm.state.value.error)
     }
+
+    @Test
+    fun `a pairing code fills in both fields but does not pair by itself`() {
+        val vm = viewModel()
+
+        vm.applyPairingCode("logisticsdriver://pair?server=https%3A%2F%2Fapi.example.com&token=$TOKEN")
+
+        val state = vm.state.value
+        assertEquals("https://api.example.com", state.serverUrl)
+        assertEquals(TOKEN, state.deviceToken)
+        assertTrue(state.fromCode)
+        assertTrue(api.calls.isEmpty())
+    }
+
+    @Test
+    fun `a code that isn't a pairing code is refused and changes nothing`() {
+        val vm = viewModel()
+        vm.onDeviceTokenChange("typed")
+
+        vm.applyPairingCode("https://example.com/menu")
+
+        assertEquals("typed", vm.state.value.deviceToken)
+        assertNotNull(vm.state.value.error)
+        assertFalse(vm.state.value.fromCode)
+    }
 }

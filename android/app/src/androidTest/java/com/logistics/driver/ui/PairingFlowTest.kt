@@ -123,4 +123,19 @@ class PairingFlowTest {
         compose.onNodeWithTag("pair-button").assertIsDisplayed()
         assertEquals(null, runBlocking { container.pairingRepository.pairing.first() })
     }
+
+    @Test
+    fun aPairingLinkFillsInTheFormAndPairsOnlyOnTap() {
+        container.pendingPairingLink.value =
+            "logisticsdriver://pair?server=${java.net.URLEncoder.encode(serverUrl(), "UTF-8")}&token=$token"
+
+        compose.waitUntil(5_000) { hasTag("from-code-hint") }
+        compose.onNodeWithTag("server-url").assertTextContains(serverUrl())
+        compose.onNodeWithTag("device-token").assertTextContains(token)
+        assertEquals(0, server.requestCount)
+
+        compose.onNodeWithTag("pair-button").performClick()
+        compose.waitUntil(10_000) { hasTag("driver-name") }
+        compose.onNodeWithTag("driver-name").assertTextContains("Ramesh Patil")
+    }
 }

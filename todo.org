@@ -1022,7 +1022,21 @@
    gate, latest timestamp wins against hardware trackers. accuracy/speed are
    validated but not stored until phase 3. 8 model tests + 16 route tests.
    README route table updated.
-** TODO Phase 2: dashboard - driver pairing panel (token/QR, regenerate), last-fix source on vehicle detail, unit + Playwright + standalone demo flow
+** DONE Phase 2a: dashboard - driver pairing panel (token/QR, regenerate, unpair, last seen), unit + Playwright + standalone demo flow
+   As built: [[file:docs/driver-phone-tracking.md]] ("Phase 2 as built").
+   On the driver's page rather than the org page. Backend: Drivers gains
+   device_paired_at / device_last_seen_at; GET /api/drivers/{id}/device-token
+   (state, never the token) and DELETE (unpair); phone requests set "last
+   seen". Panel: Pair a phone shows the token once as a QR code
+   (logisticsdriver://pair?server=&token=) plus text with copy buttons; Pair
+   a new phone / Unpair ask first; warehouse staff can only look. Android
+   app: Scan QR code (Google code scanner) and a logisticsdriver:// link
+   filter fill in the pairing form; the driver still taps Pair. Tests: Rust
+   model + route, Vitest, headless Playwright against the real backend,
+   Android unit + instrumented; android/scripts/demo-phone-pairing.sh runs
+   dashboard and emulator together, decoding the QR off the screen, with
+   MySQL checks. The camera scan itself waits for the real-phone check.
+** TODO Phase 2b: vehicle detail shows the source of the last fix (driver phone vs GPS tracker vs manual)
 ** TODO Phase 3: VehicleLocationHistory table with retention, history endpoint, trail on the trip map
 ** DONE Phase 4: minimal React Native driver app (pairing, background reporting, offline queue)
    Plan/as-built: [[file:docs/driver-phone-tracking.md]] (section "Phase 4 as
@@ -1057,7 +1071,7 @@
   validation mirroring validate_driver_fix - see
   [[file:docs/driver-phone-tracking.md]]. Pairing is a typed token for now;
   switch to scanning the QR from the dashboard pairing panel once driver
-  tracking Phase 2 lands.
+  tracking Phase 2 lands (done: Phase 2a below, and the app's Scan QR code).
   Suggested stack: Kotlin, Jetpack Compose, FusedLocationProviderClient in a
   location-type foreground service, Room for the offline queue, WorkManager
   (network constraint) to flush it, encrypted storage for the token,

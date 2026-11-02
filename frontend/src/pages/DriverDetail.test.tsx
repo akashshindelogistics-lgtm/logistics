@@ -14,6 +14,7 @@ vi.mock('react-router-dom', async importOriginal => {
 vi.mock('../api/drivers');
 // Tested on its own in DriverAppCard.test.tsx.
 vi.mock('../components/DriverAppCard', () => ({ default: () => <div data-testid="driver-app-card" /> }));
+vi.mock('../components/PhonePairingCard', () => ({ default: () => <div data-testid="phone-pairing-card" /> }));
 
 const ok = <T,>(data: T) => ({ success: true, message: '', data });
 const driver = (o: Partial<Driver> = {}): Driver => ({
@@ -23,10 +24,11 @@ const driver = (o: Partial<Driver> = {}): Driver => ({
 describe('DriverDetail page', () => {
   beforeEach(() => vi.resetAllMocks());
 
-  it('shows the driver app card for setting up the phone', async () => {
+  it('shows the phone pairing and driver app cards for setting up the phone', async () => {
     vi.mocked(driversApi.listDrivers).mockResolvedValue(ok([driver()]));
     render(<DriverDetail />, { wrapper: MemoryRouter });
     expect(await screen.findByTestId('driver-app-card')).toBeInTheDocument();
+    expect(screen.getByTestId('phone-pairing-card')).toBeInTheDocument();
   });
 
   it('shows a not-found state for an unknown driver id', async () => {
