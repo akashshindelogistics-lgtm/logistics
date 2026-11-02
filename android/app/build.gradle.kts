@@ -92,6 +92,9 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.play.services.location)
+    // QR scanner drawn by Google Play services: no camera permission or
+    // scanning UI of our own.
+    implementation(libs.play.services.code.scanner)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)

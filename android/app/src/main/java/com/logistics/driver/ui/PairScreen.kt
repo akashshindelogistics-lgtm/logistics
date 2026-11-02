@@ -14,21 +14,35 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 @Composable
 fun PairScreen(vm: PairViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    fun scan() {
+        val options = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
+        GmsBarcodeScanning.getClient(context, options).startScan()
+            .addOnSuccessListener { code -> code.rawValue?.let(vm::applyPairingCode) }
+            // Cancelling is not an error; anything else means no scanner.
+            .addOnFailureListener { vm.onScannerUnavailable() }
+    }
 
     Column(
         modifier = Modifier
@@ -39,12 +53,24 @@ fun PairScreen(vm: PairViewModel) {
     ) {
         Text("Pair this phone", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Your dispatcher gives you a device token and the server address. " +
-                "Enter both to link this phone to you. While you share your location, " +
+            "Scan the pairing code on your driver page in the dashboard, or enter the server " +
+                "address and device token your dispatcher gives you. While you share your location, " +
                 "your assigned vehicle's position on the dispatch map follows this phone.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        OutlinedButton(onClick = ::scan, enabled = !state.busy, modifier = Modifier.fillMaxWidth().testTag("scan-qr")) {
+            Text("Scan QR code")
+        }
+
+        if (state.fromCode) {
+            Text(
+                "Filled in from the pairing code. Check the server address is your company's, then tap Pair.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag("from-code-hint"),
+            )
+        }
 
         OutlinedTextField(
             value = state.serverUrl,

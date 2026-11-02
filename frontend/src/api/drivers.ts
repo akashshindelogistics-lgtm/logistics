@@ -1,5 +1,5 @@
 import api from './client';
-import type { ApiResponse, Driver, Vehicle } from '../types';
+import type { ApiResponse, DevicePairing, Driver, DriverDeviceToken, Vehicle } from '../types';
 
 export const listDrivers = () =>
   api.get<ApiResponse<Driver[]>>('/drivers').then(r => r.data);
@@ -44,3 +44,18 @@ export const assignVehicleDriver = (reg: string, driverId: string | null) =>
       driver_id: driverId,
     })
     .then(r => r.data);
+
+/** Whether the driver's phone is paired, and when it last reported. */
+export const getDevicePairing = (driverId: string) =>
+  api.get<ApiResponse<DevicePairing>>(`/drivers/${driverId}/device-token`).then(r => r.data);
+
+/**
+ * Issue a new device token, disconnecting any phone paired before. The plain
+ * token is in this response only (Admin/Dispatcher).
+ */
+export const rotateDeviceToken = (driverId: string) =>
+  api.post<ApiResponse<DriverDeviceToken>>(`/drivers/${driverId}/device-token/rotate`).then(r => r.data);
+
+/** Unpair the driver's phone; its token stops working at once (Admin/Dispatcher). */
+export const unpairDevice = (driverId: string) =>
+  api.delete<ApiResponse<DevicePairing>>(`/drivers/${driverId}/device-token`).then(r => r.data);

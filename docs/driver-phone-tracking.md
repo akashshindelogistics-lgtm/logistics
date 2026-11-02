@@ -1,12 +1,11 @@
 # Driver phone location tracking (plan)
 
-Status: **Phases 1 (backend) and 4 (mobile app skeleton) implemented; phases 2-3
-planned.** See [Phase 1 as built](#phase-1-as-built) and
-[Phase 4 as built](#phase-4-as-built) for where the implementation settled the
-open questions below. Phase 4 was built ahead of phases 2-3 (dashboard pairing
-UI, location history) at the user's request; the device token is currently
-paired by pasting it, since there is no dashboard panel yet to show it as a QR
-code.
+Status: **Phases 1 (backend) and 4 (mobile app) implemented; phase 2's
+pairing panel implemented; the rest of phase 2 (source of the last fix) and
+phase 3 (history) planned.** See [Phase 1 as built](#phase-1-as-built),
+[Phase 2 as built](#phase-2-as-built) and [Phase 4 as built](#phase-4-as-built).
+Phase 4 was built ahead of phases 2-3 at the user's request. The app in use
+is now the native Android one ([android-driver-app.md](android-driver-app.md)).
 
 [gps-tracking.md](gps-tracking.md) added hardware GPS trackers that push a
 vehicle's position to `POST /api/track/{tracker_key}`. This plan adds a second
@@ -120,6 +119,59 @@ flushes in batches, and a visible "location is being shared" indicator.
    on the trip map.
 4. **Mobile app:** minimal React Native driver app in a separate directory,
    with its own test and release notes.
+
+## Phase 2 as built
+
+The **pairing panel** is built. Showing the source of the last fix on the
+vehicle page is not built yet.
+
+- **Placement (changed from the plan):** a **Driver's phone** panel on each
+  driver's page (`/drivers/{id}`, `PhonePairingCard`), not on the org page's
+  Drivers section. A driver's page is where the office sets up that driver's
+  phone, next to the driver-app download card, and the org page is being
+  split into sections separately.
+- **Backend:**
+  - `Drivers` gains `device_paired_at` and `device_last_seen_at` (Unix
+    seconds), added to old databases by `ensure_device_token_column`.
+  - Rotating sets `device_paired_at` and clears "last seen".
+  - Every request a phone makes with its token (`/api/driver/location`,
+    `/api/driver/me`) sets "last seen". This is best effort: a failed write
+    never refuses the phone.
+  - New: `GET /api/drivers/{id}/device-token` (pairing state, never the
+    token; any role in the org) and `DELETE` (unpair, clearing the hash so the
+    token dies at once; Admin/Dispatcher).
+- **Panel:**
+  - Shows Paired / Not paired, "Paired 2 days ago · last reported 5 min ago",
+    or "the phone hasn't connected yet".
+  - **Pair a phone** issues a token and shows it once, until **Done**: a QR
+    code, the server address and the token, with copy buttons. **Pair a new
+    phone** and **Unpair** ask first.
+  - Warehouse staff see the state but not the buttons.
+- **The QR code** holds `logisticsdriver://pair?server=<address>&token=<token>`
+  (`frontend/src/lib/pairingLink.ts`). The server address is the API's origin
+  (`VITE_API_BASE_URL`), or the dashboard's own in development.
+- **App** (see "Pairing from the dashboard's QR code" in
+  [android-driver-app.md](android-driver-app.md)):
+  - A **Scan QR code** button (Google's code scanner) and a
+    `logisticsdriver://pair` link filter fill in the pairing form.
+  - The driver still taps Pair, so a stray link can't send the phone's
+    location to another server.
+- **Checks:**
+  - Rust model test (the pairing lifecycle) and route tests (status without
+    the token, last seen after a phone request, unpair kills the token,
+    another org 403, warehouse staff may look but not unpair, 404).
+  - Vitest for the panel, the API calls and the link, and a headless
+    Playwright spec against the real backend
+    (`frontend/tests/phone-pairing.spec.ts`).
+  - `android/scripts/demo-phone-pairing.sh`:
+    - the dashboard pairs, and the demo decodes the QR code off the screen
+      (jsQR);
+    - the emulator opens the decoded link: the form fills in and nothing is
+      sent until Pair;
+    - after Pair, MySQL has the phone paired and seen, and the panel shows
+      "last reported just now";
+    - Unpair clears the token in MySQL, and the app's next Refresh is
+      refused.
 
 ## Phase 4 as built
 

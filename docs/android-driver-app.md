@@ -469,6 +469,32 @@ testing and the demo.
   assembleDebug assembleRelease` on JDK 21 when `android/**` changes, and
   uploads the debug APK. Not yet seen running on GitHub.
 
+## Pairing from the dashboard's QR code
+
+Added with the dashboard's pairing panel (driver tracking phase 2, see
+[driver-phone-tracking.md](driver-phone-tracking.md#phase-2-as-built)).
+
+- **The code:** `logisticsdriver://pair?server=<address>&token=<token>`, read
+  by `domain/PairingLink.kt`. It is case-insensitive, takes either parameter
+  order, and returns `null` for anything else.
+- **Two ways in:**
+  - **Scan QR code** on the pairing screen uses Google's code scanner
+    (`play-services-code-scanner`). It needs no camera permission and draws
+    its own UI.
+  - An intent filter for `logisticsdriver://pair` covers a camera app or
+    another app opening the link (`MainActivity` hands it over through
+    `AppContainer.pendingPairingLink`).
+- **Never pairs by itself:** both only fill in the form, with a hint to check
+  the server address; the driver taps Pair, which validates as before. A link
+  arriving on an already-paired phone shows "This phone is already paired"
+  (unpair first) instead of replacing the pairing.
+- **Tests:** link parsing and the view model (JVM), and an instrumented test
+  that hands the app a link and checks that the form fills in, nothing is
+  sent, and Pair then works.
+- **Not checked yet: the camera scan itself**, since the emulator has no easy
+  way to point its camera at a QR code. It's on the real-phone check list
+  below, along with the first-run download of the scanner module.
+
 ## Distribution
 
 Decided 2026-10-30, after comparing the ways to get the app onto drivers'
@@ -555,6 +581,19 @@ testing tracks.
   - on the status screen, to show the driver and vehicle before the first
     upload, and to show "No vehicle assigned" up front instead of only after
     a `409`.
+
+## Real-phone check list
+
+Before phase 6 (retiring `mobile/`), on a driver's phone against the hosted
+`https://` backend:
+
+- Install from the driver-app QR code or link, through Play Protect.
+- Pair by **Scan QR code** from the dashboard's Driver's phone panel. This is
+  the first real use of the camera scanner.
+- Share for a shift with the screen off. Check positions keep arriving, and
+  check the phone brand's battery settings.
+- Offline stretch and catch-up; restart and "Tap to resume".
+- Update to a newer published release over the old one, still paired.
 
 ## Open questions
 

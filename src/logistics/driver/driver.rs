@@ -23,6 +23,26 @@ pub struct Driver {
     pub is_active: bool,
 }
 
+/// The pairing state of a driver's phone, as the dashboard shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct DevicePairing {
+    /// A device token is issued and not revoked.
+    pub paired: bool,
+    /// Unix seconds the current token was issued. `None` for a phone paired
+    /// before this was recorded.
+    pub paired_at: Option<i64>,
+    /// Unix seconds the phone last used its token (a location report or a
+    /// status check). `None` until it does.
+    pub last_seen_at: Option<i64>,
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 impl Driver {
     /// Create the `Drivers` table if it does not exist. Kept in sync with
     /// `test_support::migrate`.
@@ -36,6 +56,8 @@ impl Driver {
                 phone VARCHAR(64) NOT NULL,
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                 device_token_hash CHAR(64) DEFAULT NULL,
+                device_paired_at BIGINT DEFAULT NULL,
+                device_last_seen_at BIGINT DEFAULT NULL,
                 UNIQUE KEY uq_driver_device_token (device_token_hash),
                 CONSTRAINT fk_driver_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
             )",
@@ -63,6 +85,20 @@ impl Driver {
                  ADD UNIQUE KEY uq_driver_device_token (device_token_hash)",
             )?;
         }
+        // When the phone was paired and last used its token, for the
+        // dashboard's pairing panel. Added after the token column.
+        let has_status: Option<i64> = conn.query_first(
+            "SELECT COUNT(*) FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = 'Drivers'
+               AND column_name = 'device_paired_at'",
+        )?;
+        if has_status.unwrap_or(0) == 0 {
+            conn.query_drop(
+                "ALTER TABLE Drivers
+                 ADD COLUMN device_paired_at BIGINT DEFAULT NULL,
+                 ADD COLUMN device_last_seen_at BIGINT DEFAULT NULL",
+            )?;
+        }
         Ok(())
     }
 
@@ -83,13 +119,58 @@ impl Driver {
 
         let token = Uuid::new_v4();
         conn.exec_drop(
-            "UPDATE Drivers SET device_token_hash = :hash WHERE id = :id",
+            "UPDATE Drivers SET device_token_hash = :hash, device_paired_at = :now,
+                    device_last_seen_at = NULL
+             WHERE id = :id",
             params! {
                 "hash" => Self::hash_device_token(token),
+                "now" => now_secs(),
                 "id" => self.id.to_string(),
             },
         )?;
         Ok(token)
+    }
+
+    /// Disconnect the driver's phone: its token stops working at once (lost
+    /// phone, driver left). Pairing again needs a new token.
+    pub fn unpair_device(&self) -> Result<(), Box<dyn Error>> {
+        let mut conn = DbConnection::from_env().get_connection()?;
+        Self::ensure_device_token_column(&mut conn)?;
+        conn.exec_drop(
+            "UPDATE Drivers SET device_token_hash = NULL, device_paired_at = NULL,
+                    device_last_seen_at = NULL
+             WHERE id = :id",
+            params! { "id" => self.id.to_string() },
+        )?;
+        Ok(())
+    }
+
+    /// Whether a phone is paired, and when it was paired and last used its
+    /// token. Never includes the token.
+    pub fn device_pairing(&self) -> Result<DevicePairing, Box<dyn Error>> {
+        let mut conn = DbConnection::from_env().get_connection()?;
+        Self::ensure_device_token_column(&mut conn)?;
+        let row: Option<(bool, Option<i64>, Option<i64>)> = conn.exec_first(
+            "SELECT device_token_hash IS NOT NULL, device_paired_at, device_last_seen_at
+             FROM Drivers WHERE id = :id",
+            params! { "id" => self.id.to_string() },
+        )?;
+        let (paired, paired_at, last_seen_at) = row.unwrap_or((false, None, None));
+        Ok(DevicePairing {
+            paired,
+            paired_at,
+            last_seen_at,
+        })
+    }
+
+    /// Record that the paired phone just used its token.
+    pub fn touch_device(&self) -> Result<(), Box<dyn Error>> {
+        let mut conn = DbConnection::from_env().get_connection()?;
+        conn.exec_drop(
+            "UPDATE Drivers SET device_last_seen_at = :now WHERE id = :id",
+            params! { "now" => now_secs(), "id" => self.id.to_string() },
+        )?;
+        Ok(())
     }
 
     /// Resolve a device token to its driver, or `None` for a stale or
@@ -321,6 +402,41 @@ mod tests {
         Driver::create(org.id, "Doomed", "LIC", "000").expect("create");
         org.remove_organization().expect("remove org");
         assert!(Driver::list_by_org(org.id).expect("list").is_empty());
+    }
+
+    #[test]
+    fn test_device_pairing_lifecycle() {
+        let _db = TestDb::create();
+        let org = make_org();
+        let d = Driver::create(org.id, "Pairing Driver", "LIC-PR", "333").expect("create");
+
+        let fresh = d.device_pairing().expect("status");
+        assert_eq!(
+            fresh,
+            DevicePairing {
+                paired: false,
+                paired_at: None,
+                last_seen_at: None
+            }
+        );
+
+        let before = now_secs();
+        d.rotate_device_token().expect("pair");
+        let paired = d.device_pairing().expect("status");
+        assert!(paired.paired);
+        assert!(paired.paired_at.expect("paired_at") >= before);
+        assert_eq!(paired.last_seen_at, None);
+
+        d.touch_device().expect("touch");
+        assert!(d.device_pairing().expect("status").last_seen_at.is_some());
+
+        // A new token starts the "last seen" over: the old phone is gone.
+        let token = d.rotate_device_token().expect("re-pair");
+        assert_eq!(d.device_pairing().expect("status").last_seen_at, None);
+
+        d.unpair_device().expect("unpair");
+        assert_eq!(d.device_pairing().expect("status"), fresh);
+        assert!(Driver::by_device_token(token).expect("lookup").is_none());
     }
 
     #[test]

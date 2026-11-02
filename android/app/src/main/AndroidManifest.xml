@@ -35,6 +35,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Pairing links from the dashboard's QR code:
+                 logisticsdriver://pair?server=...&token=... (fills in the
+                 pairing form; the driver still taps Pair). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="logisticsdriver" android:host="pair" />
+            </intent-filter>
         </activity>
 
         <service

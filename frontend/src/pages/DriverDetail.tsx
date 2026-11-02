@@ -4,6 +4,7 @@ import { listDrivers, updateDriver } from '../api/drivers';
 import { IconUsers, IconChevron, IconCheck } from '../components/Icons';
 import Icon3D from '../components/Icon3D';
 import DriverAppCard from '../components/DriverAppCard';
+import PhonePairingCard from '../components/PhonePairingCard';
 import type { Driver } from '../types';
 import './page.css';
 
@@ -133,6 +134,7 @@ export default function DriverDetail() {
         </form>
       </div>
 
+      <PhonePairingCard driverId={driver.id} />
       <DriverAppCard />
     </div>
   );

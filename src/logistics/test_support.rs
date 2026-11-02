@@ -59,6 +59,8 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
             phone VARCHAR(64) NOT NULL,
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             device_token_hash CHAR(64) DEFAULT NULL,
+            device_paired_at BIGINT DEFAULT NULL,
+            device_last_seen_at BIGINT DEFAULT NULL,
             UNIQUE KEY uq_driver_device_token (device_token_hash),
             CONSTRAINT fk_driver_org FOREIGN KEY (org_id) REFERENCES Orgs(id) ON DELETE CASCADE
         )",

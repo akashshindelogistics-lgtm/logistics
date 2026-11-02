@@ -18,20 +18,17 @@ Needs Android 8.0 or newer, and location (GPS) switched on.
    a release first ("Building a release" below).
 2. **The server address:** the `https://` address of the backend, the same one
    the dashboard uses for its API.
-3. **A device token for the driver:** the driver must exist, be active and
-   have a vehicle assigned (Vehicles > assign driver). The dashboard has no
-   button for tokens yet, so an Admin or Dispatcher issues one with the API:
-
-   ```sh
-   curl -X POST https://<server>/api/drivers/<driver id>/device-token/rotate \
-        -H "Authorization: Bearer <your login token>"
-   ```
-
-   The response has `device_token`, a code like
-   `1b4e28ba-2fa1-11d2-883f-0016d3cca427`. It is shown only once. Treat it like
-   a password: anyone with it can move that driver's vehicle on the map.
-   Issuing a new one disconnects the old phone, which is how to handle a lost
-   or changed phone.
+3. **A pairing code for the driver:** the driver must exist, be active and
+   have a vehicle assigned (Vehicles > assign driver). On the driver's page,
+   an Admin or Dispatcher taps **Pair a phone** in the **Driver's phone**
+   panel. It shows a QR code for the app to scan, and the server address and
+   device token (a code like `1b4e28ba-2fa1-11d2-883f-0016d3cca427`) to type
+   instead. They are shown only once. Treat the token like a password: anyone
+   with it can move that driver's vehicle on the map.
+   - **Lost or changed phone:** tap **Pair a new phone**; the old phone stops
+     reporting at once.
+   - **Driver left:** tap **Unpair**.
+   - **Has it worked?** The panel shows when the phone last reported.
 
 ## Install (driver)
 
@@ -48,10 +45,16 @@ Needs Android 8.0 or newer, and location (GPS) switched on.
 
 ## Pair the phone
 
-1. Enter the **server address** and the **device token** from the office.
-   Copy and paste both if you can; the token's capital letters and a pasted
-   `Bearer ` in front don't matter.
-2. Tap **Pair**. The app checks both with the server and shows your name,
+1. Tap **Scan QR code** and scan the code on the office's screen. The app
+   fills in the server address and device token. Check the server address is
+   your company's.
+   - The first scan may take a moment while Google Play services sets up the
+     scanner.
+   - If the phone's camera app opens the code instead, it offers to open it
+     in Logistics Driver; that fills in the form the same way.
+   - No scanner? Type both: the token's capital letters and a pasted
+     `Bearer ` in front don't matter.
+2. Tap **Pair**. The app never pairs from a code by itself. The app checks both with the server and shows your name,
    company and vehicle. If it says the token wasn't recognised, ask the office
    for a new one.
 

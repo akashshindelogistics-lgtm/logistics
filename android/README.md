@@ -14,8 +14,11 @@ Backend contract: [docs/driver-phone-tracking.md](../docs/driver-phone-tracking.
 
 Phases 2 to 5 are built (skeleton, background reporting, tests and demo, release):
 
-- **Pairing screen:** enter the server address and the device token. The app
-  checks them with `GET /api/driver/me` before saving anything.
+- **Pairing screen:** **Scan QR code** reads the pairing code from the
+  dashboard's Driver's phone panel (a `logisticsdriver://pair` link, which
+  the app also opens from outside). Or enter the server address and device
+  token by hand. Either way the app checks them with `GET /api/driver/me`
+  when the driver taps Pair, and saves nothing before.
 - **Status screen:** the driver, organization, active status, assigned
   vehicle and its last position, from `GET /api/driver/me`. It has Refresh,
   Unpair (with confirmation) and the app version.
@@ -81,6 +84,7 @@ over adb. Shared steps are in `scripts/lib.sh`.
 ```sh
 android/scripts/demo-tracking.sh   # phase 4 end to end, about 3 minutes
 android/scripts/demo-update.sh     # distribution and in-app update, about 3 minutes
+android/scripts/demo-phone-pairing.sh  # pairing from the dashboard's QR code, about 3 minutes
 android/scripts/demo-pairing.sh    # pairing only, under a minute
 ```
 
@@ -109,6 +113,18 @@ script. The phone run is recorded to `android/build/demo/tracking-demo.webm`
 other than 8080, the dashboard runs on its own Vite at 5174 (`WEB_PORT`). On its own,
 `npm run test:e2e:demo:driver-tracking` (from `frontend/`) seeds a driver and
 sends a fix the way the phone does.
+
+`demo-phone-pairing.sh` runs the dashboard (`frontend/tests/phone-pairing.demo.ts`)
+and the emulator side by side:
+- the driver's page issues a token as a QR code, and the demo decodes it off
+  the screen;
+- the emulator opens the decoded link; the form fills in, and pairs only on
+  Pair;
+- MySQL shows the phone paired and seen, and the panel shows "last reported";
+- the dashboard unpairs, and the app's next Refresh is refused.
+
+The emulator reaches the dashboard's address through `adb reverse`. Recorded
+to `android/build/demo/phone-pairing-demo.webm`.
 
 `demo-pairing.sh` reports one location fix with curl and taps Refresh.
 Recorded to `android/build/demo/pairing-demo.mp4`.

@@ -28,6 +28,7 @@
     "test:e2e:demo:vendor-payments": "playwright test --config=playwright.demo.config.ts vendor-payments.demo",
     "test:e2e:demo:driver-tracking": "playwright test --config=playwright.demo.config.ts driver-tracking.demo",
     "test:e2e:demo:driver-app": "playwright test --config=playwright.demo.config.ts driver-app.demo",
+    "test:e2e:demo:phone-pairing": "playwright test --config=playwright.demo.config.ts phone-pairing.demo",
     "test:e2e:demo:theme-colors": "playwright test --config=playwright.demo.config.ts theme-colors.demo",
     "render:vehicle-icons": "node scripts/render-vehicle-icons.mjs"
   },
@@ -57,6 +58,7 @@
     "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.0",
     "jsdom": "^29.1.1",
+    "jsqr": "^1.4.0",
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.2",

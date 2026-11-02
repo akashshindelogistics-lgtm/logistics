@@ -39,6 +39,21 @@ export interface Driver {
   is_active: boolean;
 }
 
+/** Whether a driver's phone is paired (GET /api/drivers/{id}/device-token). Never holds the token. */
+export interface DevicePairing {
+  paired: boolean;
+  /** Unix seconds; null for a phone paired before this was recorded. */
+  paired_at: number | null;
+  /** Unix seconds the phone last used its token; null until it does. */
+  last_seen_at: number | null;
+}
+
+/** A freshly issued device token: the only time the plain token is ever returned. */
+export interface DriverDeviceToken {
+  driver_id: string;
+  device_token: string;
+}
+
 /** The Android driver app release published on the server (GET /api/driver-app/latest). */
 export interface DriverAppRelease {
   version_code: number;

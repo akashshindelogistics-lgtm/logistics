@@ -35,6 +35,12 @@ class AppContainer(context: Context) {
     private val api = OkHttpDriverApi(httpClient, json)
     private val pairingStore = DataStorePairingStore(appContext.driverPrefs, KeystoreTokenCipher())
 
+    /**
+     * A pairing link the app was opened with (`logisticsdriver://pair?...`),
+     * until the pairing screen picks it up.
+     */
+    val pendingPairingLink = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     /** Lives as long as the process; for work that must finish even if the service stops. */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
