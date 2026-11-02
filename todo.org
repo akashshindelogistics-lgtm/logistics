@@ -1351,3 +1351,19 @@
    logi-web from ~/logistics-ngrok/logistics-frontend; same public URL.
    Development clones of the new repos in ~/logistics-split/. README badges
    per repo; docs/repo-split.md is now an as-built note.
+* TODO [#B] RAG across the logistics system - get the "ask your data" assistant working in production and better, then extend retrieval to drivers, documents and help
+  Plan written: [[file:docs/rag-integration.md]]
+  Exploration findings: the assistant (MySQL FULLTEXT over AiChunks plus an
+  OpsReport snapshot) is the only RAG feature; it's off in the deployment (no
+  ANTHROPIC_API_KEY), six modules hard-code claude-haiku-4-5-20251001, and
+  FULLTEXT misses partial registration numbers, spaced plates, plurals and
+  synonyms (measured). Recommended order: fix and evaluate before adding
+  embeddings; corpora are thousands of chunks per org at most.
+** TODO Phase 0: ANTHROPIC_API_KEY in the deployment and frontend CI; shared ai/client.rs; migrate all AI calls to claude-haiku-5-5 with per-feature effort
+** TODO Phase 1: evaluation fixture (questions -> expected sources, recall@8 in cargo test) and FULLTEXT fixes (identifier normalisation, ngram identifier index, query expansion)
+** TODO Phase 2: cited answers - search_result blocks with citations, sources as links in the widget
+** TODO Phase 3: coverage - vendor, vehicle_hire, trip_narrative, invoice, stock_transfer, driver_phone chunks, with a minimum role per kind
+** TODO Phase 4: agentic retrieval - lookup tools over existing queries, follow-up questions in the widget
+** TODO Phase 5: driver assistant in the Android app, scoped to the driver's own dispatches and trips
+** TODO Phase 6: documents - PDF compliance uploads, org knowledge base (org_doc chunks), in-app help over product docs
+** TODO Phase 7 (conditional): embeddings + hybrid retrieval, only if phase 1's evaluation shows paraphrase misses that matter
