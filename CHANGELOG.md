@@ -4,6 +4,14 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.15.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.14.0...v0.15.0) (2026-11-02)
+
+
+### Features
+
+* **driver-tracking:** dashboard pairing panel for drivers' phones, with QR pairing in the app ([015f68e](https://github.com/akashshindelogistics-lgtm/logistics/commit/015f68e38c4d04cb47ba73f8acbb8e5150131ae1))
+* **driver-tracking:** dashboard pairing panel for drivers' phones, with QR pairing in the app ([d9bccb3](https://github.com/akashshindelogistics-lgtm/logistics/commit/d9bccb3ea85c3d902fd2bab69563eca9f18c2bac))
+
 ## [0.14.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.13.0...v0.14.0) (2026-11-02)
 
 
