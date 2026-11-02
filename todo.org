@@ -1316,7 +1316,7 @@
    a lifecycle-track check in e2e-full-flow, headless config sets reducedMotion: 'reduce', and the narrated
    tests/motion.demo.ts (npm run test:e2e:demo:motion). Ports are now configurable (E2E_BASE_URL, E2E_WEB_PORT,
    E2E_API_PORT, API_PROXY_TARGET) so a worktree can test beside servers already on 5173/8080.
-* TODO You need to devide single mono repo into multiple repos, one more rust backend, one for frontend code and one android app. You need to also readjust readme file, CI action jobs accordingly. Also release tag should be handled seperatly for seperate repo.
+* DONE You need to devide single mono repo into multiple repos, one more rust backend, one for frontend code and one android app. You need to also readjust readme file, CI action jobs accordingly. Also release tag should be handled seperatly for seperate repo.
   Plan written: [[file:docs/repo-split.md]]
   Decided: this repo becomes the backend and is renamed logistics-backend
   (keeps PRs, tags, releases, GHCR image); new public repos
@@ -1335,5 +1335,19 @@
 ** DONE Phase 2: backend cleanup branch - remove frontend/ and android/, trim workflows (Swagger-only Pages, image + OpenAPI release), release-please without frontend, README and doc links to the new repos
    Branch chore/repo-split (not pushed). Also moves the two Android docs out,
    updates docs/releasing.md and deploy/README.md, and .dockerignore.
-** TODO Phase 3: cutover - land in-flight work, create and push the two repos, Pages/variables/secrets, merge the cleanup, rename to logistics-backend, all CI green
-** TODO Phase 4: local follow-up - sibling checkouts, ngrok deployment from two repos, badges, retire the plan to an as-built note
+** DONE Phase 3: cutover - land in-flight work, create and push the two repos, Pages/variables/secrets, merge the cleanup, rename to logistics-backend, all CI green
+   2026-11-02: merged release PR #101 first (v0.15.0, the last combined
+   release), re-split from it, renamed this repo to logistics-backend, created
+   and pushed logistics-frontend and logistics-android (public, with history),
+   set the frontend's API_BASE_URL variable, Pages and workflow permissions,
+   merged the cleanup (#102). First runs green in all three repos, including
+   the frontend's e2e against logistics-backend; dashboard Pages at
+   /logistics-frontend/, Swagger at /logistics-backend/api-docs/. Left for
+   the user: add the ANTHROPIC_API_KEY secret to logistics-frontend (secret
+   values can't be copied), and move the uncommitted frontend/ work in the
+   main checkout (refactor/org-page-extract-sections) to logistics-frontend.
+** DONE Phase 4: local follow-up - sibling checkouts, ngrok deployment from two repos, badges, retire the plan to an as-built note
+   ngrok deployment: logi-api from this repo's deploy worktree (master),
+   logi-web from ~/logistics-ngrok/logistics-frontend; same public URL.
+   Development clones of the new repos in ~/logistics-split/. README badges
+   per repo; docs/repo-split.md is now an as-built note.

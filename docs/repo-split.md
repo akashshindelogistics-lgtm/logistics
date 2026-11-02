@@ -1,7 +1,9 @@
-# Splitting the monorepo into three repos (plan)
+# Splitting the monorepo into three repos
 
-Status: **planned** (2026-11-02). Tracked by the top-level item in `todo.org`
-("devide single mono repo into multiple repos").
+Status: **done** (2026-11-02). The plan below is kept as written; see
+[As built](#as-built) at the end for how the cutover went and what's left.
+Tracked by the top-level item in `todo.org` ("devide single mono repo into
+multiple repos").
 
 Today one repo, `akashshindelogistics-lgtm/logistics`, holds the Rust backend
 (`src/`, `Cargo.toml`), the React dashboard (`frontend/`), the native Android
@@ -136,3 +138,51 @@ happens locally, so it can be redone from a newer `master`.
   repo: by the frontend's scheduled and per-push e2e runs against the
   backend's `master`, not by the backend PR itself.
 - **The GHCR image name** stays `logistics-api`, so deploys don't change.
+
+## As built
+
+- **Order:** release PR #101 was merged first, so **v0.15.0 is the last
+  combined release** (API, plus `frontend-0.15.0.tar.gz`). The split was then
+  redone from that commit.
+- **Repos:**
+  - [logistics-backend](https://github.com/akashshindelogistics-lgtm/logistics-backend):
+    this repo, renamed; the cleanup is PR #102.
+  - [logistics-frontend](https://github.com/akashshindelogistics-lgtm/logistics-frontend)
+    and [logistics-android](https://github.com/akashshindelogistics-lgtm/logistics-android):
+    public, history from `git subtree split`, each with one setup commit on top.
+- **Releases:** the frontend starts after 0.15.0 and Android at 0.1.0. Both
+  release-please configs set `bootstrap-sha` at the split, so their first
+  changelogs only cover work after it.
+- **Settings copied to the frontend:** the `API_BASE_URL` variable, Pages
+  (source: GitHub Actions), and workflow permissions (write; may open PRs).
+  Android got the same workflow permissions.
+- **First CI runs:** green in all three repos. The frontend's e2e built
+  logistics-backend from source. Its first Pages run failed only because it
+  started before `API_BASE_URL` was set, and a rerun deployed it.
+- **Live sites:** the dashboard at
+  <https://akashshindelogistics-lgtm.github.io/logistics-frontend/> and the
+  Swagger UI at
+  <https://akashshindelogistics-lgtm.github.io/logistics-backend/api-docs/>.
+  The old `/logistics/` Pages site is gone.
+- **Local ngrok deployment:** the same public URL. `logi-api` builds from
+  this repo's deploy worktree, and `logi-web` serves a clone of
+  logistics-frontend in `~/logistics-ngrok/`.
+- **Found while testing:** the cross-repo QR-pairing demo could end the
+  dashboard's Vite server (the phone's server address) before the phone's
+  last request. The dashboard demo now waits for the phone's signal.
+
+**Left for the user:**
+
+- Add the `ANTHROPIC_API_KEY` secret to logistics-frontend. Its e2e passes
+  without it, but the assistant can't answer there.
+- Move the uncommitted `frontend/` work in the main checkout
+  (`refactor/org-page-extract-sections`) to logistics-frontend. Its
+  backend-side changes stay here. One way:
+
+  ```sh
+  # in the old checkout; ../logistics-frontend is a clone of the new repo
+  git diff -- frontend > /tmp/frontend.patch           # changes to tracked files
+  git -C ../logistics-frontend apply -p2 /tmp/frontend.patch
+  cp -r frontend/src/components/org ../logistics-frontend/src/components/   # new files
+  cp frontend/src/lib/vehicleStatus.ts ../logistics-frontend/src/lib/
+  ```
