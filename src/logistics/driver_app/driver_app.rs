@@ -1,14 +1,14 @@
-//! The published release of the Android driver app (`android/`), which
+//! The published release of the Android driver app (the logistics-android repo), which
 //! drivers download from this server instead of an app store. A release is
-//! two files in one directory, written by `android/scripts/build-release.sh
-//! --publish <dir>`:
+//! two files in one directory, written by logistics-android's
+//! `scripts/publish-apk.sh` (or `build-release.sh` with `PUBLISH_DIR`):
 //!
 //! - the signed APK, e.g. `logistics-driver-0.2.0.apk`;
 //! - `latest.json`, describing it (see [`Manifest`]).
 //!
 //! The directory is `DRIVER_APP_DIR`, or `{UPLOAD_DIR}/driver-app` by default,
 //! so a deployment keeps releases on the uploads volume. See
-//! `docs/android-driver-app.md` ("Distribution").
+//! logistics-android's `docs/android-driver-app.md` ("Distribution").
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

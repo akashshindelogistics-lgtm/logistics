@@ -1,7 +1,11 @@
 # Releasing
 
-Versions follow [SemVer](https://semver.org/). The backend (`Cargo.toml`) and
-frontend (`frontend/package.json`) are released together under one version.
+Versions follow [SemVer](https://semver.org/). This repo releases the API
+(`Cargo.toml`) under its own version and `vX.Y.Z` tags. The dashboard and the
+Android app have their own release-please and tags in
+[logistics-frontend](https://github.com/akashshindelogistics-lgtm/logistics-frontend) and [logistics-android](https://github.com/akashshindelogistics-lgtm/logistics-android); see their READMEs.
+Until the split (November 2026, v0.14.x) the API and the dashboard were
+released together from this repo, so those older tags cover both.
 
 ## How it fits together
 
@@ -10,27 +14,25 @@ frontend (`frontend/package.json`) are released together under one version.
         │
         ▼
  release-please.yml ──► opens/updates a "release PR"
-        │                (bumps Cargo.toml + package.json, writes CHANGELOG.md)
+        │                (bumps Cargo.toml, writes CHANGELOG.md)
         │  merge the PR
         ▼
  tag vX.Y.Z  +  GitHub Release created by release-please
         │
         ▼
  release.yml ──► GHCR image  logistics-api:X.Y.Z / :X.Y / :latest   (arm64)
-             ├─► frontend-X.Y.Z.tar.gz   (attached to the Release)
              ├─► openapi-X.Y.Z.json      (attached to the Release)
              └─► (optional) rollout to the Oracle VM, pinning API_IMAGE=:X.Y.Z
 ```
 
-The live GitHub Pages demo keeps tracking `master` via `pages.yml` — releases do
-not change it. A release is the reproducible checkpoint: the tagged image, the
-static bundle, the spec, and the VM running that exact version.
+The Swagger UI on GitHub Pages keeps tracking `master` via `pages.yml`; releases
+do not change it. A release is the reproducible checkpoint: the tagged image,
+the spec, and the VM running that exact version.
 
 ## Prerequisites (one-time)
 
 | What | Where |
 | --- | --- |
-| `API_BASE_URL` repo **variable** | e.g. `https://logi-api.duckdns.org/api` — the frontend build needs it |
 | `RELEASE_PLEASE_TOKEN` repo **secret** *(optional)* | fine-grained PAT (contents + pull-requests: write). Without it, tags release-please pushes won't auto-trigger `release.yml` — run it via **Actions → Release → Run workflow** instead |
 | `DEPLOY_ON_RELEASE` repo **variable** = `true` *(optional)* | makes `release.yml` also roll the new version out to the VM |
 | `SSH_HOST` / `SSH_USER` / `SSH_KEY` secrets | required only if `DEPLOY_ON_RELEASE` is on (see `deploy/README.md`) |

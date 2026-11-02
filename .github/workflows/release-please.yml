@@ -1,7 +1,7 @@
 name: release-please
 
-# Maintains a rolling "release PR" off master: it bumps Cargo.toml +
-# frontend/package.json, updates CHANGELOG.md from the conventional-commit
+# Maintains a rolling "release PR" off master: it bumps Cargo.toml, updates
+# CHANGELOG.md from the conventional-commit
 # history, and — when you merge it — creates the vX.Y.Z tag and GitHub Release.
 #
 # The new release is then built and published by `release.yml` (image +

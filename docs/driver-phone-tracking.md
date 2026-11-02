@@ -5,7 +5,7 @@ pairing panel implemented; the rest of phase 2 (source of the last fix) and
 phase 3 (history) planned.** See [Phase 1 as built](#phase-1-as-built),
 [Phase 2 as built](#phase-2-as-built) and [Phase 4 as built](#phase-4-as-built).
 Phase 4 was built ahead of phases 2-3 at the user's request. The app in use
-is now the native Android one ([android-driver-app.md](android-driver-app.md)).
+is now the native Android one ([android-driver-app.md](https://github.com/akashshindelogistics-lgtm/logistics-android/blob/master/docs/android-driver-app.md)).
 
 [gps-tracking.md](gps-tracking.md) added hardware GPS trackers that push a
 vehicle's position to `POST /api/track/{tracker_key}`. This plan adds a second
@@ -151,7 +151,7 @@ vehicle page is not built yet.
   (`frontend/src/lib/pairingLink.ts`). The server address is the API's origin
   (`VITE_API_BASE_URL`), or the dashboard's own in development.
 - **App** (see "Pairing from the dashboard's QR code" in
-  [android-driver-app.md](android-driver-app.md)):
+  [android-driver-app.md](https://github.com/akashshindelogistics-lgtm/logistics-android/blob/master/docs/android-driver-app.md)):
   - A **Scan QR code** button (Google's code scanner) and a
     `logisticsdriver://pair` link filter fill in the pairing form.
   - The driver still taps Pair, so a stray link can't send the phone's
@@ -176,7 +176,7 @@ vehicle page is not built yet.
 ## Phase 4 as built
 
 > **Being replaced** by a native Kotlin Android app. See
-> [android-driver-app.md](android-driver-app.md). `mobile/` is deleted once
+> [android-driver-app.md](https://github.com/akashshindelogistics-lgtm/logistics-android/blob/master/docs/android-driver-app.md). `mobile/` is deleted once
 > that app has been verified on a real phone.
 
 `mobile/` — an [Expo](https://expo.dev) app (SDK 57, TypeScript, Expo Router).
@@ -228,7 +228,7 @@ The backend is done. It follows the design above except where noted; the
 | --- | --- | --- |
 | `POST /api/drivers/{id}/device-token/rotate` | org bearer, Admin or Dispatcher, driver in the caller's org | Issue or replace the driver's device token. The plain token is in this response only. `403` for another org's driver or the wrong role, `404` if unknown. |
 | `POST /api/driver/location` | `Authorization: Bearer <device token>` | Report a batch of fixes. See below. |
-| `GET /api/driver/me` | `Authorization: Bearer <device token>` | Who the phone is paired as. See below. Added for the native Android app ([android-driver-app.md](android-driver-app.md)). |
+| `GET /api/driver/me` | `Authorization: Bearer <device token>` | Who the phone is paired as. See below. Added for the native Android app ([android-driver-app.md](https://github.com/akashshindelogistics-lgtm/logistics-android/blob/master/docs/android-driver-app.md)). |
 
 **`POST /api/driver/location`**
 

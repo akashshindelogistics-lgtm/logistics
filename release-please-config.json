@@ -5,10 +5,7 @@
       "release-type": "rust",
       "package-name": "logistics-system",
       "include-component-in-tag": false,
-      "changelog-path": "CHANGELOG.md",
-      "extra-files": [
-        { "type": "json", "path": "frontend/package.json", "jsonpath": "$.version" }
-      ]
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "changelog-sections": [

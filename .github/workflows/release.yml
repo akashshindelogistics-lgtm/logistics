@@ -8,7 +8,6 @@ name: Release
 #
 # Produces, for tag vX.Y.Z:
 #   - GHCR image  ghcr.io/<owner>/logistics-api:X.Y.Z, :X.Y, :latest  (arm64)
-#   - frontend-X.Y.Z.tar.gz   (static build, root-relative)
 #   - openapi-X.Y.Z.json      (the generated OpenAPI spec)
 #   - a GitHub Release with auto-generated notes and those files attached
 #   - optionally, a rollout to the Oracle VM (set repo variable
@@ -88,22 +87,6 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.tag }}
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-      - name: Build frontend (root-relative)
-        working-directory: frontend
-        env:
-          VITE_BASE: /
-          VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}
-        run: |
-          npm ci
-          npm run build
-          cp dist/index.html dist/404.html
-          tar -C dist -czf "../frontend-${{ needs.version.outputs.version }}.tar.gz" .
-
       - uses: dtolnay/rust-toolchain@stable
       - name: Generate OpenAPI spec
         run: cargo run --bin gen_openapi --release > "openapi-${{ needs.version.outputs.version }}.json"
@@ -112,7 +95,6 @@ jobs:
         with:
           name: release-files
           path: |
-            frontend-${{ needs.version.outputs.version }}.tar.gz
             openapi-${{ needs.version.outputs.version }}.json
           retention-days: 3
 
@@ -128,7 +110,6 @@ jobs:
           tag_name: ${{ needs.version.outputs.tag }}
           generate_release_notes: true
           files: |
-            frontend-${{ needs.version.outputs.version }}.tar.gz
             openapi-${{ needs.version.outputs.version }}.json
 
   deploy:
