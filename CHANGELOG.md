@@ -4,6 +4,14 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.14.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.13.0...v0.14.0) (2026-11-02)
+
+
+### Features
+
+* **driver-app:** serve the Android app from the backend, with in-app updates ([e059207](https://github.com/akashshindelogistics-lgtm/logistics/commit/e059207347b08e2fe2b96b26207c1dc835bba8d6))
+* **driver-app:** serve the Android app from the backend, with in-app updates ([8a0ce11](https://github.com/akashshindelogistics-lgtm/logistics/commit/8a0ce11915d147a02e4a2a43f1a44de9a6c8b909))
+
 ## [0.13.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.12.3...v0.13.0) (2026-10-30)
 
 
