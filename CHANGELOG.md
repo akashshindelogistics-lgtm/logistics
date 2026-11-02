@@ -4,6 +4,17 @@ All notable changes to this project are documented here. From v0.1.1 on, this
 file is maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from the conventional-commit history.
 
+## [0.15.1](https://github.com/akashshindelogistics-lgtm/logistics-backend/compare/v0.15.0...v0.15.1) (2026-11-02)
+
+
+### Documentation
+
+* explore RAG across the logistics system and plan it in phases ([b9f2fb2](https://github.com/akashshindelogistics-lgtm/logistics-backend/commit/b9f2fb2d96dfd0d114210f9f5731aea7bd96c656))
+* explore RAG across the logistics system and plan it in phases ([748cbb4](https://github.com/akashshindelogistics-lgtm/logistics-backend/commit/748cbb4c886dbdfdae48eae47fd179cbae5e7762))
+* plan splitting the monorepo into backend, frontend and android repos ([249b372](https://github.com/akashshindelogistics-lgtm/logistics-backend/commit/249b37291cf0c7c604de644eaa764c19d844a159))
+* the repo split is done; as-built notes and what's left ([28718f9](https://github.com/akashshindelogistics-lgtm/logistics-backend/commit/28718f97b6cfa1de6d0e15600f5dfc07c3784455))
+* the repo split is done; as-built notes and what's left ([bd8bf4c](https://github.com/akashshindelogistics-lgtm/logistics-backend/commit/bd8bf4ce1a86b77dd0c04d0f0c661cdd767f8931))
+
 ## [0.15.0](https://github.com/akashshindelogistics-lgtm/logistics/compare/v0.14.0...v0.15.0) (2026-11-02)
 
 
