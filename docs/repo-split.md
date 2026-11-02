@@ -15,8 +15,8 @@ part its own repo, CI, README and release tags.
 | --- | --- |
 | The existing repo | Becomes the **backend** repo and is renamed `logistics-backend`. It keeps PRs #1 onwards, issues, tags v0.1.0 to v0.14.x, releases, the `logistics-api` GHCR image, Actions variables and secrets. GitHub redirects the old URL and git remotes. |
 | New repos | `logistics-frontend` and `logistics-android`, public like today. |
-| History | Kept per folder: `git filter-repo` moves each folder's commits to the new repo's root, so `git log` and `blame` still work there. |
-| `mobile/` (Expo) | Stays in the backend repo until phase 6 of [android-driver-app.md](android-driver-app.md) deletes it. |
+| History | Kept per folder: `git subtree split` (built into git) moves each folder's commits to the new repo's root, so `git log` and `blame` still work there. Tags aren't carried over. |
+| `mobile/` (Expo) | Stays in the backend repo until phase 6 of [android-driver-app.md](https://github.com/akashshindelogistics-lgtm/logistics-android/blob/master/docs/android-driver-app.md) deletes it. |
 
 ## What goes where
 
@@ -71,9 +71,11 @@ Releases only describe its own code.
   `major × 10000 + minor × 100 + patch`. It goes up with every release without
   hand edits (0.1.0 → 100, today it's 1), so Android always accepts the update.
 - **Backend:** `extra-files` stops bumping `frontend/package.json`.
-- **Old combined tags:** v0.1.0 to v0.14.x stay in the backend repo. The
-  frontend repo gets the same tags through the rewritten history, so its
-  release-please continues from there.
+- **Old combined tags:** v0.1.0 to v0.14.x stay in the backend repo. The new
+  repos start without tags. Their release-please configs set `bootstrap-sha`
+  to the split commit, so the first release's changelog only covers work after
+  the split. Their manifests start at the frontend's version at the split and
+  at Android 0.1.0.
 
 ## Working across repos
 
@@ -97,7 +99,7 @@ Nothing on GitHub changes until the user says go. Until then everything
 happens locally, so it can be redone from a newer `master`.
 
 1. **Prepare locally (reversible):**
-   - Extract both new repos with `git filter-repo`.
+   - Extract both new repos with `git subtree split`.
    - Add each one's README, workflows and release config as commits on top.
    - Run their builds and tests locally.
    - Prepare the backend cleanup branch.

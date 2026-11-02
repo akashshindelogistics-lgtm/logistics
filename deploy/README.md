@@ -1,11 +1,12 @@
 # Deployment
 
-Free-tier setup: the **frontend + Swagger UI** on GitHub Pages, the **Rust API
-+ MySQL** on an Oracle Cloud "Always Free" VM, both driven from GitHub Actions.
+Free-tier setup: the **Rust API + MySQL** on an Oracle Cloud "Always Free"
+VM, the **Swagger UI** on this repo's GitHub Pages, and the **dashboard** on
+[logistics-frontend](https://github.com/akashshindelogistics-lgtm/logistics-frontend)'s GitHub Pages, all driven from GitHub Actions.
 
 ```
- Browser ──HTTPS──▶ <owner>.github.io/<repo>/         (React dashboard, GitHub Pages)
-    │                     /api-docs/                  (Swagger UI)
+ Browser ──HTTPS──▶ <owner>.github.io/logistics-frontend/   (React dashboard, its own repo's Pages)
+    │               <owner>.github.io/logistics-backend/api-docs/   (Swagger UI, this repo)
     │
     └───────HTTPS──▶ logi-api.duckdns.org  ──▶ Caddy ──▶ api:8080 ──▶ db:3306
                      (Oracle VM: docker compose — caddy + api + mysql + duckdns)
@@ -15,9 +16,9 @@ Free-tier setup: the **frontend + Swagger UI** on GitHub Pages, the **Rust API
 
 | Workflow | Trigger | Does |
 | --- | --- | --- |
-| `.github/workflows/pages.yml` | push to `main`/`master`, manual | Builds the Vite app, generates + validates the OpenAPI spec, deploys both to Pages — this is the live demo, always tracking `master` |
+| `.github/workflows/pages.yml` | push to `main`/`master`, manual | Generates + validates the OpenAPI spec and deploys the Swagger UI to Pages, always tracking `master` |
 | `.github/workflows/release-please.yml` | push to `master` | Maintains a rolling release PR (version bump + `CHANGELOG.md`); merging it tags `vX.Y.Z` |
-| `.github/workflows/release.yml` | `v*` tag, manual | Builds + pushes the GHCR image `:X.Y.Z`/`:X.Y`/`:latest`, publishes the frontend bundle + OpenAPI spec on a GitHub Release, optionally rolls the VM to that version |
+| `.github/workflows/release.yml` | `v*` tag, manual | Builds + pushes the GHCR image `:X.Y.Z`/`:X.Y`/`:latest`, publishes the OpenAPI spec on a GitHub Release, optionally rolls the VM to that version |
 | `.github/workflows/deploy-backend.yml` | manual | Break-glass: pin the VM to any existing GHCR image tag (redeploy / rollback) |
 
 Full release process: [`docs/releasing.md`](../docs/releasing.md).
@@ -27,14 +28,9 @@ Full release process: [`docs/releasing.md`](../docs/releasing.md).
 ### 1. GitHub Pages
 Repo → **Settings → Pages → Source → GitHub Actions**.
 
-### 2. Repo variable for the API URL
-Repo → **Settings → Secrets and variables → Actions → Variables → New**:
-
-| Name | Value |
-| --- | --- |
-| `API_BASE_URL` | `https://logi-api.duckdns.org/api` |
-
-The frontend build fails fast if this is missing.
+### 2. The dashboard's API URL
+Set in [logistics-frontend](https://github.com/akashshindelogistics-lgtm/logistics-frontend), not here: its repo variable `API_BASE_URL`
+(e.g. `https://logi-api.duckdns.org/api`) is what its Pages build calls.
 
 ### 3. DuckDNS
 Sign in at <https://www.duckdns.org>, create a subdomain (e.g. `logi-api`),
@@ -97,13 +93,14 @@ After the first release publishes the image, either:
 
 ## First run
 
-1. Merge this branch. `pages.yml` publishes the site (live demo, tracks `master`).
+1. Merge this branch. `pages.yml` publishes the Swagger UI (tracks `master`);
+   the dashboard deploys from logistics-frontend.
 2. Cut the first release: `git tag v0.1.0 && git push origin v0.1.0`. `release.yml`
    builds the image and (if `DEPLOY_ON_RELEASE=true`) brings the VM stack up;
    otherwise run **Deploy Backend (manual)** with `image_tag = 0.1.0`.
 3. Visit `https://logi-api.duckdns.org/api/health` → `{"status":"ok"}` (Caddy
    may take ~30s to obtain the first certificate).
-4. Open the Pages URL, register an org, log in.
+4. Open the dashboard's Pages URL (logistics-frontend), register an org, log in.
 
 ## Backups
 

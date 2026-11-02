@@ -1321,9 +1321,19 @@
   Decided: this repo becomes the backend and is renamed logistics-backend
   (keeps PRs, tags, releases, GHCR image); new public repos
   logistics-frontend and logistics-android keep their folders' history (git
-  filter-repo); mobile/ stays in the backend until it is retired. Each repo
+  subtree split); mobile/ stays in the backend until it is retired. Each repo
   gets its own CI, README and release-please with separate tags.
-** TODO Phase 1: extract logistics-frontend and logistics-android locally with history; their README, CI, release config; builds and tests pass locally
-** TODO Phase 2: backend cleanup branch - remove frontend/ and android/, trim workflows (Swagger-only Pages, image + OpenAPI release), release-please without frontend, README and doc links to the new repos
+** DONE Phase 1: extract logistics-frontend and logistics-android locally with history; their README, CI, release config; builds and tests pass locally
+   Prepared in ~/logistics-split/ (not pushed): git subtree split of
+   frontend/ (106 commits) and android/ (12 commits), each with a setup
+   commit (README, workflows, release-please with bootstrap-sha, LICENSE).
+   Frontend: tsc, lint, 327 Vitest, build, 19 Playwright tests against a real
+   API, a demo starting the API from BACKEND_DIR. Android: version.txt with
+   derived versionCode (0.1.0 -> 100), scripts use BACKEND_DIR/FRONTEND_DIR,
+   docs copied in; 58 unit tests, lint, builds, and demo-phone-pairing.sh run
+   across the split repos (which found and fixed a demo race).
+** DONE Phase 2: backend cleanup branch - remove frontend/ and android/, trim workflows (Swagger-only Pages, image + OpenAPI release), release-please without frontend, README and doc links to the new repos
+   Branch chore/repo-split (not pushed). Also moves the two Android docs out,
+   updates docs/releasing.md and deploy/README.md, and .dockerignore.
 ** TODO Phase 3: cutover - land in-flight work, create and push the two repos, Pages/variables/secrets, merge the cleanup, rename to logistics-backend, all CI green
 ** TODO Phase 4: local follow-up - sibling checkouts, ngrok deployment from two repos, badges, retire the plan to an as-built note

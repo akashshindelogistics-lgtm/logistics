@@ -1,29 +1,33 @@
-# Logistics System
+# Logistics Backend
 
-[![Frontend Unit Tests (Vitest)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-unit-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-unit-tests.yml)
-
-[![Frontend Integration Tests (Playwright)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/frontend-integration.yml)
-
-[![Periodic Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/periodic-tests.yml)
-
-[![Rust Lint](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/rust-lint.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/rust-lint.yml)
-
-[![Android Driver App](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/android.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/android.yml)
-
-[![Pages — Deploy Frontend + Swagger UI](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/pages.yml)
-
-[![Release](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics/actions/workflows/release.yml)
-&nbsp; [![Latest release](https://img.shields.io/github/v/release/akashshindelogistics-lgtm/logistics?sort=semver)](https://github.com/akashshindelogistics-lgtm/logistics/releases)
+[![Periodic Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/periodic-tests.yml)
+[![Rust Lint](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/rust-lint.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/rust-lint.yml)
+[![Pages — Swagger UI](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/pages.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/pages.yml)
+[![Release](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/release.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/release.yml)
+&nbsp; [![Latest release](https://img.shields.io/github/v/release/akashshindelogistics-lgtm/logistics-backend?sort=semver)](https://github.com/akashshindelogistics-lgtm/logistics-backend/releases)
 
 A logistics management platform for tracking organizations, their vehicle
-fleets, stock, customers, and delivery dispatches. It ships as a Rust REST
-API backed by MySQL, with a React + TypeScript dashboard for day-to-day
-operations, live location maps, and AI-generated dispatch summaries.
+fleets, stock, customers, and delivery dispatches. This repo is its Rust REST
+API backed by MySQL, with the feature docs (`docs/`) and the task list
+(`todo.org`) for the whole system.
 
-📖 **Live dashboard:** <https://akashshindelogistics-lgtm.github.io/logistics/>
-&nbsp;·&nbsp; **API docs (Swagger UI):** <https://akashshindelogistics-lgtm.github.io/logistics/api-docs/>
-&nbsp;·&nbsp; 🏷️ **Releases:** [latest](https://github.com/akashshindelogistics-lgtm/logistics/releases/latest)
-· [all releases](https://github.com/akashshindelogistics-lgtm/logistics/releases)
+The system is three repos:
+
+| Repo | What | CI |
+| --- | --- | --- |
+| **logistics-backend** | This API, the deployment (`deploy/`), feature docs and `todo.org` | [![Cargo Tests](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/periodic-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics-backend/actions/workflows/periodic-tests.yml) |
+| [logistics-frontend](https://github.com/akashshindelogistics-lgtm/logistics-frontend) | The React + TypeScript dispatch dashboard: day-to-day operations, live location maps, AI-generated dispatch summaries | [![Unit Tests](https://github.com/akashshindelogistics-lgtm/logistics-frontend/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics-frontend/actions/workflows/unit-tests.yml) [![E2E](https://github.com/akashshindelogistics-lgtm/logistics-frontend/actions/workflows/e2e.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics-frontend/actions/workflows/e2e.yml) |
+| [logistics-android](https://github.com/akashshindelogistics-lgtm/logistics-android) | The native Kotlin driver app that reports a driver's phone location | [![Android CI](https://github.com/akashshindelogistics-lgtm/logistics-android/actions/workflows/android.yml/badge.svg)](https://github.com/akashshindelogistics-lgtm/logistics-android/actions/workflows/android.yml) |
+
+Each has its own CI, README and release tags. Until November 2026 they were
+one repo (this one); the other two kept their folders' history. In the docs,
+paths starting `frontend/` mean logistics-frontend and `android/` mean
+logistics-android. See [docs/repo-split.md](docs/repo-split.md).
+
+📖 **Live dashboard:** <https://akashshindelogistics-lgtm.github.io/logistics-frontend/>
+&nbsp;·&nbsp; **API docs (Swagger UI):** <https://akashshindelogistics-lgtm.github.io/logistics-backend/api-docs/>
+&nbsp;·&nbsp; 🏷️ **Releases:** [latest](https://github.com/akashshindelogistics-lgtm/logistics-backend/releases/latest)
+· [all releases](https://github.com/akashshindelogistics-lgtm/logistics-backend/releases)
 · [changelog](CHANGELOG.md)
 
 ## Features
@@ -46,7 +50,7 @@ operations, live location maps, and AI-generated dispatch summaries.
   needs an **active** assigned driver, spare capacity, and no trip already
   in progress before it can be selected for a dispatch. Each driver's page
   also sets up the driver's phone. The **Driver's phone** panel pairs it: a
-  device token shown once as a QR code for the Android app (`android/`) to
+  device token shown once as a QR code for the Android app (logistics-android) to
   scan, when the phone last reported, re-pair for a lost phone, and unpair.
   Next to it is the app's download link and QR code, served by this backend;
   the app offers newer releases itself.
@@ -105,11 +109,11 @@ operations, live location maps, and AI-generated dispatch summaries.
   (manages godowns and stock). Every role can read everything in its org.
 - **Interactive API docs** — a Swagger UI generated from the API with
   `utoipa`, auto-deployed to
-  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/api-docs/)
+  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics-backend/api-docs/)
   on every push to `main`/`master`.
 - **Web dashboard** — a React frontend for organizations, vehicles, stock,
-  customers, and dispatches, including a live Leaflet map of locations,
-  deployed alongside the docs on GitHub Pages.
+  customers, and dispatches, including a live Leaflet map of locations, in
+  [logistics-frontend](https://github.com/akashshindelogistics-lgtm/logistics-frontend) and deployed to its own GitHub Pages.
 
 ## Tech stack
 
@@ -121,7 +125,7 @@ operations, live location maps, and AI-generated dispatch summaries.
 - [jsonwebtoken](https://github.com/Keats/jsonwebtoken) + [bcrypt](https://github.com/Keats/rust-bcrypt) — auth
 - [reqwest](https://github.com/seanmonstar/reqwest) — outbound HTTP calls to the Anthropic API
 
-**Frontend** (`frontend/`)
+**Frontend** ([logistics-frontend](https://github.com/akashshindelogistics-lgtm/logistics-frontend))
 - [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
 - [Vite](https://vitejs.dev/) — dev server and build tooling
 - [React Router](https://reactrouter.com/) — client-side routing
@@ -148,15 +152,9 @@ operations, live location maps, and AI-generated dispatch summaries.
 │   │   └── vehicle/     # Vehicle domain model
 │   ├── bin/gen_openapi.rs  # Generates the OpenAPI spec for Swagger UI
 │   └── main.rs
-├── frontend/
-│   ├── src/
-│   │   ├── api/         # Axios clients per resource
-│   │   ├── components/  # Shared UI (navbar, sidebar, map, icons)
-│   │   └── pages/        # Dashboard, orgs, vehicles, customers, dispatches, auth
-│   └── tests/           # Playwright end-to-end tests
-├── android/             # Native Kotlin driver app (replacing mobile/) — see android/README.md
-│   └── app/src/main/java/com/logistics/driver/  # domain, data, net, ui
-└── mobile/              # Expo driver app, to be retired — see mobile/README.md
+├── deploy/              # docker compose + Caddy for the hosted API
+├── docs/                # feature docs and plans for the whole system
+└── mobile/              # Expo driver app, replaced by logistics-android and to be retired — see mobile/README.md
     └── src/
         ├── app/          # Screens (Expo Router): pairing, status
         └── lib/          # Offline queue, API client, background location task
@@ -201,7 +199,7 @@ export RESEND_FROM_EMAIL="dispatch@yourdomain.com"
 export UPLOAD_DIR="./uploads"
 
 # Optional: where the published Android driver app release is kept (latest.json
-# + the APK, written by android/scripts/publish-apk.sh). Defaults to
+# + the APK, written by logistics-android's scripts/publish-apk.sh). Defaults to
 # $UPLOAD_DIR/driver-app.
 export DRIVER_APP_DIR="./uploads/driver-app"
 
@@ -221,74 +219,36 @@ To regenerate the OpenAPI spec used by Swagger UI:
 cargo run --bin gen_openapi
 ```
 
-### Frontend
+### Dashboard and driver app
 
-```bash
-cd frontend
-npm install
-npm run dev
+The dashboard is [logistics-frontend](https://github.com/akashshindelogistics-lgtm/logistics-frontend) and the driver app is
+[logistics-android](https://github.com/akashshindelogistics-lgtm/logistics-android). For local work, clone them next to this repo;
+their demos start this API from `../logistics-backend` with `cargo run`:
+
+```text
+logistics/
+├── logistics-backend/    # this repo: cargo run → http://127.0.0.1:8080
+├── logistics-frontend/   # npm run dev → http://localhost:5173 (proxies /api here)
+└── logistics-android/    # ./gradlew assembleDebug; scripts/demo-*.sh
 ```
-
-The dashboard runs on Vite's default dev server port and talks to the API
-at `http://127.0.0.1:8080`.
 
 ### Tests
 
 ```bash
-# Rust unit tests
-cargo test
-
-cd frontend
-
-# Frontend unit tests (Vitest)
-npm run test:unit
-
-# Frontend end-to-end tests (Playwright)
-npm run test:e2e
-
-# Watch the whole product run in a real browser window: register, login,
-# godowns/stock/transfer, fleet + compliance, driver, customer, a dispatch
-# carried through delivery, billing, a return, and entity edits. Starts the
-# Vite dev server and the Rust API itself if they aren't already running.
-npm run test:e2e:demo
-
-# Or watch just one feature's flow:
-npm run test:e2e:demo:reports        # operations reporting
-npm run test:e2e:demo:roles          # role-scoped team members
-npm run test:e2e:demo:notifications  # dispatch notifications
-npm run test:e2e:demo:trips          # multi-stop trips
-npm run test:e2e:demo:assistant      # "ask your data" assistant
-npm run test:e2e:demo:uploads        # proof-of-delivery file uploads
-npm run test:e2e:demo:stock-categories # stock categories
-npm run test:e2e:demo:vendors        # vehicle vendors
-npm run test:e2e:demo:hired-vehicles # dispatching on a hired truck
-npm run test:e2e:demo:vendor-payments # paying vendors + hired-transport report
-npm run test:e2e:demo:vehicle-visuals # 3D icons, vehicle types and the 3D vehicle view
-npm run test:e2e:demo:motion         # motion: transitions, lifecycle track, gliding markers
-npm run test:e2e:demo:theme-colors   # Oxford & Claret colour theme, light and dark
-
-# Already have servers on 5173/8080 (e.g. another worktree)? Run a demo on
-# other ports; it starts its own API (PORT) and Vite (API_PROXY_TARGET) there:
-E2E_WEB_PORT=5174 E2E_API_PORT=8081 npm run test:e2e:demo:motion
-# The headless suite takes the dev server URL the same way:
-E2E_BASE_URL=http://localhost:5174 npm run test:e2e
+cargo test                               # unit and route tests; needs a local MySQL
+cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
+cargo run --bin gen_openapi > openapi.json   # the spec Swagger UI shows
 ```
 
-Motion follows the OS "reduce motion" setting everywhere (CSS, motion/react,
-auto-animate, page transitions and map gliding), and the headless Playwright
-suite runs with reduced motion so animations never race its assertions.
-
-The vehicle-type icons are still renders of the 3D models in
-`frontend/public/models/vehicles` (Kenney Car Kit, CC0). After changing a model
-or the scene lighting, regenerate them with `npm run render:vehicle-icons`. The
-other 3D icons are Microsoft Fluent Emoji (MIT). Set
-`localStorage['logitrack:disable-3d'] = '1'` to show still renders instead of the
-live WebGL view.
+The dashboard's Vitest and Playwright suites and its headed demos live in
+logistics-frontend; its end-to-end CI checks out and builds this repo's
+`master`. The Android app's tests and emulator demos live in
+logistics-android.
 
 ## API overview
 
 Key REST endpoints exposed by the server (see the
-[published Swagger UI](https://akashshindelogistics-lgtm.github.io/logistics/api-docs/)
+[published Swagger UI](https://akashshindelogistics-lgtm.github.io/logistics-backend/api-docs/)
 for the full spec, request/response schemas, and try-it-out support):
 
 All routes are served under the `/api` prefix.
@@ -369,25 +329,25 @@ Full runbook in [`deploy/README.md`](deploy/README.md).
 
 ## Releases
 
-Backend and frontend are versioned together (SemVer). `release-please` keeps a
-rolling release PR from the conventional-commit history; merging it tags
-`vX.Y.Z`, which drives `release.yml` to publish the GHCR image
-(`logistics-api:X.Y.Z`), a `frontend-X.Y.Z.tar.gz` bundle, the OpenAPI spec,
-and a GitHub Release — optionally rolling the Oracle VM to that version. See
-[`docs/releasing.md`](docs/releasing.md) and the
-[Releases page](https://github.com/akashshindelogistics-lgtm/logistics/releases).
+The API is versioned on its own (SemVer); the dashboard and the Android app
+have their own release-please and `vX.Y.Z` tags in their repos (up to v0.14.x
+the API and dashboard were released together from here). `release-please`
+keeps a rolling release PR from the conventional-commit history; merging it
+tags `vX.Y.Z`, which drives `release.yml` to publish the GHCR image
+(`logistics-api:X.Y.Z`), the OpenAPI spec, and a GitHub Release, optionally
+rolling the Oracle VM to that version. See [`docs/releasing.md`](docs/releasing.md)
+and the [Releases page](https://github.com/akashshindelogistics-lgtm/logistics-backend/releases).
 
 **What's in a release** (for tag `vX.Y.Z`):
 
 | Artifact | Where | How to use it |
 | --- | --- | --- |
 | API image (arm64) | GHCR, tags `X.Y.Z`, `X.Y`, `latest` | `docker pull ghcr.io/akashshindelogistics-lgtm/logistics-api:X.Y.Z` |
-| Frontend bundle | `frontend-X.Y.Z.tar.gz` on the GitHub Release | Static build with root-relative paths; serve it from any web server |
 | OpenAPI spec | `openapi-X.Y.Z.json` on the GitHub Release | Import into Swagger UI, Postman or a client generator |
 | Release notes | The GitHub Release page and [`CHANGELOG.md`](CHANGELOG.md) | Grouped into features and bug fixes from the conventional commits |
 
-[**→ Latest release**](https://github.com/akashshindelogistics-lgtm/logistics/releases/latest)
-&nbsp;·&nbsp; [All releases](https://github.com/akashshindelogistics-lgtm/logistics/releases)
+[**→ Latest release**](https://github.com/akashshindelogistics-lgtm/logistics-backend/releases/latest)
+&nbsp;·&nbsp; [All releases](https://github.com/akashshindelogistics-lgtm/logistics-backend/releases)
 &nbsp;·&nbsp; [Changelog](CHANGELOG.md)
 
 ## CI/CD
@@ -398,21 +358,16 @@ GitHub Actions workflows in `.github/workflows/`:
 feedback before, and without, a pull request; the `pull_request` trigger is
 kept only for fork PRs, which can't fire `push` on this repo):
 
-- **frontend-unit-tests.yml** — type-checks the frontend and runs its Vitest
-  unit suite. No backend or database needed, so it's the fastest signal on a
-  frontend change.
-- **frontend-integration.yml** — runs the Playwright end-to-end suite against a
-  MySQL service container.
 - **periodic-tests.yml** — runs the Cargo test suite. Also on a 2-hourly
   schedule.
 - **rust-lint.yml** — checks Rust formatting (`cargo fmt --check`) and runs
   `cargo clippy --all-targets -- -D warnings`, so any clippy warning fails the
   build. Only runs when Rust sources, `Cargo.toml`/`Cargo.lock` or
   `rustfmt.toml` change.
-- **pages.yml** — the *validate the OpenAPI spec* and *build the React
-  dashboard* jobs run as CI on every branch; the **deploy to
-  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics/)** job
-  (app at `/`, Swagger UI at `/api-docs/`) only runs on `main`/`master`.
+- **pages.yml** — the *validate the OpenAPI spec* job runs as CI on every
+  branch; the **deploy to
+  [GitHub Pages](https://akashshindelogistics-lgtm.github.io/logistics-backend/api-docs/)**
+  job (Swagger UI at `/api-docs/`) only runs on `main`/`master`.
 
 **Release / deploy — deliberately _not_ run on branch pushes** (they publish
 artifacts or touch production):
@@ -420,8 +375,7 @@ artifacts or touch production):
 - **release-please.yml** — maintains the release PR (version bump +
   `CHANGELOG.md`) on push to `master`.
 - **release.yml** — on a `vX.Y.Z` tag: builds + pushes the API image, publishes
-  the frontend bundle + OpenAPI spec on a GitHub Release, optionally deploys the
-  VM.
+  the OpenAPI spec on a GitHub Release, optionally deploys the VM.
 - **deploy-backend.yml** — manual (`workflow_dispatch`): pin the VM to any
   existing GHCR image tag — redeploy or rollback.
 
