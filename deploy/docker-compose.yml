@@ -38,6 +38,11 @@ services:
       ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
       # Optional — without these, notifications are recorded but stay QUEUED
       # (docs/notifications.md). Blank counts as unset.
+      AGENTS_ENABLED: ${AGENTS_ENABLED:-}
+      AGENT_INTERVAL_MINUTES: ${AGENT_INTERVAL_MINUTES:-}
+      AGENT_MODEL: ${AGENT_MODEL:-}
+      AGENT_EFFORT: ${AGENT_EFFORT:-}
+      AGENT_DAILY_TOKEN_LIMIT: ${AGENT_DAILY_TOKEN_LIMIT:-}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}

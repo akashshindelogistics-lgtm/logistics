@@ -1367,3 +1367,15 @@
 ** TODO Phase 5: driver assistant in the Android app, scoped to the driver's own dispatches and trips
 ** TODO Phase 6: documents - PDF compliance uploads, org knowledge base (org_doc chunks), in-app help over product docs
 ** TODO Phase 7 (conditional): embeddings + hybrid retrieval, only if phase 1's evaluation shows paraphrase misses that matter
+* TODO [#B] Agentic workflow - agents run routine logistics operations and people handle exceptions, with autonomy enforced in code (off / shadow / supervised / autonomous per org)
+   Plan: [[file:docs/agentic-workflow.md]]
+** TODO Add Anthropic API credits - the key is rejected with "credit balance is too low", so no agent or existing AI feature can reach Claude
+** DONE Phase 1 backend: agent loop, tool gate, autonomy modes, audit tables, approval routes, dispatch desk agent, off by default
+** TODO Phase 1: first live run (cargo test live_agent_run -- --ignored), compare Opus 5.5 and Haiku 5.5 on cost and judgement
+** TODO Phase 1: dashboard - agent settings, runs and approval inbox in logistics-frontend, unit + Playwright + standalone demo flow
+** TODO Phase 2: domain event outbox instead of polling; move notification sending from routes into the model layer
+** TODO Phase 3: fleet and compliance, warehouse, ops analyst, data quality agents
+** TODO Phase 4: driver status actions in the Android app, then delivery monitor and trip planner agents
+** TODO Phase 5: billing agent - raise on delivery, send reminders; payment recording stays human
+** TODO Phase 6: inbound email or WhatsApp, then order intake, customer comms, vendor and hire agents
+** TODO Phase 7: payment gateway, only then consider automatic payment recording

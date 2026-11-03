@@ -1,5 +1,6 @@
 use actix_cors::Cors;
 use actix_web::{App, HttpServer};
+use logistics_system::logistics::agent::runtime as agents;
 use logistics_system::logistics::auth::auth::ensure_jwt_secret_configured;
 use logistics_system::logistics::notification::delay_alerts;
 use logistics_system::logistics::server::routes::config_routes;
@@ -8,6 +9,10 @@ use logistics_system::logistics::server::routes::config_routes;
 /// `IN_TRANSIT` dispatch across every org for one running behind schedule.
 /// See `docs/delay-alerts.md`.
 const DELAY_ALERT_SCAN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// How often agents run when `AGENTS_ENABLED=true`, unless
+/// `AGENT_INTERVAL_MINUTES` says otherwise. See `docs/agentic-workflow.md`.
+const DEFAULT_AGENT_INTERVAL_MINUTES: u64 = 60;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -26,6 +31,24 @@ async fn main() -> std::io::Result<()> {
             }
         }
     });
+
+    // Off unless asked for, because each run costs money. Each org also has its
+    // own mode, which starts as OFF.
+    if std::env::var("AGENTS_ENABLED").is_ok_and(|v| v.trim() == "true") {
+        let minutes = std::env::var("AGENT_INTERVAL_MINUTES")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .filter(|m| *m > 0)
+            .unwrap_or(DEFAULT_AGENT_INTERVAL_MINUTES);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(minutes * 60)).await;
+                if let Err(err) = agents::run_due_orgs().await {
+                    eprintln!("agent scheduler failed: {err}");
+                }
+            }
+        });
+    }
 
     // Bind host/port come from the environment so the same binary runs behind a
     // reverse proxy in a container (`0.0.0.0`, `PORT`) and directly on a

@@ -40,6 +40,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
+mod agents;
 mod ai;
 mod auth;
 mod billing;
@@ -62,6 +63,7 @@ mod vehicle_documents;
 mod vehicles;
 mod vendors;
 
+pub use agents::*;
 pub use ai::*;
 pub use auth::*;
 pub use billing::*;
@@ -195,6 +197,13 @@ impl Modify for SecurityAddon {
         get_ops_report_summary,
         list_dispatch_notifications,
         list_org_notifications,
+        get_agent_settings,
+        update_agent_settings,
+        run_agents_now,
+        list_agent_runs,
+        list_agent_actions,
+        approve_agent_action,
+        reject_agent_action,
         create_trip,
         list_org_trips,
         get_trip,
@@ -244,6 +253,13 @@ impl Modify for SecurityAddon {
             UploadedFileResponse, UploadedFileRef,
             AssistantAskPayload, AssistantAnswer, AssistantSource, AssistantAnswerResponse,
             AssistantReindexResult, AssistantReindexResponse,
+            AgentSettings, AgentSettingsResponse, AgentRunResponse, AgentRunListResponse,
+            AgentActionResponse, AgentActionListResponse,
+            crate::logistics::agent::store::AutonomyMode,
+            crate::logistics::agent::store::Risk,
+            crate::logistics::agent::store::ActionStatus,
+            crate::logistics::agent::store::AgentRun,
+            crate::logistics::agent::store::AgentAction,
             LocationResponse, OrgSummaryListResponse, EmptyResponse,
         )
     ),
@@ -266,6 +282,7 @@ impl Modify for SecurityAddon {
         (name = "Notifications", description = "Customer and driver notifications recorded for each dispatch"),
         (name = "Trips", description = "Multi-stop trips: one vehicle serving several customer orders in sequence"),
         (name = "Uploads", description = "File storage for uploaded images, e.g. proof-of-delivery photos and signatures"),
+        (name = "Agents", description = "Autonomy settings, the audit trail of agent runs and actions, and the approval inbox"),
         (name = "AI Assistant", description = "Retrieval-grounded natural-language Q&A over an organization's own data"),
     )
 )]
@@ -363,6 +380,13 @@ pub fn config_routes(cfg: &mut web::ServiceConfig) {
             .service(get_ops_report_summary)
             .service(list_dispatch_notifications)
             .service(list_org_notifications)
+            .service(get_agent_settings)
+            .service(update_agent_settings)
+            .service(run_agents_now)
+            .service(list_agent_runs)
+            .service(list_agent_actions)
+            .service(approve_agent_action)
+            .service(reject_agent_action)
             .service(create_trip)
             .service(list_org_trips)
             .service(get_trip)
