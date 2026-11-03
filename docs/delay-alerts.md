@@ -41,7 +41,7 @@ assumes:
 3. Otherwise looks up the dispatch's customer and records + attempts to
    deliver a new `NotificationEvent::DispatchRunningLate` notification via
    `Notification::record_dispatch_running_late`, reusing the existing
-   Twilio/email delivery pipeline (`notification::delivery`) exactly as the
+   SMS/email delivery pipeline (`notification::delivery`) exactly as the
    dispatch-created / dispatch-delivered events do — this is a new trigger
    condition on the same mechanism, not a new one. The body is
    AI-personalized via `ai::notification_copy::generate_dispatch_running_late_customer_body`

@@ -571,6 +571,7 @@ mod tests {
             body: "Hi Priya Sharma, your order (ref a1b2c3d4) has been dispatched.".to_string(),
             status: NotificationStatus::Queued,
             created_at: 1_700_000_000,
+            sms_vars: Vec::new(),
         }
     }
 

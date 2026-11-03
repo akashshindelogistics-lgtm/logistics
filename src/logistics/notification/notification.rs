@@ -1,12 +1,13 @@
 //! Dispatch notifications to the customer and driver.
 //!
 //! When a dispatch is created, and again when it's delivered, the system
-//! builds a notification for each party it should tell — its body
+//! builds a notification for each party it should tell — an email body is
 //! AI-personalized via [`crate::logistics::ai::notification_copy`] when
 //! `ANTHROPIC_API_KEY` is configured, falling back to a fixed template on
-//! any error — records it, then immediately attempts to actually send it via
-//! [`crate::logistics::notification::delivery`] (Twilio for SMS, SMTP or
-//! Resend for email). Every row lands with status `QUEUED`
+//! any error, and an SMS always uses a fixed template, since Indian operators
+//! only deliver DLT-approved wording — records it, then immediately attempts
+//! to actually send it via [`crate::logistics::notification::delivery`] (MSG91
+//! for SMS, SMTP or Resend for email). Every row lands with status `QUEUED`
 //! (ready to send), `SKIPPED` (no phone/email on file for that party),
 //! `SENT` (delivery succeeded), or `FAILED` (delivery was attempted and the
 //! provider reported an error). A `QUEUED` row whose channel has no
@@ -16,6 +17,7 @@
 
 use crate::logistics::customer::customer::Customer;
 use crate::logistics::db::connection::DbConnection;
+use crate::logistics::notification::delivery::{self, SmsTemplate, sms_var};
 use mysql::prelude::*;
 use mysql::*;
 use serde::{Deserialize, Serialize};
@@ -134,6 +136,10 @@ pub struct Notification {
     pub body: String,
     pub status: NotificationStatus,
     pub created_at: i64,
+    /// Values for the SMS template's variables. Only needed to send a freshly
+    /// recorded notification, so never stored or returned by the API.
+    #[serde(skip)]
+    pub sms_vars: Vec<String>,
 }
 
 type Row = (
@@ -215,6 +221,7 @@ impl Notification {
             body,
             status: NotificationStatus::from_str(&status),
             created_at,
+            sms_vars: Vec::new(),
         }
     }
 
@@ -259,6 +266,7 @@ impl Notification {
         recipient_kind: &str,
         target: Option<(NotificationChannel, String)>,
         body: String,
+        sms_vars: Vec<String>,
     ) -> Notification {
         let (channel, recipient, status) = match target {
             Some((ch, to)) => (ch, to, NotificationStatus::Queued),
@@ -279,17 +287,30 @@ impl Notification {
             body,
             status,
             created_at: now_unix(),
+            sms_vars,
+        }
+    }
+
+    /// The DLT template this notification goes out as, if sent by SMS.
+    fn sms_template(&self) -> SmsTemplate {
+        match self.event {
+            NotificationEvent::DispatchCreated if self.recipient_kind == "driver" => {
+                SmsTemplate::DispatchCreatedDriver
+            }
+            NotificationEvent::DispatchCreated => SmsTemplate::DispatchCreatedCustomer,
+            NotificationEvent::DispatchDelivered => SmsTemplate::DispatchDelivered,
+            NotificationEvent::DispatchRunningLate => SmsTemplate::DispatchRunningLate,
         }
     }
 
     /// Record the "your shipment is on its way" notifications for a new
     /// dispatch: one for the customer, one for the driver (via `driver_phone`).
-    /// The body for each is AI-personalized when `ANTHROPIC_API_KEY` is
+    /// A customer email is AI-personalized when `ANTHROPIC_API_KEY` is
     /// configured (see `crate::logistics::ai::notification_copy`), falling
-    /// back to a fixed template on any error — a misconfigured or
-    /// rate-limited environment must never block recording a dispatch.
-    /// Generation is skipped entirely for a row with no contact to send to,
-    /// since nobody will ever see that copy.
+    /// back to the fixed text on any error — a misconfigured or rate-limited
+    /// environment must never block recording a dispatch. An SMS always uses
+    /// the fixed text, which has to match its DLT template (see
+    /// `docs/notifications.md`), and so does a row with no contact to send to.
     pub async fn record_dispatch_created(
         org_id: Uuid,
         dispatch_id: Uuid,
@@ -302,43 +323,21 @@ impl Notification {
             .filter(|s| !s.is_empty())
             .map(|p| (NotificationChannel::Sms, p.to_string()));
 
-        let customer_body = if customer_target.is_some() {
+        let name = sms_var(&customer.name);
+        let fixed = |name: &str| {
+            format!("Hi {name}, your order (ref {short_id}) has been dispatched and is on its way.")
+        };
+        let customer_body = if Self::is_email(&customer_target) {
             crate::logistics::ai::notification_copy::generate_dispatch_created_customer_body(
                 &customer.name,
                 short_id,
             )
             .await
-            .unwrap_or_else(|_| {
-                format!(
-                    "Hi {}, your order (ref {short_id}) has been dispatched and is on its way.",
-                    customer.name
-                )
-            })
+            .unwrap_or_else(|_| fixed(&customer.name))
         } else {
-            format!(
-                "Hi {}, your order (ref {short_id}) has been dispatched and is on its way.",
-                customer.name
-            )
+            fixed(&name)
         };
-
-        let driver_body = if driver_target.is_some() {
-            crate::logistics::ai::notification_copy::generate_dispatch_created_driver_body(
-                &customer.name,
-                short_id,
-            )
-            .await
-            .unwrap_or_else(|_| {
-                format!(
-                    "New trip assigned: dispatch {short_id} to {}.",
-                    customer.name
-                )
-            })
-        } else {
-            format!(
-                "New trip assigned: dispatch {short_id} to {}.",
-                customer.name
-            )
-        };
+        let driver_body = format!("New trip assigned: dispatch {short_id} to {name}.");
 
         let notifs = vec![
             Self::build(
@@ -348,6 +347,7 @@ impl Notification {
                 "customer",
                 customer_target,
                 customer_body,
+                vec![name.clone(), short_id.to_string()],
             ),
             Self::build(
                 org_id,
@@ -356,14 +356,20 @@ impl Notification {
                 "driver",
                 driver_target,
                 driver_body,
+                vec![short_id.to_string(), name],
             ),
         ];
         Self::persist(&notifs)?;
         Ok(notifs)
     }
 
+    /// Whether this customer target goes by email, and so can take AI copy.
+    fn is_email(target: &Option<(NotificationChannel, String)>) -> bool {
+        matches!(target, Some((NotificationChannel::Email, _)))
+    }
+
     /// Record the "your shipment was delivered" notification for the
-    /// customer. AI-personalized / fallback behavior matches
+    /// customer. AI-personalized / fixed text behavior matches
     /// [`Self::record_dispatch_created`].
     pub async fn record_dispatch_delivered(
         org_id: Uuid,
@@ -373,23 +379,19 @@ impl Notification {
         let short_id = &dispatch_id.to_string()[..8];
         let customer_target = Self::customer_target(customer);
 
-        let customer_body = if customer_target.is_some() {
+        let name = sms_var(&customer.name);
+        let fixed = |name: &str| {
+            format!("Hi {name}, your order (ref {short_id}) has been delivered. Thank you!")
+        };
+        let customer_body = if Self::is_email(&customer_target) {
             crate::logistics::ai::notification_copy::generate_dispatch_delivered_customer_body(
                 &customer.name,
                 short_id,
             )
             .await
-            .unwrap_or_else(|_| {
-                format!(
-                    "Hi {}, your order (ref {short_id}) has been delivered. Thank you!",
-                    customer.name
-                )
-            })
+            .unwrap_or_else(|_| fixed(&customer.name))
         } else {
-            format!(
-                "Hi {}, your order (ref {short_id}) has been delivered. Thank you!",
-                customer.name
-            )
+            fixed(&name)
         };
 
         let notifs = vec![Self::build(
@@ -399,6 +401,7 @@ impl Notification {
             "customer",
             customer_target,
             customer_body,
+            vec![name, short_id.to_string()],
         )];
         Self::persist(&notifs)?;
         Ok(notifs)
@@ -409,8 +412,9 @@ impl Notification {
     /// [`crate::logistics::dispatch::dispatch::PROMISED_DELIVERY_HOURS`].
     /// Called by [`crate::logistics::notification::delay_alerts::scan_and_alert`],
     /// which is also responsible for not calling this twice for the same
-    /// dispatch. AI-personalized / fallback behavior matches
-    /// [`Self::record_dispatch_created`].
+    /// dispatch. AI-personalized / fixed text behavior matches
+    /// [`Self::record_dispatch_created`]. The SMS leaves out the hours, because
+    /// a DLT template can only hold two variables.
     pub async fn record_dispatch_running_late(
         org_id: Uuid,
         dispatch_id: Uuid,
@@ -420,7 +424,8 @@ impl Notification {
         let short_id = &dispatch_id.to_string()[..8];
         let customer_target = Self::customer_target(customer);
 
-        let customer_body = if customer_target.is_some() {
+        let name = sms_var(&customer.name);
+        let customer_body = if Self::is_email(&customer_target) {
             crate::logistics::ai::notification_copy::generate_dispatch_running_late_customer_body(&customer.name, short_id, hours_late)
                 .await
                 .unwrap_or_else(|_| {
@@ -431,8 +436,7 @@ impl Notification {
                 })
         } else {
             format!(
-                "Hi {}, your order (ref {short_id}) is running about {hours_late}h behind its expected delivery time. We're sorry for the delay.",
-                customer.name
+                "Hi {name}, your order (ref {short_id}) is running behind its expected delivery time. We're sorry for the delay."
             )
         };
 
@@ -443,6 +447,7 @@ impl Notification {
             "customer",
             customer_target,
             customer_body,
+            vec![name, short_id.to_string()],
         )];
         Self::persist(&notifs)?;
         Ok(notifs)
@@ -476,26 +481,28 @@ impl Notification {
     }
 
     /// Attempt to actually send every `QUEUED` notification in `notifs` via
-    /// [`crate::logistics::notification::delivery::deliver`], updating each
+    /// [`crate::logistics::notification::delivery`], updating each
     /// row's status to `SENT` or `FAILED` accordingly. Best-effort: a
     /// delivery failure only updates that row's status, it never propagates
     /// — the caller (recording a dispatch event) must not fail because a
     /// downstream SMS/email provider had a bad day. Rows whose channel has
-    /// no provider configured are left `QUEUED`, not marked `FAILED`.
+    /// no provider configured are left `QUEUED`, not marked `FAILED`. Takes
+    /// freshly recorded notifications: rows read back from the database don't
+    /// carry `sms_vars`.
     pub async fn deliver_queued_best_effort(notifs: &[Notification]) {
         for n in notifs {
             if n.status != NotificationStatus::Queued {
                 continue;
             }
-            let subject = n.event.email_subject();
-            match crate::logistics::notification::delivery::deliver(
-                n.channel,
-                &n.recipient,
-                subject,
-                &n.body,
-            )
-            .await
-            {
+            let result = match n.channel {
+                NotificationChannel::Email => {
+                    delivery::send_email(&n.recipient, n.event.email_subject(), &n.body).await
+                }
+                NotificationChannel::Sms => {
+                    delivery::send_sms(&n.recipient, n.sms_template(), &n.sms_vars).await
+                }
+            };
+            match result {
                 Ok(()) => {
                     if let Err(e) = Self::update_status(n.id, NotificationStatus::Sent) {
                         eprintln!(
@@ -504,7 +511,7 @@ impl Notification {
                         );
                     }
                 }
-                Err(crate::logistics::notification::delivery::DeliveryError::NotConfigured) => {}
+                Err(delivery::DeliveryError::NotConfigured) => {}
                 Err(err) => {
                     eprintln!(
                         "notification delivery: failed to send {} to {}: {err}",

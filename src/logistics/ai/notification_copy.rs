@@ -73,14 +73,6 @@ fn build_dispatch_created_customer_prompt(customer_name: &str, dispatch_short_id
     )
 }
 
-fn build_dispatch_created_driver_prompt(customer_name: &str, dispatch_short_id: &str) -> String {
-    format!(
-        "You are a logistics company texting a driver to let them know they've been assigned a new \
-        delivery trip. Customer they're delivering to: {customer_name}. Order reference: {dispatch_short_id}. \
-        {STYLE_NOTE}"
-    )
-}
-
 fn build_dispatch_delivered_customer_prompt(
     customer_name: &str,
     dispatch_short_id: &str,
@@ -111,18 +103,6 @@ pub async fn generate_dispatch_created_customer_body(
     dispatch_short_id: &str,
 ) -> Result<String, String> {
     call_claude(build_dispatch_created_customer_prompt(
-        customer_name,
-        dispatch_short_id,
-    ))
-    .await
-}
-
-/// "New trip assigned" — for the driver, when a dispatch is created.
-pub async fn generate_dispatch_created_driver_body(
-    customer_name: &str,
-    dispatch_short_id: &str,
-) -> Result<String, String> {
-    call_claude(build_dispatch_created_driver_prompt(
         customer_name,
         dispatch_short_id,
     ))
@@ -170,15 +150,6 @@ mod tests {
     }
 
     #[test]
-    fn build_dispatch_created_driver_prompt_mentions_the_customer_being_delivered_to() {
-        let prompt = build_dispatch_created_driver_prompt("Priya Sharma", "a1b2c3d4");
-        assert!(prompt.contains("Priya Sharma"));
-        assert!(prompt.contains("a1b2c3d4"));
-        assert!(prompt.contains("driver"));
-        assert!(prompt.contains("new delivery trip") || prompt.contains("assigned"));
-    }
-
-    #[test]
     fn build_dispatch_delivered_customer_prompt_mentions_delivery_and_thanks() {
         let prompt = build_dispatch_delivered_customer_prompt("Priya Sharma", "a1b2c3d4");
         assert!(prompt.contains("Priya Sharma"));
@@ -208,18 +179,6 @@ mod tests {
             std::env::remove_var("ANTHROPIC_API_KEY");
         }
         let err = generate_dispatch_created_customer_body("Priya Sharma", "a1b2c3d4")
-            .await
-            .expect_err("should fail without an API key");
-        assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");
-    }
-
-    #[actix_web::test]
-    async fn generate_dispatch_created_driver_body_errors_when_the_api_key_is_not_set() {
-        // SAFETY: see above.
-        unsafe {
-            std::env::remove_var("ANTHROPIC_API_KEY");
-        }
-        let err = generate_dispatch_created_driver_body("Priya Sharma", "a1b2c3d4")
             .await
             .expect_err("should fail without an API key");
         assert!(err.contains("ANTHROPIC_API_KEY"), "unexpected: {err}");

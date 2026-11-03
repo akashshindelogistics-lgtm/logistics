@@ -2,7 +2,7 @@
 //!
 //! `docs/notifications.md` used to describe this as "a deployment concern —
 //! nothing in this repo talks to Twilio or an SMTP server." This module is
-//! that wiring: SMS via the Twilio REST API; email via SMTP (Gmail by
+//! that wiring: SMS via the MSG91 REST API; email via SMTP (Gmail by
 //! default, see [`SmtpConfig`]) or the Resend REST API. All are optional — an
 //! environment with no credentials configured for a channel behaves exactly
 //! as before (notifications stay `QUEUED`), so this is safe to ship without
@@ -11,7 +11,6 @@
 //! SMTP exists alongside Resend because Resend only sends from a domain you
 //! have verified, which rules out a `@gmail.com` sender.
 
-use crate::logistics::notification::notification::NotificationChannel;
 use lettre::message::{Mailbox, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
@@ -20,6 +19,14 @@ use std::time::Duration;
 /// Sending happens inline in the dispatch request, so a hung mail server must
 /// not hold that request open for long.
 const SMTP_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Same reasoning as [`SMTP_TIMEOUT`].
+const MSG91_TIMEOUT: Duration = Duration::from_secs(15);
+
+const MSG91_FLOW_URL: &str = "https://control.msg91.com/api/v5/flow/";
+
+/// DLT rejects a template variable value longer than this.
+const SMS_VAR_MAX_CHARS: usize = 40;
 
 /// Why a delivery attempt didn't end in a sent message.
 #[derive(Debug)]
@@ -41,47 +48,147 @@ impl std::fmt::Display for DeliveryError {
     }
 }
 
-/// `(account_sid, auth_token, from_number)`, or `None` if any of
-/// `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` is
-/// unset or blank.
-fn twilio_credentials() -> Option<(String, String, String)> {
-    let non_blank = |key: &str| std::env::var(key).ok().filter(|s| !s.trim().is_empty());
-    Some((
-        non_blank("TWILIO_ACCOUNT_SID")?,
-        non_blank("TWILIO_AUTH_TOKEN")?,
-        non_blank("TWILIO_FROM_NUMBER")?,
-    ))
+/// One DLT-approved SMS message. Indian operators only deliver text matching
+/// an approved template, so SMS sends a template ID plus variable values, never
+/// free text. The wording and variables of each are in `docs/notifications.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmsTemplate {
+    DispatchCreatedCustomer,
+    DispatchCreatedDriver,
+    DispatchDelivered,
+    DispatchRunningLate,
 }
 
-async fn send_sms(to: &str, body: &str) -> Result<(), DeliveryError> {
-    let (account_sid, auth_token, from) =
-        twilio_credentials().ok_or(DeliveryError::NotConfigured)?;
+impl SmsTemplate {
+    /// The environment variable holding this template's MSG91 ID.
+    fn env_key(&self) -> &'static str {
+        match self {
+            SmsTemplate::DispatchCreatedCustomer => "MSG91_TEMPLATE_DISPATCH_CREATED_CUSTOMER",
+            SmsTemplate::DispatchCreatedDriver => "MSG91_TEMPLATE_DISPATCH_CREATED_DRIVER",
+            SmsTemplate::DispatchDelivered => "MSG91_TEMPLATE_DISPATCH_DELIVERED",
+            SmsTemplate::DispatchRunningLate => "MSG91_TEMPLATE_DISPATCH_RUNNING_LATE",
+        }
+    }
+}
 
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .form(&[("To", to), ("From", from.as_str()), ("Body", body)])
+/// Cut a template variable value down to what DLT accepts.
+pub fn sms_var(value: &str) -> String {
+    value.trim().chars().take(SMS_VAR_MAX_CHARS).collect()
+}
+
+/// A phone number as MSG91 wants it, `91` plus the 10-digit mobile number.
+/// Stored numbers are free text (`+91 98765 43210`, `9876543210`, `098765...`).
+/// `None` for anything else, including non-Indian numbers: DLT templates only
+/// cover Indian operators, and a junk number shouldn't be sent or billed.
+fn normalize_indian_mobile(raw: &str) -> Option<String> {
+    let digits: String = raw.chars().filter(char::is_ascii_digit).collect();
+    let national = if raw.trim_start().starts_with('+') {
+        digits.strip_prefix("91")?
+    } else {
+        match digits.len() {
+            10 => digits.as_str(),
+            11 => digits.strip_prefix('0')?,
+            12 => digits.strip_prefix("91")?,
+            _ => return None,
+        }
+    };
+    (national.len() == 10 && national.starts_with(['6', '7', '8', '9']))
+        .then(|| format!("91{national}"))
+}
+
+/// MSG91 settings: `MSG91_AUTH_KEY` turns SMS on. `MSG91_SENDER_ID` is only
+/// needed when a template's sender is set to come from the API.
+struct Msg91Config {
+    auth_key: String,
+    sender_id: Option<String>,
+    url: String,
+}
+
+impl Msg91Config {
+    fn from_env() -> Option<Self> {
+        Some(Self {
+            auth_key: non_blank_env("MSG91_AUTH_KEY")?,
+            sender_id: non_blank_env("MSG91_SENDER_ID"),
+            url: MSG91_FLOW_URL.to_string(),
+        })
+    }
+}
+
+fn non_blank_env(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|s| !s.trim().is_empty())
+}
+
+async fn send_via_msg91(
+    config: &Msg91Config,
+    template_id: &str,
+    to: &str,
+    vars: &[String],
+) -> Result<(), DeliveryError> {
+    let mobile = normalize_indian_mobile(to)
+        .ok_or_else(|| DeliveryError::ProviderError("Not an Indian mobile number".to_string()))?;
+
+    let mut recipient = serde_json::Map::new();
+    recipient.insert("mobiles".to_string(), mobile.into());
+    for (i, value) in vars.iter().enumerate() {
+        recipient.insert(format!("VAR{}", i + 1), value.as_str().into());
+    }
+    // MSG91's docs name this field both `template_id` and `flow_id`, depending
+    // on the page, so send the ID under both.
+    let mut payload = serde_json::json!({
+        "template_id": template_id,
+        "flow_id": template_id,
+        // Reports a bad key or template as an error sooner. It doesn't catch
+        // them all: tried on 2026-11-03, a made-up key still got "success" on
+        // its first call and only an error on the next.
+        "realTimeResponse": "1",
+        "recipients": [recipient],
+    });
+    if let Some(sender) = &config.sender_id {
+        payload["sender"] = sender.as_str().into();
+    }
+
+    let resp = reqwest::Client::new()
+        .post(&config.url)
+        .header("authkey", &config.auth_key)
+        .timeout(MSG91_TIMEOUT)
+        .json(&payload)
         .send()
         .await
-        .map_err(|e| DeliveryError::ProviderError(format!("Failed to reach Twilio: {e}")))?;
+        .map_err(|e| DeliveryError::ProviderError(format!("Failed to reach MSG91: {e}")))?;
 
-    if !resp.status().is_success() {
-        let err = resp.text().await.unwrap_or_default();
-        return Err(DeliveryError::ProviderError(format!("Twilio error: {err}")));
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    // A rejected request can still come back as HTTP 200, with `"type": "error"`.
+    // "success" means MSG91 queued the request, not that the phone got it.
+    let accepted = status.is_success()
+        && serde_json::from_str::<serde_json::Value>(&text)
+            .is_ok_and(|reply| reply["type"] == "success");
+    if !accepted {
+        return Err(DeliveryError::ProviderError(format!(
+            "MSG91 error ({status}): {text}"
+        )));
     }
     Ok(())
+}
+
+/// Send one templated SMS. `NotConfigured` without `MSG91_AUTH_KEY` or without
+/// an ID for this template, so templates can be approved and added one by one.
+pub async fn send_sms(
+    to: &str,
+    template: SmsTemplate,
+    vars: &[String],
+) -> Result<(), DeliveryError> {
+    let config = Msg91Config::from_env().ok_or(DeliveryError::NotConfigured)?;
+    let template_id = non_blank_env(template.env_key()).ok_or(DeliveryError::NotConfigured)?;
+    send_via_msg91(&config, &template_id, to, vars).await
 }
 
 /// `(api_key, from_address)`, or `None` if either `RESEND_API_KEY` /
 /// `RESEND_FROM_EMAIL` is unset or blank.
 fn resend_credentials() -> Option<(String, String)> {
-    let non_blank = |key: &str| std::env::var(key).ok().filter(|s| !s.trim().is_empty());
     Some((
-        non_blank("RESEND_API_KEY")?,
-        non_blank("RESEND_FROM_EMAIL")?,
+        non_blank_env("RESEND_API_KEY")?,
+        non_blank_env("RESEND_FROM_EMAIL")?,
     ))
 }
 
@@ -116,16 +223,15 @@ struct SmtpConfig {
 
 impl SmtpConfig {
     fn from_env() -> Option<Self> {
-        let non_blank = |key: &str| std::env::var(key).ok().filter(|s| !s.trim().is_empty());
-        let username = non_blank("SMTP_USERNAME")?;
-        let password = non_blank("SMTP_PASSWORD")?;
-        let port = non_blank("SMTP_PORT")
+        let username = non_blank_env("SMTP_USERNAME")?;
+        let password = non_blank_env("SMTP_PASSWORD")?;
+        let port = non_blank_env("SMTP_PORT")
             .and_then(|p| p.trim().parse().ok())
             .unwrap_or(587);
         Some(Self {
-            host: non_blank("SMTP_HOST").unwrap_or_else(|| "smtp.gmail.com".to_string()),
+            host: non_blank_env("SMTP_HOST").unwrap_or_else(|| "smtp.gmail.com".to_string()),
             port,
-            from: non_blank("SMTP_FROM").unwrap_or_else(|| username.clone()),
+            from: non_blank_env("SMTP_FROM").unwrap_or_else(|| username.clone()),
             username,
             password,
             security: if port == 465 {
@@ -213,25 +319,11 @@ async fn send_via_resend(to: &str, subject: &str, body: &str) -> Result<(), Deli
     Ok(())
 }
 
-/// SMTP when it's configured, otherwise Resend.
-async fn send_email(to: &str, subject: &str, body: &str) -> Result<(), DeliveryError> {
+/// Send one email: SMTP when it's configured, otherwise Resend.
+pub async fn send_email(to: &str, subject: &str, body: &str) -> Result<(), DeliveryError> {
     match SmtpConfig::from_env() {
         Some(config) => send_via_smtp(&config, to, subject, body).await,
         None => send_via_resend(to, subject, body).await,
-    }
-}
-
-/// Attempt to actually send one notification. `subject` is only used for
-/// [`NotificationChannel::Email`].
-pub async fn deliver(
-    channel: NotificationChannel,
-    to: &str,
-    subject: &str,
-    body: &str,
-) -> Result<(), DeliveryError> {
-    match channel {
-        NotificationChannel::Sms => send_sms(to, body).await,
-        NotificationChannel::Email => send_email(to, subject, body).await,
     }
 }
 
@@ -239,29 +331,53 @@ pub async fn deliver(
 mod tests {
     use super::*;
 
-    // Both tests below only exercise the "not configured" short-circuit,
-    // which returns before any network call — matching this codebase's
-    // convention of never hitting a live third-party API in tests (see
-    // ai/status.rs's equivalent note about the Anthropic call).
+    // The "not configured" tests return before any network call, matching this
+    // codebase's convention of never hitting a live third-party API in tests
+    // (see ai/status.rs's equivalent note about the Anthropic call). The rest
+    // talk to fake servers on localhost.
+    //
+    // No test sets a MSG91_TEMPLATE_* variable, so setting MSG91_AUTH_KEY below
+    // can't make a parallel test reach the real API.
 
     #[actix_web::test]
-    async fn deliver_sms_is_not_configured_without_twilio_credentials() {
-        // SAFETY: this module is the only code that reads the TWILIO_*
-        // variables, and no other test sets them, so this doesn't race with
-        // anything else.
+    async fn sms_is_not_configured_without_an_auth_key() {
+        // SAFETY: this module is the only code that reads the MSG91_*
+        // variables, and it only ever leaves them unusable, see above.
         unsafe {
-            std::env::remove_var("TWILIO_ACCOUNT_SID");
-            std::env::remove_var("TWILIO_AUTH_TOKEN");
-            std::env::remove_var("TWILIO_FROM_NUMBER");
+            std::env::remove_var("MSG91_AUTH_KEY");
         }
-        let err = deliver(NotificationChannel::Sms, "+15551234567", "subject", "body")
-            .await
-            .expect_err("should be unconfigured");
+        let err = send_sms(
+            "+91 98765 43210",
+            SmsTemplate::DispatchCreatedDriver,
+            &["a1b2c3d4".to_string(), "Asha".to_string()],
+        )
+        .await
+        .expect_err("should be unconfigured");
         assert!(matches!(err, DeliveryError::NotConfigured));
     }
 
     #[actix_web::test]
-    async fn deliver_email_is_not_configured_without_any_email_credentials() {
+    async fn sms_is_not_configured_without_an_id_for_that_template() {
+        // SAFETY: see above.
+        unsafe {
+            std::env::set_var("MSG91_AUTH_KEY", "test-key");
+        }
+        let err = send_sms(
+            "+91 98765 43210",
+            SmsTemplate::DispatchDelivered,
+            &["Asha".to_string(), "a1b2c3d4".to_string()],
+        )
+        .await
+        .expect_err("should be unconfigured");
+        assert!(matches!(err, DeliveryError::NotConfigured));
+        // SAFETY: see above.
+        unsafe {
+            std::env::remove_var("MSG91_AUTH_KEY");
+        }
+    }
+
+    #[actix_web::test]
+    async fn email_is_not_configured_without_any_email_credentials() {
         // SAFETY: this module is the only code that reads the RESEND_* and
         // SMTP_* variables, and no other test sets them, so this doesn't race
         // with anything else.
@@ -271,33 +387,177 @@ mod tests {
             std::env::remove_var("RESEND_API_KEY");
             std::env::remove_var("RESEND_FROM_EMAIL");
         }
-        let err = deliver(
-            NotificationChannel::Email,
-            "customer@example.com",
-            "subject",
-            "body",
-        )
-        .await
-        .expect_err("should be unconfigured");
+        let err = send_email("customer@example.com", "subject", "body")
+            .await
+            .expect_err("should be unconfigured");
         assert!(matches!(err, DeliveryError::NotConfigured));
     }
 
+    #[test]
+    fn indian_mobile_numbers_are_normalized_from_the_formats_we_store() {
+        for raw in [
+            "+91 98765 43210",
+            "+919876543210",
+            "9876543210",
+            "09876543210",
+            "919876543210",
+            " 98765-43210 ",
+        ] {
+            assert_eq!(
+                normalize_indian_mobile(raw).as_deref(),
+                Some("919876543210"),
+                "{raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn junk_and_foreign_numbers_are_rejected() {
+        for raw in [
+            "",
+            "0",
+            "9",
+            "12345",
+            "+91 98765432",    // too short, must not gain a second 91
+            "+1 415 555 0100", // foreign
+            "+44 7911 123456", // foreign
+            "1234567890",      // Indian mobiles start with 6-9
+            "98765432101234",  // too long
+        ] {
+            assert_eq!(normalize_indian_mobile(raw), None, "{raw}");
+        }
+    }
+
+    #[test]
+    fn sms_var_is_cut_to_the_dlt_limit_on_a_character_boundary() {
+        assert_eq!(sms_var("  Asha Rao "), "Asha Rao");
+        let long = "आ".repeat(50);
+        assert_eq!(sms_var(&long).chars().count(), SMS_VAR_MAX_CHARS);
+    }
+
+    /// Answer one HTTP request on a local port and return what was sent.
+    async fn fake_msg91(
+        status: &'static str,
+        reply: &'static str,
+    ) -> (Msg91Config, tokio::task::JoinHandle<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut buf).await.unwrap();
+                request.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&request).to_lowercase();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length: usize = text
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length: "))
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}",
+                reply.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&request).into_owned()
+        });
+        let config = Msg91Config {
+            auth_key: "test-key".to_string(),
+            sender_id: Some("LOGIST".to_string()),
+            url: format!("http://127.0.0.1:{port}/api/v5/flow/"),
+        };
+        (config, handle)
+    }
+
     #[actix_web::test]
-    async fn deliver_sms_is_not_configured_when_only_some_twilio_variables_are_set() {
-        // SAFETY: see above.
-        unsafe {
-            std::env::set_var("TWILIO_ACCOUNT_SID", "AC123");
-            std::env::remove_var("TWILIO_AUTH_TOKEN");
-            std::env::remove_var("TWILIO_FROM_NUMBER");
-        }
-        let err = deliver(NotificationChannel::Sms, "+15551234567", "subject", "body")
+    async fn msg91_gets_the_template_normalized_number_and_variables() {
+        let (config, server) =
+            fake_msg91("200 OK", r#"{"message":"5762846b","type":"success"}"#).await;
+        send_via_msg91(
+            &config,
+            "tmpl-1",
+            "+91 98765 43210",
+            &["Asha Rao".to_string(), "a1b2c3d4".to_string()],
+        )
+        .await
+        .expect("send should succeed");
+
+        let request = server.await.unwrap();
+        assert!(request.starts_with("POST /api/v5/flow/ "), "{request}");
+        assert!(
+            request.to_lowercase().contains("authkey: test-key"),
+            "{request}"
+        );
+        let body = request.split("\r\n\r\n").nth(1).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(payload["template_id"], "tmpl-1");
+        assert_eq!(payload["flow_id"], "tmpl-1");
+        assert_eq!(payload["realTimeResponse"], "1");
+        assert_eq!(payload["sender"], "LOGIST");
+        assert_eq!(
+            payload["recipients"],
+            serde_json::json!([{
+                "mobiles": "919876543210",
+                "VAR1": "Asha Rao",
+                "VAR2": "a1b2c3d4",
+            }])
+        );
+    }
+
+    #[actix_web::test]
+    async fn msg91_error_reported_with_http_200_is_a_provider_error() {
+        let (config, _server) =
+            fake_msg91("200 OK", r#"{"message":"flow id missing","type":"error"}"#).await;
+        let err = send_via_msg91(&config, "tmpl-1", "9876543210", &[])
             .await
-            .expect_err("should be unconfigured with a partial credential set");
-        assert!(matches!(err, DeliveryError::NotConfigured));
-        // SAFETY: see above.
-        unsafe {
-            std::env::remove_var("TWILIO_ACCOUNT_SID");
-        }
+            .expect_err("should fail");
+        assert!(
+            matches!(&err, DeliveryError::ProviderError(m) if m.contains("flow id missing")),
+            "{err}"
+        );
+    }
+
+    #[actix_web::test]
+    async fn msg91_http_error_is_a_provider_error() {
+        let (config, _server) = fake_msg91(
+            "401 Unauthorized",
+            r#"{"message":"Authentication failure","type":"error"}"#,
+        )
+        .await;
+        let err = send_via_msg91(&config, "tmpl-1", "9876543210", &[])
+            .await
+            .expect_err("should fail");
+        assert!(matches!(err, DeliveryError::ProviderError(_)), "{err}");
+    }
+
+    #[actix_web::test]
+    async fn junk_number_is_rejected_without_calling_msg91() {
+        // Port 1 has nothing listening: reaching the network would surface as
+        // "Failed to reach MSG91" rather than this error.
+        let config = Msg91Config {
+            auth_key: "test-key".to_string(),
+            sender_id: None,
+            url: "http://127.0.0.1:1/".to_string(),
+        };
+        let err = send_via_msg91(&config, "tmpl-1", "9", &[])
+            .await
+            .expect_err("should fail");
+        assert!(
+            matches!(&err, DeliveryError::ProviderError(m) if m.contains("Not an Indian mobile")),
+            "{err}"
+        );
     }
 
     /// Serve one SMTP session on a local port, accepting everything, and

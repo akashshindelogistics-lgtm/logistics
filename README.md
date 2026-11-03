@@ -95,7 +95,7 @@ logistics-android. See [docs/repo-split.md](docs/repo-split.md).
   inventory, and dispatch volume over the last 14 days.
 - **Dispatch notifications** — when a dispatch is created or delivered, a
   notification is recorded for the customer (email or SMS, whichever is on
-  file) and the driver (SMS), and delivered via Twilio (SMS) / Gmail SMTP or Resend
+  file) and the driver (SMS), and delivered via MSG91 (SMS) / Gmail SMTP or Resend
   (email) when those are configured. The Dispatches page shows the log per
   order. A background scan also alerts the customer if a dispatch is still
   in transit well past when it should have arrived — see
@@ -188,9 +188,9 @@ export ANTHROPIC_WORKSPACE_ID="wrkspc_..."
 
 # Optional: actually deliver notifications instead of just recording them.
 # Without these, notifications stay QUEUED — see docs/notifications.md.
-export TWILIO_ACCOUNT_SID="AC..."
-export TWILIO_AUTH_TOKEN="..."
-export TWILIO_FROM_NUMBER="+15551234567"
+# SMS: an MSG91 key, plus one ID per DLT template (see the doc for the names).
+export MSG91_AUTH_KEY="..."
+export MSG91_TEMPLATE_DISPATCH_CREATED_DRIVER="..."
 # Email: a Gmail address + App Password (or any SMTP server), or else Resend.
 export SMTP_USERNAME="you@gmail.com"
 export SMTP_PASSWORD="your-16-char-app-password"

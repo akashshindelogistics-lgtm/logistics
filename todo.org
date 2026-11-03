@@ -1371,3 +1371,9 @@
    Plan/context: [[file:docs/notifications.md]] ("Sending email from a Gmail account").
 ** DONE Gmail SMTP backend - SMTP_USERNAME/SMTP_PASSWORD (optional SMTP_FROM, SMTP_HOST, SMTP_PORT), used ahead of Resend; send_test_email bin to check credentials
 ** TODO Create an App Password on the Gmail account, add the variables to the deployment's environment, send a test email, deploy this version and restart the API
+* TODO [#B] Send SMS through MSG91 instead of Twilio - Twilio's India rate is about $0.0832 per SMS, MSG91 about Rs 0.25
+   Plan/context: [[file:docs/notifications.md]] ("Sending SMS through MSG91").
+** DONE Replace Twilio with MSG91 - fixed DLT templates plus variables, Indian number normalization, send_test_sms bin; driver SMS no longer AI-written
+** TODO Register business, sender ID and the four templates on a DLT portal, create them in MSG91, set MSG91_AUTH_KEY and the template IDs, send a test SMS, deploy
+** TODO Clean up driver records whose phone is a placeholder, they'd end up FAILED
+** TODO Read MSG91 delivery reports so the dashboard can tell "delivered" from "queued" - SENT only means MSG91 queued it, even a made-up key can get "success"
