@@ -2,7 +2,7 @@
 //! its promised delivery window
 //! ([`DispatchOrder::is_running_late`](crate::logistics::dispatch::dispatch::DispatchOrder::is_running_late))
 //! and sends the customer a "your order is running behind schedule"
-//! notification through the existing Twilio/Resend delivery pipeline —
+//! notification through the existing Twilio/email delivery pipeline —
 //! exactly the same mechanism [`crate::logistics::notification::notification`]
 //! already uses for the dispatch-created / dispatch-delivered events, just a
 //! new trigger condition. See `docs/delay-alerts.md`.

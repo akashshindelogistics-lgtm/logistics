@@ -1367,3 +1367,7 @@
 ** TODO Phase 5: driver assistant in the Android app, scoped to the driver's own dispatches and trips
 ** TODO Phase 6: documents - PDF compliance uploads, org knowledge base (org_doc chunks), in-app help over product docs
 ** TODO Phase 7 (conditional): embeddings + hybrid retrieval, only if phase 1's evaluation shows paraphrase misses that matter
+* TODO [#B] Send email notifications from akashshinde.logistics@gmail.com - dispatch created / delivered / running late emails to customers were recorded but stayed QUEUED, because no email provider was configured and Resend can't send from a @gmail.com address
+   Plan/context: [[file:docs/notifications.md]] ("Sending email from a Gmail account").
+** DONE Gmail SMTP backend - SMTP_USERNAME/SMTP_PASSWORD (optional SMTP_FROM, SMTP_HOST, SMTP_PORT), used ahead of Resend; send_test_email bin to check credentials
+** TODO Create an App Password on the Gmail account, add the variables to the deployment's environment, send a test email, deploy this version and restart the API

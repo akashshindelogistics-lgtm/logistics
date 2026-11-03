@@ -172,6 +172,8 @@ async fn deliver_queued_best_effort_leaves_notifications_queued_without_provider
         std::env::remove_var("TWILIO_ACCOUNT_SID");
         std::env::remove_var("TWILIO_AUTH_TOKEN");
         std::env::remove_var("TWILIO_FROM_NUMBER");
+        std::env::remove_var("SMTP_USERNAME");
+        std::env::remove_var("SMTP_PASSWORD");
         std::env::remove_var("RESEND_API_KEY");
         std::env::remove_var("RESEND_FROM_EMAIL");
     }
