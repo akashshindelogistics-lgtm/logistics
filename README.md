@@ -95,7 +95,7 @@ logistics-android. See [docs/repo-split.md](docs/repo-split.md).
   inventory, and dispatch volume over the last 14 days.
 - **Dispatch notifications** — when a dispatch is created or delivered, a
   notification is recorded for the customer (email or SMS, whichever is on
-  file) and the driver (SMS), and delivered via Twilio (SMS) / Resend
+  file) and the driver (SMS), and delivered via Twilio (SMS) / Gmail SMTP or Resend
   (email) when those are configured. The Dispatches page shows the log per
   order. A background scan also alerts the customer if a dispatch is still
   in transit well past when it should have arrived — see
@@ -191,6 +191,9 @@ export ANTHROPIC_WORKSPACE_ID="wrkspc_..."
 export TWILIO_ACCOUNT_SID="AC..."
 export TWILIO_AUTH_TOKEN="..."
 export TWILIO_FROM_NUMBER="+15551234567"
+# Email: a Gmail address + App Password (or any SMTP server), or else Resend.
+export SMTP_USERNAME="you@gmail.com"
+export SMTP_PASSWORD="your-16-char-app-password"
 export RESEND_API_KEY="re_..."
 export RESEND_FROM_EMAIL="dispatch@yourdomain.com"
 

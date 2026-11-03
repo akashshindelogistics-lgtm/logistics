@@ -5,8 +5,8 @@
 //! AI-personalized via [`crate::logistics::ai::notification_copy`] when
 //! `ANTHROPIC_API_KEY` is configured, falling back to a fixed template on
 //! any error — records it, then immediately attempts to actually send it via
-//! [`crate::logistics::notification::delivery`] (Twilio for SMS, Resend for
-//! email). Every row lands with status `QUEUED`
+//! [`crate::logistics::notification::delivery`] (Twilio for SMS, SMTP or
+//! Resend for email). Every row lands with status `QUEUED`
 //! (ready to send), `SKIPPED` (no phone/email on file for that party),
 //! `SENT` (delivery succeeded), or `FAILED` (delivery was attempted and the
 //! provider reported an error). A `QUEUED` row whose channel has no
