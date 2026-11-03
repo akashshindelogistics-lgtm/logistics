@@ -489,6 +489,7 @@ impl Organization {
             created_at: now,
             status,
             stops: trip_stops,
+            is_single_dispatch: false,
         })
     }
 

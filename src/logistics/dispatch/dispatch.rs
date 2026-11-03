@@ -887,6 +887,20 @@ impl DispatchOrder {
         Self::rows_to_orders(&mut conn, rows)
     }
 
+    /// The org's dispatches that aren't a stop on any multi-stop trip.
+    pub fn list_standalone_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
+        let db_connection = DbConnection::from_env();
+        let mut conn = db_connection.get_connection()?;
+        ensure_tables(&mut conn)?;
+
+        let rows: Vec<DispatchRow> = conn.exec(
+            "SELECT id, org_id, customer_id, vehicle_registration_number, status, dispatched_at, trip_id, stop_sequence, vehicle_source, hire_id FROM Dispatches WHERE org_id = :org_id AND trip_id IS NULL",
+            params! { "org_id" => org_id.to_string() },
+        )?;
+
+        Self::rows_to_orders(&mut conn, rows)
+    }
+
     /// The stops of one multi-stop trip, ordered by `stop_sequence`.
     pub fn list_by_trip(trip_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
