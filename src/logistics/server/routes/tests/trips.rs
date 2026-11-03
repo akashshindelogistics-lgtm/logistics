@@ -118,7 +118,149 @@ async fn test_create_a_two_stop_trip_and_read_it_back() {
             .await
             .data
             .unwrap();
+    // Alongside the cancelled first dispatch, shown as a one-stop trip.
+    assert_eq!(trips.len(), 2);
+    assert_eq!(trips.iter().filter(|t| t.id == trip.id).count(), 1);
+    assert!(trips.iter().any(|t| t.id == first.id));
+}
+
+async fn list_trips(
+    app: &impl actix_web::dev::Service<
+        actix_http::Request,
+        Response = actix_web::dev::ServiceResponse,
+        Error = actix_web::Error,
+    >,
+    org_id: Uuid,
+    auth: &str,
+) -> Vec<Trip> {
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/orgs/{org_id}/trips"))
+        .insert_header(("Authorization", auth.to_string()))
+        .to_request();
+    test::read_body_json::<ApiResponse<Vec<Trip>>, _>(test::call_service(app, req).await)
+        .await
+        .data
+        .unwrap()
+}
+
+#[actix_web::test]
+async fn test_a_standalone_dispatch_is_listed_as_a_one_stop_trip() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, dispatch, auth) = setup_dispatch(&app, "One Stop Org").await;
+
+    let trips = list_trips(&app, org.id, &auth).await;
     assert_eq!(trips.len(), 1);
+    let trip = &trips[0];
+    assert_eq!(trip.id, dispatch.id);
+    assert_eq!(trip.org_id, org.id);
+    assert!(trip.is_single_dispatch);
+    assert_eq!(trip.status, TripStatus::Planned);
+    assert_eq!(trip.created_at, dispatch.dispatched_at);
+    assert_eq!(
+        trip.vehicle_registration_number,
+        dispatch.vehicle_registration_number
+    );
+    assert_eq!(trip.stops.len(), 1);
+    assert_eq!(trip.stops[0].id, dispatch.id);
+    assert_eq!(trip.stops[0].stop_sequence, Some(1));
+    assert_eq!(trip.stops[0].trip_id, None);
+    assert_eq!(trip.stops[0].line_items.len(), dispatch.line_items.len());
+
+    // Presenting it stores nothing: the dispatch itself is unchanged.
+    let stored = DispatchOrder::get_by_id(dispatch.id).unwrap().unwrap();
+    assert_eq!(stored.trip_id, None);
+    assert_eq!(stored.stop_sequence, None);
+
+    // Its status follows the dispatch.
+    let req = test::TestRequest::put()
+        .uri(&format!("/api/dispatches/{}/status", dispatch.id))
+        .insert_header(("Authorization", auth.clone()))
+        .set_json(&UpdateDispatchStatusPayload {
+            status: DispatchStatus::Cancelled,
+            proof_of_delivery: None,
+            return_to_godown_id: None,
+        })
+        .to_request();
+    assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+    let trips = list_trips(&app, org.id, &auth).await;
+    assert_eq!(trips[0].status, TripStatus::Completed);
+    assert_eq!(trips[0].stops[0].status, DispatchStatus::Cancelled);
+}
+
+#[actix_web::test]
+async fn test_trip_stops_are_not_listed_again_as_one_stop_trips() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (org, first, auth) = setup_dispatch(&app, "No Duplicate Org").await;
+    let req = test::TestRequest::put()
+        .uri(&format!("/api/dispatches/{}/status", first.id))
+        .insert_header(("Authorization", auth.clone()))
+        .set_json(&UpdateDispatchStatusPayload {
+            status: DispatchStatus::Cancelled,
+            proof_of_delivery: None,
+            return_to_godown_id: None,
+        })
+        .to_request();
+    assert_eq!(test::call_service(&app, req).await.status().as_u16(), 200);
+    let c1 = located_customer(&app, org.id, &auth, "Dup One").await;
+    let c2 = located_customer(&app, org.id, &auth, "Dup Two").await;
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/orgs/{}/trips", org.id))
+        .insert_header(("Authorization", auth.clone()))
+        .set_json(&CreateTripPayload {
+            stops: vec![trip_stop(c1, 1), trip_stop(c2, 1)],
+            optimize_route: false,
+            vehicle_source: VehicleSource::Own,
+            vendor_id: None,
+        })
+        .to_request();
+    let real = test::read_body_json::<ApiResponse<Trip>, _>(test::call_service(&app, req).await)
+        .await
+        .data
+        .unwrap();
+    assert!(!real.is_single_dispatch);
+
+    let trips = list_trips(&app, org.id, &auth).await;
+    assert_eq!(trips.len(), 2);
+    let singles: Vec<&Trip> = trips.iter().filter(|t| t.is_single_dispatch).collect();
+    assert_eq!(singles.len(), 1);
+    assert_eq!(singles[0].id, first.id);
+
+    // A real trip's stop has no one-stop trip of its own.
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/trips/{}", real.stops[0].id))
+        .insert_header(("Authorization", auth))
+        .to_request();
+    assert_eq!(test::call_service(&app, req).await.status().as_u16(), 404);
+}
+
+#[actix_web::test]
+async fn test_get_trip_resolves_a_standalone_dispatch_within_its_org_only() {
+    let _db = TestDb::create();
+    let app = test::init_service(App::new().configure(config_routes)).await;
+    let (_org, dispatch, auth) = setup_dispatch(&app, "One Stop Get Org").await;
+    let (other_org, other_auth) = setup_org(&app, "One Stop Other Org").await;
+
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/trips/{}", dispatch.id))
+        .insert_header(("Authorization", auth))
+        .to_request();
+    let got = test::read_body_json::<ApiResponse<Trip>, _>(test::call_service(&app, req).await)
+        .await
+        .data
+        .unwrap();
+    assert_eq!(got.id, dispatch.id);
+    assert!(got.is_single_dispatch);
+
+    // Another org can neither fetch it nor see it in its own list.
+    let req = test::TestRequest::get()
+        .uri(&format!("/api/trips/{}", dispatch.id))
+        .insert_header(("Authorization", other_auth.clone()))
+        .to_request();
+    assert_eq!(test::call_service(&app, req).await.status().as_u16(), 403);
+    let others = list_trips(&app, other_org.id, &other_auth).await;
+    assert!(others.iter().all(|t| t.id != dispatch.id));
 }
 
 #[actix_web::test]

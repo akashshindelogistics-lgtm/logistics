@@ -7,6 +7,12 @@
 //! by `DispatchOrder::trip_id` and ordered by `DispatchOrder::stop_sequence`.
 //! The trip itself stores only which truck and when; its status is *derived*
 //! from its stops.
+//!
+//! A standalone dispatch (one with no `trip_id`) has no row in `Trips`. It is
+//! still a truck going out, so the read methods also present each one as a
+//! **one-stop trip**: built on the fly by [`Trip::from_standalone_dispatch`],
+//! carrying the dispatch's own id and flagged `is_single_dispatch`. Nothing is
+//! stored for it.
 
 use crate::logistics::db::connection::DbConnection;
 use crate::logistics::dispatch::dispatch::{DispatchOrder, DispatchStatus, VehicleSource};
@@ -51,6 +57,10 @@ pub struct Trip {
     /// `dispatch_trip_to_customers` also carries them.
     #[serde(default)]
     pub stops: Vec<DispatchOrder>,
+    /// True when this is a standalone dispatch presented as a one-stop trip:
+    /// `id` is then the dispatch's id, and there is no row in `Trips`.
+    #[serde(default)]
+    pub is_single_dispatch: bool,
 }
 
 /// `(id, org_id, vehicle_registration_number, created_at, vehicle_source, hire_id)`.
@@ -134,10 +144,30 @@ impl Trip {
             created_at,
             status: TripStatus::Planned,
             stops: Vec::new(),
+            is_single_dispatch: false,
+        }
+    }
+
+    /// Present a standalone dispatch as a one-stop trip. Its only stop reports
+    /// `stop_sequence` 1; `trip_id` stays `None` because no `Trips` row exists.
+    pub fn from_standalone_dispatch(mut order: DispatchOrder) -> Self {
+        order.stop_sequence = Some(1);
+        Trip {
+            id: order.id,
+            org_id: order.org_id,
+            vehicle_registration_number: order.vehicle_registration_number.clone(),
+            vehicle_source: order.vehicle_source,
+            hire_id: order.hire_id,
+            created_at: order.dispatched_at,
+            status: Self::compute_status(std::slice::from_ref(&order)),
+            stops: vec![order],
+            is_single_dispatch: true,
         }
     }
 
     /// One trip with its stops filled in, or `None` if there's no such trip.
+    /// `id` may also be a standalone dispatch's id, which gives its one-stop
+    /// trip; a dispatch that is a stop on a real trip is not a trip itself.
     pub fn get_by_id(id: Uuid) -> Result<Option<Self>, Box<dyn Error>> {
         let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
@@ -145,14 +175,19 @@ impl Trip {
             "SELECT id, org_id, vehicle_registration_number, created_at, vehicle_source, hire_id FROM Trips WHERE id = :id",
             params! { "id" => id.to_string() },
         )?;
-        let Some(row) = row else { return Ok(None) };
+        let Some(row) = row else {
+            return Ok(DispatchOrder::get_by_id(id)?
+                .filter(|order| order.trip_id.is_none())
+                .map(Self::from_standalone_dispatch));
+        };
         let mut trip = Self::row_to_trip(row);
         trip.stops = Self::stops_of(id)?;
         trip.status = Self::compute_status(&trip.stops);
         Ok(Some(trip))
     }
 
-    /// Every trip for an org, newest first, each with its stops.
+    /// Every trip for an org, newest first, each with its stops. Includes the
+    /// org's standalone dispatches as one-stop trips.
     pub fn list_by_org(org_id: Uuid) -> Result<Vec<Self>, Box<dyn Error>> {
         let mut conn = DbConnection::from_env().get_connection()?;
         Self::ensure_table(&mut conn)?;
@@ -161,14 +196,26 @@ impl Trip {
              WHERE org_id = :org_id ORDER BY created_at DESC, id DESC",
             params! { "org_id" => org_id.to_string() },
         )?;
-        rows.into_iter()
+        let mut trips = rows
+            .into_iter()
             .map(|row| {
                 let mut trip = Self::row_to_trip(row);
                 trip.stops = Self::stops_of(trip.id)?;
                 trip.status = Self::compute_status(&trip.stops);
                 Ok(trip)
             })
-            .collect()
+            .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
+        trips.extend(
+            DispatchOrder::list_standalone_by_org(org_id)?
+                .into_iter()
+                .map(Self::from_standalone_dispatch),
+        );
+        trips.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.to_string().cmp(&a.id.to_string()))
+        });
+        Ok(trips)
     }
 
     fn stops_of(trip_id: Uuid) -> Result<Vec<DispatchOrder>, Box<dyn Error>> {
