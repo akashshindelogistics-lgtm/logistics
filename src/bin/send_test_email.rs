@@ -3,8 +3,7 @@
 //!
 //!     cargo run --bin send_test_email -- you@example.com
 
-use logistics_system::logistics::notification::delivery::{DeliveryError, deliver};
-use logistics_system::logistics::notification::notification::NotificationChannel;
+use logistics_system::logistics::notification::delivery::{DeliveryError, send_email};
 use std::process::ExitCode;
 
 #[tokio::main]
@@ -13,8 +12,7 @@ async fn main() -> ExitCode {
         eprintln!("usage: send_test_email <recipient>");
         return ExitCode::from(2);
     };
-    let result = deliver(
-        NotificationChannel::Email,
+    let result = send_email(
         &to,
         "Logistics email test",
         "This is a test message from the logistics system. Email delivery is working.",
