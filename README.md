@@ -307,6 +307,12 @@ All routes are served under the `/api` prefix.
 | GET | `/api/dispatches/{id}/summary` | AI-generated summary of a dispatch |
 | GET | `/api/dispatches/{id}/notifications` | Customer + driver notifications recorded for a dispatch |
 | GET | `/api/orgs/{id}/notifications` | The org's 100 most recent notifications |
+| GET, PUT | `/api/orgs/{id}/agents/settings` | Read or change (Admin) the org's autonomy mode, see [docs/agentic-workflow.md](docs/agentic-workflow.md) |
+| POST | `/api/orgs/{id}/agents/run` | Run the dispatch desk agent now |
+| GET | `/api/orgs/{id}/agents/runs` | The org's 100 most recent agent runs |
+| GET | `/api/orgs/{id}/agents/actions` | The org's 100 most recent agent actions, optionally `?status=PENDING_APPROVAL` |
+| POST | `/api/agent-actions/{id}/approve` | Approve and carry out a pending agent action |
+| POST | `/api/agent-actions/{id}/reject` | Reject a pending agent action |
 | GET/POST | `/api/dispatches/{id}/invoice` | Get / raise the freight invoice for a dispatch |
 | PUT | `/api/invoices/{id}` | Amend an unpaid invoice's amount or due date |
 | POST | `/api/invoices/{id}/pay` | Mark an invoice paid |
