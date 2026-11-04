@@ -500,7 +500,7 @@ fn resolve_id(org_id: Uuid, key: &str, raw: &str) -> Option<String> {
                 .ok()
                 .flatten()
                 .map_or_else(|| "unknown customer".to_string(), |c| c.name);
-            format!("to {customer}, {}", d.status)
+            format!("To {customer} ({})", humanize_code(d.status.as_str()))
         })
     } else {
         return None;
@@ -508,32 +508,79 @@ fn resolve_id(org_id: Uuid, key: &str, raw: &str) -> Option<String> {
     Some(name.unwrap_or_else(not_found))
 }
 
-fn flatten(org_id: Uuid, label: &str, key: &str, value: &Value, out: &mut Vec<ProposalField>) {
+/// What a request field is called on a card.
+fn field_label(key: &str) -> String {
+    match key {
+        "stock_description" => "Item".to_string(),
+        "requested_quantity" => "Quantity".to_string(),
+        "receiver_name" => "Received by".to_string(),
+        "signature_or_photo_url" => "Proof file".to_string(),
+        "location_address" => "Location".to_string(),
+        other => humanize(other.strip_suffix("_id").unwrap_or(other)),
+    }
+}
+
+/// Lead with what identifies the record, then the rest in their usual order.
+fn field_rank(key: &str) -> u8 {
+    match key {
+        "name" | "customer_id" | "registration_number" | "status" | "stock_description" => 0,
+        _ => 1,
+    }
+}
+
+/// `IN_TRANSIT` to `In transit`.
+fn humanize_code(code: &str) -> String {
+    humanize(&code.to_lowercase())
+}
+
+/// Fields holding a fixed code rather than something a person typed. Limited to
+/// these so a customer called ACME still reads ACME.
+const CODE_FIELDS: &[&str] = &["status", "vehicle_source", "role", "doc_type"];
+
+fn field_value(org_id: Uuid, key: &str, text: &str) -> String {
+    if CODE_FIELDS.contains(&key) {
+        return humanize_code(text);
+    }
+    resolve_id(org_id, key, text).unwrap_or_else(|| text.to_string())
+}
+
+/// `number` tells rows of a list apart, and is empty when there's only one row.
+fn flatten(
+    org_id: Uuid,
+    label: &str,
+    key: &str,
+    number: &str,
+    value: &Value,
+    out: &mut Vec<ProposalField>,
+) {
+    let mut push = |text: String| {
+        out.push(ProposalField {
+            label: format!("{label}{number}"),
+            value: text,
+        })
+    };
     match value {
         Value::Null => {}
+        Value::String(s) => push(field_value(org_id, key, s)),
+        Value::Bool(b) => push(if *b { "Yes" } else { "No" }.to_string()),
+        Value::Number(n) => push(n.to_string()),
         Value::Object(map) => {
-            for (k, v) in map {
-                let nested = if label.is_empty() {
-                    humanize(k)
-                } else {
-                    format!("{label}: {}", k.replace('_', " "))
-                };
-                flatten(org_id, &nested, k, v, out);
+            let mut entries: Vec<_> = map.iter().collect();
+            entries.sort_by_key(|(k, _)| field_rank(k));
+            for (k, v) in entries {
+                flatten(org_id, &field_label(k), k, number, v, out);
             }
         }
         Value::Array(items) => {
             for (i, item) in items.iter().enumerate() {
-                flatten(org_id, &format!("{label} {}", i + 1), key, item, out);
+                let row = if items.len() > 1 {
+                    format!(" {}", i + 1)
+                } else {
+                    number.to_string()
+                };
+                flatten(org_id, label, key, &row, item, out);
             }
         }
-        Value::String(s) => out.push(ProposalField {
-            label: label.to_string(),
-            value: resolve_id(org_id, key, s).unwrap_or_else(|| s.clone()),
-        }),
-        other => out.push(ProposalField {
-            label: label.to_string(),
-            value: other.to_string(),
-        }),
     }
 }
 
@@ -563,10 +610,10 @@ pub fn card_fields(
             "desc" => ("Stock item".to_string(), "desc"),
             other => (humanize(other), other),
         };
-        flatten(org_id, &label, key, value, &mut fields);
+        flatten(org_id, &label, key, "", value, &mut fields);
     }
     if let Some(body) = body {
-        flatten(org_id, "", "", body, &mut fields);
+        flatten(org_id, "", "", "", body, &mut fields);
     }
     fields
 }

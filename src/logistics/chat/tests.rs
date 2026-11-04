@@ -253,6 +253,76 @@ async fn credentials_never_reach_the_model_or_the_stored_conversation() {
     }
 }
 
+fn card_pairs(operation: &str, path_params: Value, body: Value) -> Vec<(String, String)> {
+    let op = catalog::find(operation).unwrap();
+    runtime::card_fields(Uuid::new_v4(), op, &path_params, Some(&body))
+        .into_iter()
+        .map(|f| (f.label, f.value))
+        .collect()
+}
+
+fn pair(label: &str, value: &str) -> (String, String) {
+    (label.to_string(), value.to_string())
+}
+
+#[test]
+fn card_labels_read_like_words() {
+    assert_eq!(
+        card_pairs(
+            "dispatch_stock",
+            Value::Null,
+            json!({"line_items": [{"stock_description": "Cement", "requested_quantity": 5}]}),
+        ),
+        vec![pair("Item", "Cement"), pair("Quantity", "5")],
+        "one line needs no number"
+    );
+    assert_eq!(
+        card_pairs(
+            "dispatch_stock",
+            Value::Null,
+            json!({"line_items": [
+                {"stock_description": "Cement", "requested_quantity": 5},
+                {"stock_description": "Sand", "requested_quantity": 2},
+            ]}),
+        ),
+        vec![
+            pair("Item 1", "Cement"),
+            pair("Quantity 1", "5"),
+            pair("Item 2", "Sand"),
+            pair("Quantity 2", "2"),
+        ],
+    );
+}
+
+#[test]
+fn a_card_leads_with_the_name_and_says_what_codes_mean() {
+    assert_eq!(
+        card_pairs(
+            "add_customer",
+            Value::Null,
+            json!({"address": "9 Market Rd", "name": "ACME"}),
+        ),
+        vec![pair("Name", "ACME"), pair("Address", "9 Market Rd")],
+        "a name stays as it was typed"
+    );
+    let delivered = card_pairs(
+        "update_dispatch_status",
+        Value::Null,
+        json!({
+            "proof_of_delivery": {"receiver_name": "Asha", "signature_or_photo_url": "/api/uploads/u1"},
+            "status": "IN_TRANSIT",
+        }),
+    );
+    assert_eq!(
+        delivered,
+        vec![
+            pair("Status", "In transit"),
+            pair("Received by", "Asha"),
+            pair("Proof file", "/api/uploads/u1"),
+        ],
+    );
+}
+
 #[test]
 fn the_prompt_is_the_same_bytes_every_time() {
     assert_eq!(catalog::prompt_listing(), catalog::prompt_listing());
@@ -735,11 +805,8 @@ async fn a_dispatch_can_be_raised_tracked_and_moved_on_from_chat() {
         .into_iter()
         .find(|p| p.operation_id == "update_dispatch_status")
         .unwrap();
-    assert!(
-        card.fields
-            .iter()
-            .any(|f| f.label == "Dispatch" && f.value.contains("Asha Traders"))
-    );
+    let shown = card.fields.iter().find(|f| f.label == "Dispatch").unwrap();
+    assert_eq!(shown.value, "To Asha Traders (Pending)");
     let config = config_for(vec![finished("Confirmed.")]).await;
     runtime::confirm(&caller, &card, Some(&config))
         .await
