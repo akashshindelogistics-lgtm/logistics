@@ -23,11 +23,20 @@ pub struct ModelConfig {
 impl ModelConfig {
     /// `None` without `ANTHROPIC_API_KEY`. `AGENT_MODEL` and `AGENT_EFFORT`
     /// override the model and effort.
+    ///
+    /// `AGENT_MODEL_URL` points agents at a stand-in model, which is how the
+    /// dashboard's end-to-end tests get real agent runs without credits. The
+    /// real key is never sent to it.
     pub fn from_env() -> Option<Self> {
         let non_blank = |key: &str| std::env::var(key).ok().filter(|s| !s.trim().is_empty());
+        let stand_in = non_blank("AGENT_MODEL_URL");
+        let api_key = match stand_in {
+            Some(_) => "stand-in".to_string(),
+            None => non_blank("ANTHROPIC_API_KEY")?,
+        };
         Some(Self {
-            url: MESSAGES_URL.to_string(),
-            api_key: non_blank("ANTHROPIC_API_KEY")?,
+            url: stand_in.unwrap_or_else(|| MESSAGES_URL.to_string()),
+            api_key,
             workspace_id: non_blank("ANTHROPIC_WORKSPACE_ID"),
             model: non_blank("AGENT_MODEL").unwrap_or_else(|| DEFAULT_MODEL.to_string()),
             effort: non_blank("AGENT_EFFORT").unwrap_or_else(|| "medium".to_string()),

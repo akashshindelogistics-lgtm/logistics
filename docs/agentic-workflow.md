@@ -146,9 +146,9 @@ Each agent goes through `SHADOW` before anything else. Move an agent up only
 when its record justifies it: as a starting bar, staff agreed with at least 95%
 of 200 or more shadow decisions, with no serious mistake.
 
-**Phase 1: foundation and first agent.** Backend built: loop, gate, audit, modes,
-routes, dispatch desk. Still to do: the dashboard inbox (logistics-frontend),
-with unit, Playwright and standalone demo tests, and the first live run.
+**Phase 1: foundation and first agent.** Built: loop, gate, audit, modes, routes,
+dispatch desk, and the dashboard's Agent Inbox (logistics-frontend). Still to do:
+the first live run.
 
 **Phase 2: events.** Replace polling with an outbox of domain events (dispatch
 created, delivered, document expiring), so agents run when something happens.
@@ -181,6 +181,8 @@ riskiest, since it's the first time outsiders' text directly drives agents.
 - **Settings:** `AGENTS_ENABLED=true` starts the timer, and the org's mode must
   also be on. `AGENT_INTERVAL_MINUTES` (60), `AGENT_MODEL` (`claude-opus-5-5`),
   `AGENT_EFFORT` (`medium`), `AGENT_DAILY_TOKEN_LIMIT` (500000).
+- **`AGENT_MODEL_URL`:** for tests only. Points agents at a stand-in model, and the
+  real API key is never sent to it. The dashboard's end-to-end tests use this.
 - **Request:** uses the API's server-side refusal fallback, so a safety classifier
   refusal can be retried on a suitable model.
 
@@ -198,8 +200,8 @@ riskiest, since it's the first time outsiders' text directly drives agents.
 
 ### Known limits
 
-- `raise_alert` only records the alert. Nothing tells staff yet except the
-  actions list, until the inbox and email are live.
+- `raise_alert` only records the alert. Staff see it in the Agent Inbox, but
+  nothing reaches them outside the dashboard until email is live.
 - Repeat detection is by subject, so a second, different alert about the same
   subject is treated as a repeat, and a rejected action stays rejected for good.
 - Two simultaneous runs for an org are unlikely but not impossible. Approvals

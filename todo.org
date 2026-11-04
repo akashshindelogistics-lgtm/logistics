@@ -1372,7 +1372,7 @@
 ** TODO Add Anthropic API credits - the key is rejected with "credit balance is too low", so no agent or existing AI feature can reach Claude
 ** DONE Phase 1 backend: agent loop, tool gate, autonomy modes, audit tables, approval routes, dispatch desk agent, off by default
 ** TODO Phase 1: first live run (cargo test live_agent_run -- --ignored), compare Opus 5.5 and Haiku 5.5 on cost and judgement
-** TODO Phase 1: dashboard - agent settings, runs and approval inbox in logistics-frontend, unit + Playwright + standalone demo flow
+** DONE Phase 1: dashboard - Agent Inbox page in logistics-frontend (mode, approvals, alerts, activity, runs), unit + Playwright + standalone demo flow
 ** TODO Phase 2: domain event outbox instead of polling; move notification sending from routes into the model layer
 ** TODO Phase 3: fleet and compliance, warehouse, ops analyst, data quality agents
 ** TODO Phase 4: driver status actions in the Android app, then delivery monitor and trip planner agents
