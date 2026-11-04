@@ -71,7 +71,7 @@ pub struct OrgSummary {
 pub struct OrgCredentials;
 
 impl OrgCredentials {
-    fn ensure_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn ensure_table(conn: &mut mysql::PooledConn) -> Result<(), Box<dyn Error>> {
         conn.exec_drop(
             "CREATE TABLE IF NOT EXISTS OrgCredentials (
                 org_id VARCHAR(36) PRIMARY KEY,
