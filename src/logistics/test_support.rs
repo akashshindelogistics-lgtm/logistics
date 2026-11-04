@@ -446,6 +446,7 @@ pub fn migrate(conn: &mut mysql::PooledConn) {
     .expect("migrate: create UploadedFiles");
 
     crate::logistics::agent::store::ensure_tables(conn).expect("migrate: create agent tables");
+    crate::logistics::chat::store::ensure_tables(conn).expect("migrate: create chat tables");
 }
 
 /// A private, uniquely-named MySQL database scoped to exactly one test.

@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 /// Answer each request with the next scripted body, repeating the last one,
 /// and keep the request bodies.
-async fn fake_model(replies: Vec<Value>) -> (ModelConfig, Arc<Mutex<Vec<Value>>>) {
+pub(crate) async fn fake_model(replies: Vec<Value>) -> (ModelConfig, Arc<Mutex<Vec<Value>>>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let requests = Arc::new(Mutex::new(Vec::new()));

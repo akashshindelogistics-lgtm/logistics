@@ -14,4 +14,4 @@ pub mod store;
 pub mod tools;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

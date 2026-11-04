@@ -313,6 +313,11 @@ All routes are served under the `/api` prefix.
 | GET | `/api/orgs/{id}/agents/actions` | The org's 100 most recent agent actions, optionally `?status=PENDING_APPROVAL` |
 | POST | `/api/agent-actions/{id}/approve` | Approve and carry out a pending agent action |
 | POST | `/api/agent-actions/{id}/reject` | Reject a pending agent action |
+| GET, POST | `/api/chat/conversations` | This person's chat conversations, or start one, see [docs/chat-inbox.md](docs/chat-inbox.md) |
+| GET, DELETE | `/api/chat/conversations/{id}` | Read a conversation or delete it |
+| POST | `/api/chat/conversations/{id}/messages` | Send a message and wait for the answer |
+| POST | `/api/chat/proposals/{id}/confirm` | Run a change the assistant prepared, as this person |
+| POST | `/api/chat/proposals/{id}/cancel` | Refuse a change the assistant prepared |
 | GET/POST | `/api/dispatches/{id}/invoice` | Get / raise the freight invoice for a dispatch |
 | PUT | `/api/invoices/{id}` | Amend an unpaid invoice's amount or due date |
 | POST | `/api/invoices/{id}/pay` | Mark an invoice paid |
