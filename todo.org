@@ -1367,3 +1367,10 @@
 ** TODO Phase 5: driver assistant in the Android app, scoped to the driver's own dispatches and trips
 ** TODO Phase 6: documents - PDF compliance uploads, org knowledge base (org_doc chunks), in-app help over product docs
 ** TODO Phase 7 (conditional): embeddings + hybrid retrieval, only if phase 1's evaluation shows paraphrase misses that matter
+* TODO [#A] Clean test data out of the live database and stop it mixing again - local Playwright and demos write to the same logistics database as the deployment. Do this before email or agents go live
+   Plan: [[file:docs/database-cleanup.md]]
+** TODO Fix org deletion leaving Dispatches and OrgCredentials behind; point Playwright and demos at a logistics_e2e database
+** TODO List the organisations and choose which to keep (owner's decision)
+** TODO Rehearse the cleanup on a scratch copy, with checks
+** TODO Move the deployment to logistics_live with its own MySQL user
+** TODO Afterwards: remove listed upload files, add the missing foreign keys, daily dumps, drop the old database after 30 days
