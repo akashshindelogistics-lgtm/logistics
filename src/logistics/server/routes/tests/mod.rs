@@ -35,6 +35,7 @@ mod agents;
 mod ai;
 mod auth;
 mod billing;
+mod chat;
 mod customers;
 mod dispatches;
 mod driver_app;

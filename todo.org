@@ -1367,6 +1367,17 @@
 ** TODO Phase 5: driver assistant in the Android app, scoped to the driver's own dispatches and trips
 ** TODO Phase 6: documents - PDF compliance uploads, org knowledge base (org_doc chunks), in-app help over product docs
 ** TODO Phase 7 (conditional): embeddings + hybrid retrieval, only if phase 1's evaluation shows paraphrase misses that matter
+* TODO [#B] Chat inbox - a ChatGPT-style page to run every operation by asking, instead of going from tab to tab
+   Plan and as-built: [[file:docs/chat-inbox.md]]
+   Chat acts as the signed-in person through the real API handlers. Reads run straight
+   away; every write is a card the person confirms. The catalog comes from the OpenAPI
+   spec, and a test makes each new route choose exposed or excluded.
+** DONE Backend: conversations, confirmation cards, catalog, credential hiding, routes, tests
+** DONE Dashboard: /chat page, landing after sign-in, lifecycle tracker, attachments, standalone demo (logistics-frontend)
+** TODO First run on the real model: needs Anthropic credits (cargo test live_chat_run -- --ignored --nocapture)
+** TODO Stream answers as they're written
+** TODO Pagination or filters on list routes, since results over 30,000 characters are cut
+** TODO Decide whether customer, vehicle, document and maintenance writes should be role-gated on the server
 * TODO [#B] Agentic workflow - agents run routine logistics operations and people handle exceptions, with autonomy enforced in code (off / shadow / supervised / autonomous per org)
    Plan: [[file:docs/agentic-workflow.md]]
 ** TODO Add Anthropic API credits - the key is rejected with "credit balance is too low", so no agent or existing AI feature can reach Claude

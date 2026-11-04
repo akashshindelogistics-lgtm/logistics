@@ -2,6 +2,7 @@ pub mod agent;
 pub mod ai;
 pub mod auth;
 pub mod billing;
+pub mod chat;
 pub mod customer;
 pub mod db;
 pub mod dispatch;
