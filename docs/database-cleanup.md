@@ -1,8 +1,11 @@
 # Live database cleanup
 
-Status: **plan, nothing run** (2026-11-04). How to separate real data from test
-data in the live database, and stop it mixing again. Do this before turning on
-email or agents.
+Status: **step 1 done, nothing run on live data** (2026-11-04). How to separate
+real data from test data in the live database, and stop it mixing again. Do this
+before turning on email or agents.
+
+**Decided by the owner on 2026-11-04:** Mauli Brickvision AAC is the only real
+organization. Keep the old database for 30 days. The Oracle VM holds no data.
 
 ## The problem
 
@@ -46,8 +49,9 @@ remove the rest. Two tables have no such key:
 
 So deleting an org through the app doesn't fully delete it, which also matters for
 any customer who asks to have their data removed. And files on disk outlive their
-`UploadedFiles` rows. The cleanup below handles all three by hand, and step 1 fixes
-the code.
+`UploadedFiles` rows. The leftover credentials also explain why deleted orgs can
+stay on the login page: its list comes from `OrgCredentials`. Step 1 fixes the code,
+and `cleanup_db` removes what's already been left behind.
 
 ## The approach
 
@@ -55,84 +59,57 @@ the code.
 `logistics` database stays untouched until the new one has proved itself, so going
 back only means changing one line and restarting.
 
-**Keep by name, not delete by pattern.** A person lists the organisations to keep,
+**Keep by name, not delete by pattern.** A person names the organization to keep,
 and everything else goes.
 
 ## Steps
 
-### 1. Stop it happening again (code, no data touched)
+### 1. Stop it happening again (done, no data touched)
 
-- Backend: `remove_organization` also removes the org's dispatches and credentials,
-  in one transaction, with tests. Or add the missing foreign keys, but existing
-  orphan rows would block that until the cleanup is done, so it comes later.
-- Frontend: `playwright.demo.config.ts` starts its API with
+- `remove_organization` now also removes the org's dispatches and credentials in one
+  transaction, and its files on disk. The missing foreign keys come in step 6, since
+  today's orphan rows would block adding them.
+- `playwright.demo.config.ts` starts its API with
   `DATABASE_URL=mysql://root:password@localhost:3306/logistics_e2e`, and the README
   shows the same for the headless suite. The backend creates that database by itself.
-- This doesn't protect plain `cargo run`. Step 5 does, by moving the live data away
+- This doesn't protect plain `cargo run`. Step 3 does, by moving the live data away
   from the default name.
 
-### 2. List the organisations (read only)
+### 2. Rehearse on a scratch copy
 
-Run by the owner, or by Claude with explicit permission, since this reads live data:
+Stop nothing yet. Dump the live database and restore it as
+`logistics_cleanup_rehearsal`. The dump contains password hashes and customer data,
+so keep it outside the repository with `chmod 600`. Then:
 
-```sql
-SELECT o.id, o.name, o.address,
-       (SELECT COUNT(*) FROM Customers c WHERE c.org_id = o.id)  AS customers,
-       (SELECT COUNT(*) FROM Dispatches d WHERE d.org_id = o.id) AS dispatches,
-       (SELECT COUNT(*) FROM OrgUsers u WHERE u.org_id = o.id)   AS users,
-       (SELECT FROM_UNIXTIME(MAX(d.dispatched_at)) FROM Dispatches d WHERE d.org_id = o.id) AS last_dispatch
-FROM Orgs o
-ORDER BY dispatches DESC, o.name;
+```bash
+export DATABASE_URL=mysql://root:PASSWORD@127.0.0.1:3306/logistics_cleanup_rehearsal
+cargo run --bin cleanup_db -- --keep "Mauli Brickvision AAC" \
+  --uploads-list ~/backups/uploads-to-remove.txt          # reports only
+cargo run --bin cleanup_db -- --keep "Mauli Brickvision AAC" \
+  --uploads-list ~/backups/uploads-to-remove.txt --apply
 ```
 
-Save the result outside the repository: it contains real company names. Mauli
-Brickvision is expected to be on the keep list.
+**Before applying, check the report by eye:** the kept row counts should look like
+Mauli's real data, and everything else should be removed. If the name doesn't match
+exactly one organization, the tool stops and changes nothing.
 
-### 3. Choose what to keep (owner's decision)
+What the tool does, in one transaction:
 
-Write the IDs to keep to `~/.config/logistics-ngrok/keep-orgs.txt`, one per line.
-The script refuses to run if that file is empty or lists an unknown ID.
+- Refuses to run on a database named `logistics`, or without `DATABASE_URL` set.
+- Removes other orgs' rows from every table with an `org_id`, including rows left by
+  earlier deletes, then child rows with no parent, then the other orgs.
+- Rolls everything back unless these pass: one org left, and every table holding
+  exactly the rows the kept org had beforehand.
 
-### 4. Rehearse on a scratch copy
+Log in to the rehearsal copy as Mauli and look around, then drop it.
 
-Dump the live database and restore it as `logistics_cleanup_rehearsal`. Run the
-script below there, then run the checks. Repeat until they pass, then drop the copy.
-The dump contains password hashes and customer data, so keep it outside the
-repository with `chmod 600`.
-
-```sql
--- keep_orgs(id) is loaded from keep-orgs.txt.
-
--- Files to remove later. Save this list first.
-SELECT storage_path FROM UploadedFiles
-WHERE org_id NOT IN (SELECT id FROM keep_orgs);
-
-START TRANSACTION;
--- These two have no foreign key to Orgs. Also clears rows left by earlier deletes.
-DELETE FROM Dispatches     WHERE org_id NOT IN (SELECT id FROM keep_orgs);
-DELETE FROM OrgCredentials WHERE org_id NOT IN (SELECT id FROM keep_orgs);
--- Everything else follows through ON DELETE CASCADE.
-DELETE FROM Orgs           WHERE id     NOT IN (SELECT id FROM keep_orgs);
-COMMIT;
-```
-
-Checks, all of which must pass:
-
-- `SELECT COUNT(*) FROM Orgs` equals the number of lines in the keep list.
-- Zero orphans in every table with an `org_id`, by
-  `WHERE org_id NOT IN (SELECT id FROM Orgs)`, and zero child rows pointing at a
-  missing dispatch in `DispatchLineItems`, `DispatchStatusHistory` and
-  `DispatchProofOfDelivery`.
-- For each kept org, the customer, dispatch, vehicle, driver and invoice counts match
-  step 2 exactly.
-
-### 5. Move over
+### 3. Move over
 
 Takes a few minutes, with the API stopped so nothing is written mid-copy.
 
 1. Stop `logi-api`.
 2. Take a fresh dump, and restore it as `logistics_live`.
-3. Run the script and the checks on `logistics_live`.
+3. Run `cleanup_db` on `logistics_live` as above, reporting first and then applying.
 4. Create a MySQL user with access to `logistics_live` only, replacing `root`, so a
    mistake in the app can't reach other databases.
 5. Point `DATABASE_URL` in `api.env` at it, using the new user, and start `logi-api`.
@@ -142,11 +119,11 @@ Takes a few minutes, with the API stopped so nothing is written mid-copy.
 **Going back:** restore the old `DATABASE_URL` line and restart. Anything entered
 since the switch would have to be re-entered, so decide within the first day.
 
-### 6. Tidy up afterwards
+### 4. Tidy up afterwards
 
-- Delete only the files on the list saved in step 4. **Never empty the uploads folder:**
+- Delete only the files on the list `cleanup_db` wrote. **Never empty the uploads folder:**
   it also holds the published Android app (`driver-app/`), which has no database row.
-- After 30 days of no problems, drop the old `logistics` database and let it be
+- After 30 days of no problems (from the move), drop the old `logistics` database and let it be
   recreated empty as the development default. Until then it still holds real customer
   data, and a plain `cargo run` still writes to it.
 - Keep one encrypted dump for as long as you need, then delete it.
@@ -156,12 +133,5 @@ since the switch would have to be re-entered, so decide within the first day.
 
 ## Not covered
 
-- **The Oracle VM deployment.** `todo.org` lists it as unfinished. If it holds data,
-  it needs its own review, but it has no test traffic since tests only run locally.
-- **Agent tables.** Not deployed yet. They're removed with their org by foreign key.
-
-## Questions for the owner
-
-1. Which organisations are real? (step 3)
-2. Is 30 days right for keeping the old database?
-3. Does the Oracle VM hold any data?
+- **Agent tables.** Not deployed yet. `cleanup_db` covers them anyway, as it finds
+  every table with an `org_id`, and they're removed with their org by foreign key.

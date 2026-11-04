@@ -838,17 +838,39 @@ impl Organization {
         }))
     }
 
+    /// Delete the org and everything it owns. Most tables follow through
+    /// `ON DELETE CASCADE`; `Dispatches` and `OrgCredentials` have no foreign key
+    /// to `Orgs`, and files on disk aren't in the database at all.
     pub fn remove_organization(&self) -> Result<(), Box<dyn Error>> {
         let db_connection = DbConnection::from_env();
         let mut conn = db_connection.get_connection()?;
+        crate::logistics::dispatch::dispatch::ensure_tables(&mut conn)?;
+        crate::logistics::auth::auth::OrgCredentials::ensure_table(&mut conn)?;
+        crate::logistics::upload::upload::UploadedFile::ensure_table(&mut conn)?;
 
-        conn.exec_drop(
-            "DELETE FROM Orgs WHERE id = :id",
-            params! {
-                "id" => self.id.to_string(),
-            },
+        let id = self.id.to_string();
+        let files: Vec<String> = conn.exec(
+            "SELECT storage_path FROM UploadedFiles WHERE org_id = :id",
+            params! { "id" => &id },
         )?;
 
+        let mut tx = conn.start_transaction(TxOpts::default())?;
+        for sql in [
+            "DELETE FROM Dispatches WHERE org_id = :id",
+            "DELETE FROM OrgCredentials WHERE org_id = :id",
+            "DELETE FROM Orgs WHERE id = :id",
+        ] {
+            tx.exec_drop(sql, params! { "id" => &id })?;
+        }
+        tx.commit()?;
+
+        // Best-effort: the org is gone either way, and a leftover file is
+        // better than failing a delete that has already committed.
+        for path in files {
+            if let Err(e) = std::fs::remove_file(&path) {
+                eprintln!("deleting org {id}: couldn't remove {path}: {e}");
+            }
+        }
         Ok(())
     }
 }
@@ -1522,6 +1544,86 @@ mod tests {
             fourth.vehicle_registration_number, first.vehicle_registration_number,
             "the delivered trip's vehicle should be available again"
         );
+    }
+
+    #[test]
+    fn test_remove_organization_leaves_nothing_behind() {
+        use crate::logistics::auth::auth::OrgCredentials;
+        use crate::logistics::dispatch::dispatch::{DispatchStatus, DispatchStatusEvent};
+
+        let _db = TestDb::create();
+        let gone = Organization::create_organization("Gone", "1 Rd").expect("org");
+        let stays = Organization::create_organization("Stays", "2 Rd").expect("org");
+        let mut conn = DbConnection::from_env().get_connection().expect("connect");
+
+        let dir = std::env::temp_dir().join(format!("org-delete-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut file_for = |org: &Organization| {
+            let path = dir.join(format!("{}.png", org.id));
+            std::fs::write(&path, b"x").unwrap();
+            conn.exec_drop(
+                "INSERT INTO UploadedFiles (id, org_id, content_type, byte_size, storage_path, uploaded_at)
+                 VALUES (:id, :org_id, 'image/png', 1, :path, 1)",
+                params! {
+                    "id" => Uuid::new_v4().to_string(),
+                    "org_id" => org.id.to_string(),
+                    "path" => path.to_string_lossy().into_owned(),
+                },
+            )
+            .unwrap();
+            path
+        };
+        let gone_file = file_for(&gone);
+        let stays_file = file_for(&stays);
+
+        for org in [&gone, &stays] {
+            OrgCredentials::create(org.id, &org.name, "password123").expect("credentials");
+            DispatchOrder {
+                id: Uuid::new_v4(),
+                org_id: org.id,
+                customer_id: Uuid::new_v4(),
+                vehicle_registration_number: None,
+                vehicle_source: Default::default(),
+                hire_id: None,
+                line_items: Vec::new(),
+                status: DispatchStatus::Pending,
+                dispatched_at: 1,
+                status_history: vec![DispatchStatusEvent {
+                    status: DispatchStatus::Pending,
+                    changed_at: 1,
+                }],
+                proof_of_delivery: None,
+                trip_id: None,
+                stop_sequence: None,
+            }
+            .save()
+            .expect("dispatch");
+        }
+
+        gone.remove_organization().expect("remove");
+
+        assert!(DispatchOrder::list_by_org(gone.id).unwrap().is_empty());
+        assert_eq!(DispatchOrder::list_by_org(stays.id).unwrap().len(), 1);
+        assert!(
+            OrgCredentials::verify_login(gone.id, "password123")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            OrgCredentials::verify_login(stays.id, "password123")
+                .unwrap()
+                .is_some()
+        );
+        let orphaned: Option<i64> = conn
+            .query_first(
+                "SELECT COUNT(*) FROM DispatchStatusHistory
+                 WHERE dispatch_id NOT IN (SELECT id FROM Dispatches)",
+            )
+            .unwrap();
+        assert_eq!(orphaned, Some(0));
+        assert!(!gone_file.exists());
+        assert!(stays_file.exists());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
